@@ -1,0 +1,9 @@
+{
+    "domain": "viega-fonterra",
+    "name": "Viega Fonterra Modbus",
+    "documentation": "https://github.com/mikefogel/homeassistant-viega-fonterra-modbus",
+    "requirements": ["pymodbus==3.5.1"],
+    "codeowners": ["@me"],
+    "config_flow": true,
+    "version": "0.0.1"
+  }
