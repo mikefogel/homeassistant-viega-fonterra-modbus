@@ -1,7 +1,8 @@
 {
-  "name": "Viega Fonterra Modbus",
+  "name": "Viega Fonterra Smart Control",
   "content_in_root": false,
-  "domains": ["sensor"],
-  "homeassistant": "2023.9.1",
+  "domains": ["viega_fonterra"],
+  "country": "DE",
+  "homeassistant": "2024.6.0"
   "iot_class": "local_poll"
 }
