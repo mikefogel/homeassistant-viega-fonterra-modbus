@@ -59,3 +59,82 @@ def test_entity_update_reads_value_from_client():
     asyncio.run(entity.async_update())
 
     assert entity.state == 19
+
+
+def test_entity_update_handles_modbus_errors_without_crashing():
+    """A Modbus fault should not break the entity update cycle."""
+
+    class FaultyClient:
+        async def read_holding_registers(self, address, count=1):
+            raise RuntimeError("device offline")
+
+    entity = ViegaRegisterSensor(
+        SimpleNamespace(entry_id="abc123"),
+        "temperature_flow",
+        "Flow temperature",
+        "°C",
+        1000,
+    )
+    entity.hass = SimpleNamespace(data={DOMAIN: {"abc123": {"client": FaultyClient()}}})
+
+    import asyncio
+
+    asyncio.run(entity.async_update())
+
+    assert entity.state == 0
+
+
+def test_entity_keeps_previous_value_on_error_sentinel():
+    """A sentinel error value must retain the previous safe value."""
+    class ErrorSentinelClient:
+        async def read_holding_registers(self, address, count=1):
+            return [-99]
+
+    entity = ViegaRegisterSensor(
+        SimpleNamespace(entry_id="abc123"),
+        "temperature_flow",
+        "Flow temperature",
+        "°C",
+        1000,
+    )
+    entity._attr_native_value = 21.5
+    entity.hass = SimpleNamespace(data={DOMAIN: {"abc123": {"client": ErrorSentinelClient()}}})
+
+    import asyncio
+
+    asyncio.run(entity.async_update())
+
+    assert entity.state == 21.5
+    assert entity.last_error_message == "error: sensor invalid"
+
+
+def test_entity_sets_error_message_on_communication_failure():
+    """Communication failures must be recorded as a textual sensor error."""
+    entity = ViegaRegisterSensor(
+        SimpleNamespace(entry_id="abc123"),
+        "temperature_flow",
+        "Flow temperature",
+        "°C",
+        1000,
+    )
+    entity._attr_native_value = 18.0
+    entity.hass = SimpleNamespace(data={DOMAIN: {"abc123": {"client": type("Client", (), {"read_holding_registers": lambda self, address, count=1: (_ for _ in ()).throw(RuntimeError("offline"))})()}}})
+
+    import asyncio
+
+    asyncio.run(entity.async_update())
+
+    assert entity.state == 18.0
+    assert entity.last_error_message == "error: communication timeout"
+
+
+def test_transaction_id_is_checked_on_response():
+    """A response with a mismatching transaction ID should be rejected."""
+    response = b"\x00\x02\x00\x00\x00\x06\x01\x03\x04\x00\x1e\x00\x2a"
+
+    try:
+        ViegaModbusClient.validate_transaction_id(response, expected=1)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Expected mismatched transaction ID to raise ValueError")

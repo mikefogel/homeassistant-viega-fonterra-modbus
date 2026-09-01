@@ -16,6 +16,7 @@ class ViegaModbusClient:
 
     UNIT_ID = 1
     PROTOCOL_ID = 0
+    ERROR_SENTINEL = -99
     _transaction_counter = 0
 
     def __init__(self, host: str, port: int = 502) -> None:
@@ -24,6 +25,17 @@ class ViegaModbusClient:
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
         self._connected = False
+
+    @staticmethod
+    def validate_transaction_id(response: bytes, expected: int) -> None:
+        """Reject mismatched Modbus TCP transaction IDs."""
+        if len(response) < 6:
+            raise ValueError("response too short for transaction validation")
+        transaction_id = int.from_bytes(response[0:2], byteorder="big", signed=False)
+        if transaction_id != expected:
+            raise ValueError(
+                f"transaction ID mismatch: expected {expected}, got {transaction_id}"
+            )
 
     @classmethod
     def build_read_request(cls, address: int, count: int = 1, unit_id: int = 1) -> bytes:
@@ -68,10 +80,13 @@ class ViegaModbusClient:
         if len(response) != 9 + byte_count:
             raise ModbusClientError("Modbus response length does not match the byte count")
         data = response[9:]
-        return [
+        values = [
             int.from_bytes(data[index : index + 2], byteorder="big", signed=False)
             for index in range(0, len(data), 2)
         ]
+        if values and any(value == 0xFFFF for value in values):
+            raise ModbusClientError("Modbus device reported an invalid register state")
+        return values
 
     async def connect(self) -> None:
         """Open a TCP socket to the configured Modbus endpoint."""

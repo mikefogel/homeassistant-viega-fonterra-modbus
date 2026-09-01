@@ -7,6 +7,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
+from .modbus_handler import ViegaModbusClient
 from .registers import REGISTER_DEFINITIONS
 
 
@@ -49,17 +50,32 @@ class ViegaRegisterSensor(SensorEntity):
         self._attr_native_unit_of_measurement = unit
         self._address = address
         self._attr_native_value = 0
+        self.last_error_message = ""
 
     async def async_update(self) -> None:
         """Read the current register value from the Modbus client."""
         client = self.hass.data[DOMAIN].get(self._entry_id, {}).get("client")
         if client is None:
             self._attr_native_value = 0
+            self.last_error_message = "error: communication timeout"
             return
 
-        values = await client.read_holding_registers(self._address, 1)
-        if values:
-            self._attr_native_value = values[0]
+        try:
+            values = await client.read_holding_registers(self._address, 1)
+        except Exception:
+            self.last_error_message = "error: communication timeout"
+            return
+
+        if not values:
+            self.last_error_message = "error: sensor invalid"
+            return
+
+        value = values[0]
+        if value == ViegaModbusClient.ERROR_SENTINEL:
+            self.last_error_message = "error: sensor invalid"
+            return
+        self.last_error_message = ""
+        self._attr_native_value = value
 
     @property
     def state(self):

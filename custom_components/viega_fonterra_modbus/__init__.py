@@ -7,7 +7,7 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN
+from .const import DOMAIN, PLATFORMS
 from .modbus_handler import ViegaModbusClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -23,16 +23,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "host": entry.data["host"],
         "port": entry.data["port"],
         "client": client,
+        "rooms": entry.options.get("rooms", {}),
+        "device_id": entry.options.get("device_id", ""),
     }
 
-    await hass.config_entries.async_forward_entry_setups(entry, ["sensor"])
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _LOGGER.debug("Set up Viega Fonterra entry %s", entry.entry_id)
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, ["sensor"])
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         client = hass.data[DOMAIN].get(entry.entry_id, {}).get("client")
         if client is not None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 DOMAIN = "viega_fonterra_modbus"
 DEFAULT_NAME = "Viega Fonterra Smart Control"
 DEFAULT_PORT = 502
-PLATFORMS = ["sensor"]
+PLATFORMS = ["sensor", "switch", "climate", "diagnostic"]
 
 # Example register layout for the Fonterra system; the canonical registry is
 # held in a dedicated module so it can be extended cleanly without mixing it
