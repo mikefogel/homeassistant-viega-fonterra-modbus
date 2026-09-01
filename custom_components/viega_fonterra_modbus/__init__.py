@@ -22,17 +22,31 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_MODBUS_ADDRESS,
     CONF_MODBUS_ADDRESS,
-    CONF_READ_METER,
-    CONF_READ_BATTERY,
-    DEFAULT_READ_METER,
-    DEFAULT_READ_BATTERY,
-    BOOLEAN_STATUS,
-    INVERTER_STATUS,
-    BATTERY_STATUS,
-    BATTERY_BMS_ALARMS,
-    BATTERY_LIMITATION_REASONS,
-    AP_REDUCTION_REASONS,
     MODBUS_STATUS,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+VIEGA_FONTERRA_MODBUS_SCHEMA = vol.Schema (
+    {
+        vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
+        vol.Required(CONF_HOST): cv.string,
+        vol.Required(CONF_PORT): cv.string,
+        vol.Optional(
+            CONF_MODBUS_ADDRESS, default=DEFAULT_MODBUS_ADDRESS
+        ): cv.positive_int,
+        vol.Optional(
+            CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL
+        ): cv.positive_int,
+    }
+)
+CONFIG_SCHEMA = vol.Schema(
+    {DOMAIN: vol.Schema({cv.slug: VIEGA_FONTERRA_MODBUS_SCHEMA})}, extra=vol.ALLOW_EXTRA
+)
+
+PLATFORMS = ["sensor"]
+
+async def async_setup(hass, config):
+    """Set up the Ingeteam modbus component."""
+    hass.data[DOMAIN] = {}
+    return True
