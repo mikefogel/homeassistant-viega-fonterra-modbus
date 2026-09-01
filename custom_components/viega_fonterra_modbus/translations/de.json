@@ -1,1 +1,11 @@
+{
+  "title": "Viega Fonterra Smart Control",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Viega Fonterra hinzufügen"
+      }
+    }
+  }
+}
 
