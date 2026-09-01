@@ -1,9 +1,10 @@
 {
-    "domain": "viega-fonterra",
-    "name": "Viega Fonterra Modbus",
-    "documentation": "https://github.com/mikefogel/homeassistant-viega-fonterra-modbus",
-    "requirements": ["pymodbus==3.5.1"],
-    "codeowners": ["@me"],
-    "config_flow": true,
-    "version": "0.0.1"
-  }
+  "domain": "viega_fonterra_modbus",
+  "name": "Viega Fonterra Smart Control",
+  "version": "0.0.1",
+  "documentation": "https://github.com/deinname/homeassistant-viega-fonterra-modbus",
+  "requirements": [],
+  "dependencies": [],
+  "codeowners": ["@deinname"],
+  "iot_class": "local_polling"
+}
