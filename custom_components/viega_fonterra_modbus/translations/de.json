@@ -3,7 +3,12 @@
   "config": {
     "step": {
       "user": {
-        "title": "Viega Fonterra hinzufügen"
+        "title": "Viega Fonterra hinzufügen",
+        "description": "Gib die Modbus-IP-Adresse und den Port des Geräts ein.",
+        "data": {
+          "host": "IP-Adresse",
+          "port": "Port"
+        }
       }
     }
   }

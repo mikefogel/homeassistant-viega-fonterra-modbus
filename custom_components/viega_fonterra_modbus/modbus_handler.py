@@ -1,1 +1,112 @@
+"""Modbus TCP client for the Viega Fonterra Smart Control integration."""
+
+from __future__ import annotations
+
+import asyncio
+import struct
+from typing import Any
+
+
+class ModbusClientError(RuntimeError):
+    """Raised when a Modbus request cannot be processed."""
+
+
+class ViegaModbusClient:
+    """Minimal Modbus TCP helper for the Fonterra system."""
+
+    UNIT_ID = 1
+    PROTOCOL_ID = 0
+    _transaction_counter = 0
+
+    def __init__(self, host: str, port: int = 502) -> None:
+        self.host = host
+        self.port = port
+        self._reader: asyncio.StreamReader | None = None
+        self._writer: asyncio.StreamWriter | None = None
+        self._connected = False
+
+    @classmethod
+    def build_read_request(cls, address: int, count: int = 1, unit_id: int = 1) -> bytes:
+        """Build a Modbus TCP request for function code 0x03."""
+        if not 1 <= count <= 125:
+            raise ValueError("count must be between 1 and 125")
+        cls._transaction_counter += 1
+        transaction_id = cls._transaction_counter & 0xFFFF
+        return struct.pack(
+            ">HHHBBHH",
+            transaction_id,
+            cls.PROTOCOL_ID,
+            6,
+            unit_id,
+            0x03,
+            address,
+            count,
+        )
+
+    @classmethod
+    def build_write_request(cls, address: int, value: int, unit_id: int = 1) -> bytes:
+        """Build a Modbus TCP request for function code 0x06."""
+        cls._transaction_counter += 1
+        transaction_id = cls._transaction_counter & 0xFFFF
+        return struct.pack(
+            ">HHHBBHH",
+            transaction_id,
+            cls.PROTOCOL_ID,
+            6,
+            unit_id,
+            0x06,
+            address,
+            value,
+        )
+
+    @staticmethod
+    def decode_register_response(response: bytes) -> list[int]:
+        """Decode a function code 0x03 response into register values."""
+        if len(response) < 9:
+            raise ModbusClientError("Modbus response is too short")
+        byte_count = response[8]
+        if len(response) != 9 + byte_count:
+            raise ModbusClientError("Modbus response length does not match the byte count")
+        data = response[9:]
+        return [
+            int.from_bytes(data[index : index + 2], byteorder="big", signed=False)
+            for index in range(0, len(data), 2)
+        ]
+
+    async def connect(self) -> None:
+        """Open a TCP socket to the configured Modbus endpoint."""
+        self._reader, self._writer = await asyncio.open_connection(self.host, self.port)
+        self._connected = True
+
+    async def disconnect(self) -> None:
+        """Close the current TCP connection."""
+        if self._writer is not None:
+            self._writer.close()
+            await self._writer.wait_closed()
+        self._reader = None
+        self._writer = None
+        self._connected = False
+
+    async def read_holding_registers(self, address: int, count: int = 1) -> list[int]:
+        """Read one or more holding registers from the Modbus device."""
+        if not self._connected or self._reader is None or self._writer is None:
+            raise ModbusClientError("Modbus client is not connected")
+
+        request = self.build_read_request(address, count, unit_id=self.UNIT_ID)
+        self._writer.write(request)
+        await self._writer.drain()
+
+        response = await self._reader.read(256)
+        return self.decode_register_response(response)
+
+    async def write_register(self, address: int, value: int) -> None:
+        """Write a single register via Modbus function code 0x06."""
+        if not self._connected or self._reader is None or self._writer is None:
+            raise ModbusClientError("Modbus client is not connected")
+
+        request = self.build_write_request(address, value, unit_id=self.UNIT_ID)
+        self._writer.write(request)
+        await self._writer.drain()
+
+        await self._reader.read(256)
 
