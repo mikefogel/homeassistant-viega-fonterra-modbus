@@ -19,8 +19,13 @@ async def async_setup_entry(
     rooms = entry_data.get("rooms", {})
 
     entities = [
-        ViegaDiagnosticTextEntity(entry.entry_id, f"{room_id}_diagnostic")
-        for room_id in rooms.keys()
+        ViegaDiagnosticTextEntity(
+            entry.entry_id,
+            f"{room_config.get('name', room_id) if isinstance(room_config, dict) else room_id}_diagnostic"
+            if isinstance(room_config, dict)
+            else f"{room_id}_diagnostic",
+        )
+        for room_id, room_config in rooms.items()
     ]
     async_add_entities(entities)
 

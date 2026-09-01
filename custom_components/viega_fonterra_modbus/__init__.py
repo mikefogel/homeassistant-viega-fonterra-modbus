@@ -15,7 +15,8 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Viega Fonterra from a config entry."""
-    client = ViegaModbusClient(entry.data["host"], entry.data["port"])
+    timeout = float(entry.data.get("modbus_timeout", 5))
+    client = ViegaModbusClient(entry.data["host"], entry.data["port"], timeout=timeout)
     await client.connect()
 
     hass.data.setdefault(DOMAIN, {})
@@ -23,6 +24,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "host": entry.data["host"],
         "port": entry.data["port"],
         "client": client,
+        "device_name": entry.data.get("device_name", "Fonterra"),
+        "polling_interval": entry.data.get("polling_interval", 30),
+        "modbus_timeout": timeout,
         "rooms": entry.options.get("rooms", {}),
         "device_id": entry.options.get("device_id", ""),
     }

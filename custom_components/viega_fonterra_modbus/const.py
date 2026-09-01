@@ -5,7 +5,13 @@ from __future__ import annotations
 DOMAIN = "viega_fonterra_modbus"
 DEFAULT_NAME = "Viega Fonterra Smart Control"
 DEFAULT_PORT = 502
+DEFAULT_POLLING_INTERVAL = 30  # seconds
+DEFAULT_MODBUS_TIMEOUT = 5  # seconds
 PLATFORMS = ["sensor", "switch", "climate", "diagnostic"]
+
+CONF_DEVICE_NAME = "device_name"
+CONF_POLLING_INTERVAL = "polling_interval"
+CONF_MODBUS_TIMEOUT = "modbus_timeout"
 
 # Example register layout for the Fonterra system; the canonical registry is
 # held in a dedicated module so it can be extended cleanly without mixing it

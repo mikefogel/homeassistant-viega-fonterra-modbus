@@ -35,8 +35,12 @@ async def async_setup_entry(
     rooms = entry_data.get("rooms", {})
 
     entities = [
-        ViegaBasicSwitchEntity(entry.entry_id, f"{room_id}_actuator", False)
-        for room_id in rooms.keys()
+        ViegaBasicSwitchEntity(
+            entry.entry_id,
+            room_config.get("name", room_id) if isinstance(room_config, dict) else room_id,
+            False,
+        )
+        for room_id, room_config in rooms.items()
     ]
     async_add_entities(entities)
 

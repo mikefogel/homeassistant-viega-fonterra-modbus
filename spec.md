@@ -18,14 +18,19 @@ This repository defines a Home Assistant custom integration for Viega Fonterra S
 Each device represents one Fonterra Smart Control controller and is identified by:
 
 - device_id
+- device_name (human-readable name, configurable by user)
 - host
 - port
+- polling_interval (in seconds, default 30)
+- modbus_timeout (in seconds, default 5)
 - rooms
 - actors
 - sensors
 
 A room can map to:
 
+- room_id
+- room_name (human-readable name from device configuration)
 - actor_id
 - sensor_id
 - thermostat settings
@@ -64,7 +69,32 @@ This entity represents a room-level thermostat and is the primary control surfac
 
 The integration must allow multiple devices to be configured and stored independently. Each entry must remain separate and should not overwrite the others.
 
-## 7. Simple switch support
+## 6a. Configuration parameters
+
+When setting up a Viega Fonterra device, the user must configure:
+
+- `host`: IP address of the Modbus TCP device (e.g., 192.168.1.10)
+- `port`: Modbus TCP port (default 502)
+- `device_name`: Human-readable name for the device (e.g., "Heizung Wohnzimmer")
+- `polling_interval`: How often to update sensor values, in seconds (default 30, minimum 5)
+- `modbus_timeout`: Maximum time to wait for a Modbus response, in seconds (default 5, minimum 1)
+
+Room names must also be provided during device configuration:
+
+```python
+rooms = {
+    "room_1": {"name": "Wohnzimmer", "actor": 1, "sensor": 10},
+    "room_2": {"name": "Schlafzimmer", "actor": 2, "sensor": 11},
+}
+```
+
+Each room's `name` field will be used as the display name for the thermostat entity in Home Assistant.
+
+## 7. Multi-device support
+
+The integration must allow multiple devices to be configured and stored independently. Each entry must remain separate and should not overwrite the others.
+
+## 8. Simple switch support
 
 The project must support a minimal switch entity for basic actuator control, with the following state flow:
 
@@ -72,7 +102,7 @@ The project must support a minimal switch entity for basic actuator control, wit
 - turn_on() sets the state to True
 - turn_off() sets the state to False
 
-## 8. Register mapping
+## 9. Register mapping
 
 The register map is a flexible, modular schema. The initial set must include:
 
@@ -82,7 +112,7 @@ The register map is a flexible, modular schema. The initial set must include:
 - system_pressure: address 1010, unit bar
 - pump_state: address 1020, unit None
 
-## 9. Error handling and data validity
+## 10. Error handling and data validity
 
 The Modbus communication layer must treat the device error sentinel value `-99` as a failed read, not as a valid measurement.
 
@@ -105,7 +135,7 @@ These entities are not numeric; they are intended for diagnostics and troublesho
 
 The sensor layer must also record the last error message on each sensor entity itself. When a device value is invalid or a communication error occurs, the sensor keeps the last valid value but stores the latest textual error string in `last_error_message` for downstream diagnosis entities or logs.
 
-## 10. Modbus transaction validation
+## 11. Modbus transaction validation
 
 If a Modbus/TCP response contains a transaction ID, the client must validate it before accepting the payload as valid.
 
@@ -115,7 +145,7 @@ Required behavior:
 - reject mismatches with a `ValueError`
 - ignore any payload whose transaction ID does not match the outstanding request
 
-## 11. Technical implementation requirements
+## 12. Technical implementation requirements
 
 - Python 3.12 compatible code
 - type-annotated modules
@@ -123,7 +153,7 @@ Required behavior:
 - no placeholder-only final state
 - tests must cover protocol framing, register definitions, room discovery, multi-device support, thermostat behavior, and switch behavior
 
-## 12. Acceptance criteria
+## 13. Acceptance criteria
 
 The integration is considered ready for the next phase when:
 

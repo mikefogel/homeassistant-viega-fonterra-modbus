@@ -19,9 +19,10 @@ class ViegaModbusClient:
     ERROR_SENTINEL = -99
     _transaction_counter = 0
 
-    def __init__(self, host: str, port: int = 502) -> None:
+    def __init__(self, host: str, port: int = 502, timeout: float = 5) -> None:
         self.host = host
         self.port = port
+        self.timeout = timeout
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
         self._connected = False
@@ -90,7 +91,12 @@ class ViegaModbusClient:
 
     async def connect(self) -> None:
         """Open a TCP socket to the configured Modbus endpoint."""
-        self._reader, self._writer = await asyncio.open_connection(self.host, self.port)
+        try:
+            self._reader, self._writer = await asyncio.wait_for(
+                asyncio.open_connection(self.host, self.port), timeout=self.timeout
+            )
+        except asyncio.TimeoutError:
+            raise ModbusClientError(f"Connection timeout after {self.timeout}s")
         self._connected = True
 
     async def disconnect(self) -> None:
@@ -111,7 +117,10 @@ class ViegaModbusClient:
         self._writer.write(request)
         await self._writer.drain()
 
-        response = await self._reader.read(256)
+        try:
+            response = await asyncio.wait_for(self._reader.read(256), timeout=self.timeout)
+        except asyncio.TimeoutError:
+            raise ModbusClientError(f"Modbus read timeout after {self.timeout}s")
         return self.decode_register_response(response)
 
     async def write_register(self, address: int, value: int) -> None:
@@ -123,5 +132,8 @@ class ViegaModbusClient:
         self._writer.write(request)
         await self._writer.drain()
 
-        await self._reader.read(256)
+        try:
+            await asyncio.wait_for(self._reader.read(256), timeout=self.timeout)
+        except asyncio.TimeoutError:
+            raise ModbusClientError(f"Modbus write timeout after {self.timeout}s")
 
