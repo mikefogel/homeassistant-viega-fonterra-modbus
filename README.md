@@ -1,66 +1,146 @@
 # Viega Fonterra Smart Control Integration für Home Assistant
 
-Diese Integration ermöglicht die Steuerung und Überwachung des Viega Fonterra Smart Control Systems über Home Assistant.
+Eine lokale Home Assistant Custom Integration für die Steuerung und Überwachung des Viega Fonterra Smart Control Systems über Modbus TCP.
 
-## Inhalt
+## Inhaltsverzeichnis
+- [Funktionen](#funktionen)
 - [Installation](#installation)
 - [Konfiguration](#konfiguration)
 - [Verwendung](#verwendung)
+- [Fehlerbehebung](#fehlerbehebung)
 - [FAQ](#faq)
-- [Unterstützung](#unterstützung)
 - [Lizenz](#lizenz)
+
+## Funktionen
+
+✅ **Multi-Device-Support**: Mehrere Fonterra-Geräte unabhängig konfigurierbar  
+✅ **Raumthermostate**: Climate-Entitäten pro Raum mit Ziel- und Ist-Temperatur  
+✅ **Sensoren**: Register-basierte Werte (Vorlauf-, Rücklauf-, Raumtemperatur, Druck, Pumpenzustand)  
+✅ **Schalter**: Ein/Aus-Steuerung für Aktuatoren  
+✅ **Diagnose-Entitäten**: Textuelle Fehlerzustände  
+✅ **Konfigurierbar**: Polling-Intervall, Modbus-Timeout, Raumbezeichnungen  
+✅ **Fehlertoleranz**: Letzten Wert bei Kommunikationsfehlern beibehalten  
+✅ **Sicher**: Modbus/TCP-Transaktions-ID-Validierung  
 
 ## Installation
 
-### Voraussetzung
-- Home Assistant (mindestens Version 2022.5)
-- HACS (Home Assistant Community Store) installiert
+### Voraussetzungen
+- Home Assistant 2022.5+
+- HACS installiert
+- Viega Fonterra Smart Control mit Modbus TCP Zugang
 
-### Schritte
-1. Öffne HACS in deinem Home Assistant.
-2. Klicke auf „Integrationen“ und dann auf das „+“-Symbol.
-3. Suche nach „Viega Fonterra Smart Control“.
-4. Wähle die Integration aus und klicke auf „Installieren“.
-5. Starte Home Assistant neu, um die Integration zu aktivieren.
+### Schritt-für-Schritt
+
+1. **HACS öffnen**
+   - Gehe zu `Einstellungen > Geräte & Services > Integrationen > +`
+   - Suche nach "Viega Fonterra Smart Control"
+   - Klicke auf "Installieren"
+
+2. **Home Assistant neu starten**
+   - `Einstellungen > System > Neu starten`
+
+3. **Integration hinzufügen**
+   - `Einstellungen > Geräte & Services > + Integration erstellen`
+   - Wähle "Viega Fonterra Smart Control"
 
 ## Konfiguration
 
-1. Gehe zu den Integrationen in Home Assistant.
-2. Klicke auf „Integration hinzufügen“ und wähle „Viega Fonterra Smart Control“ aus.
-3. Gib die notwendigen Zugangsdaten für dein Viega Fonterra Smart Control System ein.
-4. Klicke auf „Absenden“ und überprüfe, ob die Konfiguration erfolgreich war.
+### Konfigurationsschritte
+
+**Schritt 1: Geräteverbindung**
+- **Host**: IP-Adresse des Fonterra Smart Control (z.B. `192.168.1.50`)
+- **Port**: Modbus TCP Port (Standard: `502`)
+- **Gerätename**: Lesbar z.B. "Heizung Wohnzimmer"
+- **Polling-Intervall**: Updateintervall in Sekunden (5–300, Standard: 30)
+- **Modbus-Timeout**: Wartezeit auf Antwort in Sekunden (1–30, Standard: 5)
+
+**Schritt 2: Räume konfigurieren**
+
+JSON-Format mit Rauminformationen:
+```json
+{
+  "room_1": {
+    "name": "Wohnzimmer",
+    "actor": 1,
+    "sensor": 10
+  },
+  "room_2": {
+    "name": "Schlafzimmer",
+    "actor": 2,
+    "sensor": 11
+  }
+}
+```
+
+Jeder Raum erzeugt:
+- **Climate-Entity**: Thermostat mit Name aus Konfiguration
+- **Switch-Entity**: Aktuator-Steuerung
+- **Diagnostic-Entity**: Fehlerstatus
 
 ## Verwendung
 
-### Funktionen
-- Überwachung der Temperatur in den Räumen
-- Steuerung der Heizkreise
-- Automatisierte Regelungen basierend auf Home Assistant Automationen
+### Entitäten in Home Assistant
+
+Nach der Konfiguration erscheinen automatisch:
+
+- `climate.wohnzimmer` - Raumthermostat
+- `switch.wohnzimmer` - Aktuator
+- `sensor.viega_fonterra_*` - Register-Sensoren
+- `sensor.*_diagnostic` - Fehlerzustände
 
 ### Beispiel-Automation
+
 ```yaml
 automation:
-  - alias: Heizung anpassen bei Temperaturänderung
+  - alias: Heizung bei Temperaturabfall erhöhen
     trigger:
       platform: state
-      entity_id: sensor.wohnzimmer_temperatur
+      entity_id: climate.wohnzimmer
+      attribute: current_temperature
+      to: "19.0"
     action:
       service: climate.set_temperature
-      data:
+      target:
         entity_id: climate.wohnzimmer
-        temperature: "{{ states('sensor.wohnzimmer_temperatur') | float + 2 }}"
+      data:
+        temperature: 22
 ```
 
-### FAQ
-__Wie installiere ich HACS?__
-- HACS kann über die offizielle Dokumentation installiert werden.
+## Fehlerbehebung
 
-__Kann ich mehrere Viega Fonterra Smart Control Systeme hinzufügen?__
-- Ja, du kannst mehrere Systeme hinzufügen, indem du den Konfigurationsprozess für jedes System wiederholst.
+### Verbindungsfehler
+- **Problem**: "Verbindung konnte nicht hergestellt werden"
+- **Lösung**: 
+  - Überprüfe IP-Adresse und Port des Fonterra-Geräts
+  - Teste die Verbindung: `telnet 192.168.1.50 502`
+  - Erhöhe Modbus-Timeout auf 10 Sekunden
 
-### Unterstützung
-Für Hilfe und Unterstützung besuche unser GitHub-Repository oder eröffne ein Issue im Repository.
+### Sensoren zeigen `unavailable`
+- **Problem**: Sensoren sind nicht verfügbar
+- **Lösung**:
+  - Überprüfe die Register-Adressen in der Konfiguration
+  - Kontrolliere die Gerätelogs: `Einstellungen > System > Protokolle > Viega Fonterra`
+  - Erhöhe Polling-Intervall auf 60 Sekunden
 
-### Lizenz
-Dieses Projekt steht unter der MIT-Lizenz. Siehe die LICENSE-Datei für weitere Details
+### Diagnostic-Entitäten zeigen Fehler
+- Normale Funktion bei Kommunikationsfehlern
+- Sensor behält letzten gültigen Wert
+- Fehler wird in Diagnostic-Entity angezeigt
 
+## FAQ
+
+**F: Kann ich mehrere Fonterra-Geräte hinzufügen?**  
+A: Ja! Wiederhole den Konfigurationsprozess für jedes Gerät.
+
+**F: Wie erhöhe ich das Polling-Intervall?**  
+A: In der Config-Flow unter "Polling-Intervall" oder später in den Optionen.
+
+**F: Welche Register sind unterstützt?**  
+A: Siehe `spec.md` im Repository oder `registers.py`.
+
+**F: Kann ich den Fehler `-99` selbst behandeln?**  
+A: Nein, die Integration verarbeitet `-99` automatisch und behält den letzten Wert.
+
+## Lizenz
+
+MIT License - siehe [LICENSE](LICENSE) für Details
