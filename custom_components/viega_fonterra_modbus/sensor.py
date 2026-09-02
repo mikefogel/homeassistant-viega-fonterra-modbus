@@ -7,6 +7,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
+from .diagnostic import ViegaDiagnosticTextEntity
 from .modbus_handler import ViegaModbusClient
 from .registers import REGISTER_DEFINITIONS
 
@@ -27,6 +28,16 @@ async def async_setup_entry(
         )
         for sensor_key, details in REGISTER_DEFINITIONS.items()
     ]
+    rooms = hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get("rooms", {})
+    entities.extend(
+        ViegaDiagnosticTextEntity(
+            entry.entry_id,
+            f"{room_config.get('name', room_id)}_diagnostic"
+            if isinstance(room_config, dict)
+            else f"{room_id}_diagnostic",
+        )
+        for room_id, room_config in rooms.items()
+    )
     async_add_entities(entities)
 
 
