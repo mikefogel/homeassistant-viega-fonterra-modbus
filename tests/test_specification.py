@@ -1,6 +1,7 @@
 """Specification-driven tests for the expanded Fonterra integration."""
 
 from custom_components.viega_fonterra_modbus.device_registry import DeviceRegistry
+from custom_components.viega_fonterra_modbus.climate import ViegaRoomClimateEntity
 from custom_components.viega_fonterra_modbus.room_mapping import RoomMappingDiscovery
 from custom_components.viega_fonterra_modbus.switch import ViegaBasicSwitch
 from custom_components.viega_fonterra_modbus.thermostat import ViegaRoomThermostatEntity
@@ -57,6 +58,13 @@ def test_room_thermostat_has_room_identifier_and_target_temperature():
     assert entity.room_id == "room_1"
     assert entity.current_temperature == 21.5
     assert entity.target_temperature == 22.0
+
+
+def test_climate_entity_uses_feature_flags():
+    """Climate capabilities must use a Home Assistant feature flag container."""
+    entity = ViegaRoomClimateEntity("entry_1", "room_1", "Wohnzimmer", 21.5, 22.0)
+
+    assert not entity.supported_features
 
 
 def test_basic_switch_can_be_enabled_and_disabled():

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from homeassistant.components.climate import ClimateEntity
+from homeassistant.components.climate import ClimateEntity, ClimateEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTemperature
 from homeassistant.core import HomeAssistant
@@ -38,7 +38,7 @@ class ViegaRoomClimateEntity(ClimateEntity):
     _attr_has_entity_name = True
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_hvac_modes = ["heat"]
-    _attr_supported_features = 0
+    _attr_supported_features = ClimateEntityFeature(0)
 
     def __init__(
         self,
