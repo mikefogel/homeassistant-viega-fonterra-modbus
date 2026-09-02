@@ -218,3 +218,40 @@ The integration is considered ready for the next phase when:
 - an error sentinel of `-99` keeps the previous valid value instead of overwriting it
 - Modbus TCP transaction IDs are validated before payload acceptance
 - failed unit values are exposed via diagnosis text entities that show the textual error state
+
+## 14. Session lessons and resolved errors
+
+The following issues occurred during implementation and release preparation. They
+are recorded here to prevent the same failures in future releases.
+
+### HACS content layout
+
+At one point `hacs.json` contained `content_in_root: true`, although the
+integration was stored below `custom_components/viega_fonterra_modbus/`. HACS
+then searched for `custom_components/None/manifest.json` and could not install
+the integration. For this repository layout, `content_in_root` must remain
+`false`, and the `domains` value must match the manifest domain exactly.
+
+### Missing UI config-flow declaration
+
+The Python config flow and options flow were implemented before the manifest
+declared `config_flow: true`. Home Assistant consequently displayed the message
+that the integration could only be added through `configuration.yaml`. Every
+release with a UI configuration flow must include `config_flow: true` in the
+manifest and must contain `config_flow.py` with the same domain as the manifest.
+
+### Version and tag drift
+
+Manifest versions and Git tags became temporarily inconsistent during release
+updates. A release must use the same version in the manifest and tag, for
+example manifest `0.1.5` with tag `v0.1.5`. Before publishing, verify the exact
+manifest stored in the tag rather than only the working tree. Existing remote
+tags must not be silently replaced; corrections require an explicitly
+documented tag update and a corresponding HACS refresh.
+
+### Remote authentication
+
+The release push failed because the configured GitHub SSH remote rejected the
+local key with `Permission denied (publickey)`. Creating a local commit or tag
+does not publish it. A release is only complete after both the branch and tag
+are confirmed on the remote, using a configured SSH key or authenticated HTTPS.
