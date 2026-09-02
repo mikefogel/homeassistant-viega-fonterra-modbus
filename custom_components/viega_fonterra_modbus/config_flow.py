@@ -15,6 +15,7 @@ from .const import (
     CONF_DEVICE_NAME,
     CONF_MODBUS_TIMEOUT,
     CONF_POLLING_INTERVAL,
+    DEFAULT_HOST,
     DEFAULT_MODBUS_TIMEOUT,
     DEFAULT_POLLING_INTERVAL,
     DEFAULT_PORT,
@@ -102,7 +103,7 @@ class ViegaFonterraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema(
                 {
                     vol.Required(
-                        CONF_HOST, default=defaults.get(CONF_HOST, "192.168.1.10")
+                        CONF_HOST, default=defaults.get(CONF_HOST, DEFAULT_HOST)
                     ): str,
                     vol.Required(
                         CONF_PORT, default=defaults.get(CONF_PORT, DEFAULT_PORT)
@@ -126,8 +127,8 @@ class ViegaFonterraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         ),
                     ): vol.All(vol.Coerce(float), vol.Range(min=1, max=30)),
                     vol.Optional(
-                        "rooms", default=defaults.get("rooms", example)
-                    ): vol.Any(dict, str),
+                        "rooms", default=defaults.get("rooms", json.dumps(example))
+                    ): str,
                 }
             ),
             errors=errors,
@@ -153,7 +154,7 @@ class ViegaFonterraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return self.async_show_form(
                     step_id="rooms",
                     data_schema=vol.Schema(
-                        {vol.Optional("rooms", default=rooms): vol.Any(dict, str)}
+                        {vol.Optional("rooms", default=json.dumps(rooms)): str}
                     ),
                     errors=errors,
                 )
@@ -169,7 +170,7 @@ class ViegaFonterraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="rooms",
             data_schema=vol.Schema(
                 {
-                    vol.Optional("rooms", default=example): vol.Any(dict, str),
+                    vol.Optional("rooms", default=json.dumps(example)): str,
                 }
             ),
             description_placeholders={"example": str(example)},

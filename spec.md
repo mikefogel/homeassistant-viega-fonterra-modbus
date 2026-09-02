@@ -79,8 +79,9 @@ editing YAML or JSON files manually.
 
 The setup form for each Viega module must provide these fields:
 
-- `host`: IP address or DNS hostname of the Modbus TCP device
-- `port`: Modbus TCP port, default `502`
+- `host`: IP address or DNS hostname of the Modbus TCP device, default
+    `192.168.8.20`
+- `port`: Modbus TCP port, default `1502`
 - `device_name`: editable display name for the module
 - `polling_interval`: polling interval in seconds
 - `modbus_timeout`: Modbus response timeout in seconds
@@ -119,8 +120,8 @@ entity names for the corresponding thermostats, switches, and diagnostics.
 
 When setting up a Viega Fonterra device, the user must configure:
 
-- `host`: IP address of the Modbus TCP device (e.g., 192.168.1.10)
-- `port`: Modbus TCP port (default 502)
+- `host`: IP address of the Modbus TCP device (default `192.168.8.20`)
+- `port`: Modbus TCP port (default `1502`)
 - `device_name`: Human-readable name for the device (e.g., "Heizung Wohnzimmer")
 - `polling_interval`: How often to update sensor values, in seconds (default 30, minimum 5)
 - `modbus_timeout`: Maximum time to wait for a Modbus response, in seconds (default 5, minimum 1)
@@ -216,6 +217,29 @@ Required behavior:
 - reject mismatches with a `ValueError`
 - ignore any payload whose transaction ID does not match the outstanding request
 
+## 11a. Frame-level logging and diagnostics
+
+The Modbus transport must provide optional frame-level debug logging for
+diagnosing connection and protocol problems. When enabled, each transmitted
+(`TX`) and received (`RX`) frame must be logged at DEBUG level with:
+
+- direction (`TX` or `RX`)
+- target host and port
+- frame length
+- transaction ID
+- unit ID
+- function code
+- complete frame bytes in hexadecimal form
+
+Frame logging must be disabled by default and must be controllable without
+changing the protocol behavior. Logs must not contain passwords, credentials,
+or unrelated Home Assistant state. A malformed or truncated frame must still
+be safe to log and must not cause a secondary logging exception.
+
+The same response transaction-ID validation used by normal operation must run
+after an RX frame is logged. This ensures that debug output can be correlated
+with the request while mismatched responses are still rejected.
+
 ## 12. Technical implementation requirements
 
 - Python 3.12 compatible code
@@ -242,6 +266,8 @@ The integration is considered ready for the next phase when:
 - Modbus request/response handling is covered by tests
 - an error sentinel of `-99` keeps the previous valid value instead of overwriting it
 - Modbus TCP transaction IDs are validated before payload acceptance
+- optional DEBUG logging records every Modbus TX/RX frame with protocol metadata
+- frame logging is disabled by default and does not alter normal communication
 - failed unit values are exposed via diagnosis text entities that show the textual error state
 
 ## 14. Session lessons and resolved errors

@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import struct
 from typing import Any
+
+
+_LOGGER = logging.getLogger("custom_components.viega_fonterra_modbus.modbus")
 
 
 class ModbusClientError(RuntimeError):
@@ -19,13 +23,42 @@ class ViegaModbusClient:
     ERROR_SENTINEL = -99
     _transaction_counter = 0
 
-    def __init__(self, host: str, port: int = 502, timeout: float = 5) -> None:
+    def __init__(
+        self, host: str, port: int = 1502, timeout: float = 5, debug: bool = False
+    ) -> None:
         self.host = host
         self.port = port
         self.timeout = timeout
+        self.debug = debug
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
         self._connected = False
+
+    def set_debug(self, enabled: bool) -> None:
+        """Enable or disable frame-level debug logging."""
+        self.debug = enabled
+
+    def _log_frame(self, direction: str, frame: bytes) -> None:
+        """Log a Modbus frame with decoded header fields at DEBUG level."""
+        if not self.debug:
+            return
+        transaction_id = (
+            int.from_bytes(frame[0:2], byteorder="big") if len(frame) >= 2 else None
+        )
+        unit_id = frame[6] if len(frame) >= 7 else None
+        function_code = frame[7] if len(frame) >= 8 else None
+        _LOGGER.debug(
+            "Modbus %s frame host=%s port=%s transaction_id=%s unit_id=%s "
+            "function=0x%02x length=%d hex=%s",
+            direction,
+            self.host,
+            self.port,
+            transaction_id,
+            unit_id,
+            function_code or 0,
+            len(frame),
+            frame.hex(" "),
+        )
 
     @staticmethod
     def validate_transaction_id(response: bytes, expected: int) -> None:
@@ -114,6 +147,8 @@ class ViegaModbusClient:
             raise ModbusClientError("Modbus client is not connected")
 
         request = self.build_read_request(address, count, unit_id=self.UNIT_ID)
+        expected_transaction_id = int.from_bytes(request[0:2], byteorder="big")
+        self._log_frame("TX", request)
         self._writer.write(request)
         await self._writer.drain()
 
@@ -121,6 +156,8 @@ class ViegaModbusClient:
             response = await asyncio.wait_for(self._reader.read(256), timeout=self.timeout)
         except asyncio.TimeoutError:
             raise ModbusClientError(f"Modbus read timeout after {self.timeout}s")
+        self._log_frame("RX", response)
+        self.validate_transaction_id(response, expected_transaction_id)
         return self.decode_register_response(response)
 
     async def write_register(self, address: int, value: int) -> None:
@@ -129,11 +166,17 @@ class ViegaModbusClient:
             raise ModbusClientError("Modbus client is not connected")
 
         request = self.build_write_request(address, value, unit_id=self.UNIT_ID)
+        expected_transaction_id = int.from_bytes(request[0:2], byteorder="big")
+        self._log_frame("TX", request)
         self._writer.write(request)
         await self._writer.drain()
 
         try:
-            await asyncio.wait_for(self._reader.read(256), timeout=self.timeout)
+            response = await asyncio.wait_for(
+                self._reader.read(256), timeout=self.timeout
+            )
         except asyncio.TimeoutError:
             raise ModbusClientError(f"Modbus write timeout after {self.timeout}s")
+        self._log_frame("RX", response)
+        self.validate_transaction_id(response, expected_transaction_id)
 

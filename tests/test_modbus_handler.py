@@ -1,5 +1,6 @@
 """Tests for the Viega Fonterra Modbus client."""
 
+import logging
 from types import SimpleNamespace
 
 from custom_components.viega_fonterra_modbus.const import DOMAIN
@@ -138,3 +139,34 @@ def test_transaction_id_is_checked_on_response():
         pass
     else:
         raise AssertionError("Expected mismatched transaction ID to raise ValueError")
+
+
+def test_frame_debug_logging_includes_protocol_metadata(caplog):
+    """Debug logging must expose enough metadata to trace a frame exchange."""
+    client = ViegaModbusClient("192.168.8.20", 1502, debug=True)
+    frame = b"\x00\x01\x00\x00\x00\x06\x01\x03\x00\x00\x00\x01"
+
+    with caplog.at_level(
+        logging.DEBUG,
+        logger="custom_components.viega_fonterra_modbus.modbus",
+    ):
+        client._log_frame("TX", frame)
+
+    assert "Modbus TX frame" in caplog.text
+    assert "transaction_id=1" in caplog.text
+    assert "unit_id=1" in caplog.text
+    assert "function=0x03" in caplog.text
+    assert "hex=00 01 00 00 00 06 01 03 00 00 00 01" in caplog.text
+
+
+def test_frame_debug_logging_is_disabled_by_default(caplog):
+    """No frame log should be emitted unless debug logging is enabled."""
+    client = ViegaModbusClient("192.168.8.20", 1502)
+
+    with caplog.at_level(
+        logging.DEBUG,
+        logger="custom_components.viega_fonterra_modbus.modbus",
+    ):
+        client._log_frame("TX", b"\x00\x01")
+
+    assert not caplog.records
