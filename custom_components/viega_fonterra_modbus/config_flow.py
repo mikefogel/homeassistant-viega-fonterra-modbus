@@ -294,6 +294,10 @@ class ViegaFonterraOptionsFlow(config_entries.OptionsFlow):
                 schema[vol.Required(
                     f"room_sensor_{room_id}", default=room.get("sensor", 0)
                 )] = vol.Coerce(int)
+                schema[vol.Required(
+                    f"room_target_register_{room_id}",
+                    default=room.get("target_temperature_register", 0),
+                )] = vol.Coerce(int)
 
         return self.async_show_form(
             step_id="init",
@@ -318,6 +322,10 @@ class ViegaFonterraOptionsFlow(config_entries.OptionsFlow):
                     ),
                     "sensor": user_input.get(
                         f"room_sensor_{room_id}", room.get("sensor", 0)
+                    ),
+                    "target_temperature_register": user_input.get(
+                        f"room_target_register_{room_id}",
+                        room.get("target_temperature_register", 0),
                     ),
                 }
         return rooms

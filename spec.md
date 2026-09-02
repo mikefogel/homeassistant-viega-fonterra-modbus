@@ -19,6 +19,10 @@ Each device represents one Fonterra Smart Control controller and is identified b
 
 - device_id
 - device_name (human-readable name, configurable by user)
+- wlan_module_serial_number
+- base_unit_serial_number
+- base_unit_name (human-readable name reported by the base unit)
+- base_unit_error_code
 - host
 - port
 - polling_interval (in seconds, default 30)
@@ -36,6 +40,37 @@ A room can map to:
 - thermostat settings
 - target temperature
 - current temperature
+
+## 3a. Module and base-unit identity
+
+The integration must read and retain the identity and status information of both
+the WLAN module and the Fonterra base unit. These values belong to the module's
+Home Assistant device and must not be confused with the user-editable device
+name:
+
+- WLAN module serial number
+- base-unit serial number
+- base-unit designation/name
+- base-unit error code
+
+The serial numbers and base-unit designation must be exposed as diagnostic
+read-only entities and as device diagnostics where Home Assistant supports
+those metadata fields. The base-unit error code must be exposed as a diagnostic
+sensor using the raw code and, when available, its human-readable description.
+The existing base-unit error indicator must derive its state from this code:
+an active non-zero code indicates an error, while the documented no-error value
+indicates normal operation.
+
+Identity values must be discovered during the first successful device read and
+refreshed according to the configured polling interval. The last valid value
+must be retained when a read returns `-99`, times out, or otherwise fails. A
+missing identity register must not prevent room, sensor, or thermostat entities
+from being created; it must instead be reported by the diagnostic status.
+
+The register map must define the address, encoding, and length for each serial
+number and text field. Serial numbers and names may span multiple registers and
+must be decoded according to the device manual rather than by guessing byte
+order or character encoding.
 
 ## 4. Initial discovery requirement
 
@@ -58,12 +93,90 @@ The mapping must support non-1:1 relationships. One room may map to multiple act
 
 Each room thermostat entity must expose:
 
-- room_id
-- current_temperature
-- target_temperature
-- device_class = "temperature"
+ room_id
+ current_temperature
+ target_temperature
+ device_class = "temperature"
 
+### 5a. Room thermostat capability matrix
+
+The integration must expose the following room and controller information. The
+primary control surface is the room's Climate entity wherever Home Assistant's
+Climate model supports the value. Values that do not have a native Climate
+property must be exposed as linked entities belonging to the same Home
+Assistant device and carrying the same `room_id`.
+
+| Requirement | Home Assistant representation | Behavior |
+| --- | --- | --- |
+| Show current room temperature | Climate `current_temperature` | Read from the room sensor |
+| Show target temperature | Climate `target_temperature` | Read from the target register |
+| Change target temperature | Climate `climate.set_temperature` | Write to the target holding register |
+| Show output power level | Linked sensor, with optional Climate attribute | Read the actuator power-level register |
+| Change output power level | Linked Number entity | Write the actuator power-level holding register |
+| Show manifold flow temperature | Linked temperature sensor | Read the manifold flow register |
+| Show actuator return temperature | Linked temperature sensor | Read the actuator return register |
+| Show room name | Climate and linked entity names | Use the configured room name |
+| Show room number | Diagnostic/entity attribute and unique room metadata | Preserve the configured `room_id` or room number |
+| Show actuator position | Linked percentage sensor | Read the actuator-position register |
+| Show whether the base unit has an error | Linked binary sensor or diagnostic sensor | `on`/error when any base-unit error is active |
+| Show which base-unit error exists | Linked diagnostic text sensor | Expose the error code and human-readable message |
+| Show operating mode | Climate `hvac_mode` where applicable | Read the active operating mode |
+| Change operating mode | Climate `set_hvac_mode` | Write the operating-mode holding register |
+| Show profile mode | Climate preset or linked Select entity | Read the active profile mode |
+| Change profile mode | Climate `set_preset_mode` or linked Select entity | Write the profile-mode holding register |
+
+All linked entities must use stable unique IDs based on the module entry ID and
+`room_id`, not on the editable room name. Renaming a room must therefore change
+display names without creating duplicate entities. The Climate entity and all
+linked entities must reference the same Home Assistant device registry entry.
+
+If a requested value is not supported by a particular firmware version or its
+register address is not configured, the entity must not advertise a write
+feature that cannot work. Readable values must remain available where possible,
+and unavailable register values must be reported through the diagnostic status
+without overwriting the last valid value.
+
+### 5b. Required room register mapping
+
+The room mapping must be able to define the registers needed by the capability
+matrix. Register addresses and scaling are device-specific and must not be
+guessed by the entity layer. The mapping may contain at least:
+
+```python
+"room_1": {
+    "name": "Wohnzimmer",
+    "room_number": 1,
+    "actor": 1,
+    "sensor": 10,
+    "target_temperature_register": 1200,
+    "power_level_register": 1201,
+    "actuator_position_register": 1202,
+    "operating_mode_register": 1203,
+    "profile_mode_register": 1204,
+    "flow_temperature_register": 1000,
+    "return_temperature_register": 1001,
+}
+```
+
+Each writable register must define its data type, valid range, and scaling. A
+temperature register using tenths of a degree, for example, must declare a
+scale of `10`; a percentage register must declare a range of `0` to `100`.
+Writes must be acknowledged by the Modbus response before the entity state is
+updated.
 This entity represents a room-level thermostat and is the primary control surface for a room in Home Assistant.
+
+The target temperature must be writable through the room's Modbus holding
+register. Each room mapping may define:
+
+```python
+"target_temperature_register": 1200
+```
+
+When the user calls `climate.set_temperature`, the integration must write the
+requested Celsius value multiplied by `10` as an unsigned 16-bit value using
+Modbus function code `0x06`, then update the entity's target temperature only
+after a successful write response. A room without a configured target register
+must remain readable but must not advertise target-temperature write support.
 
 ## 6. Multi-device support
 
@@ -253,6 +366,11 @@ with the request while mismatched responses are still rejected.
 The integration is considered ready for the next phase when:
 
 - multiple devices can be configured and kept separate
+- WLAN module serial number is discovered and exposed as a read-only diagnostic value
+- base-unit serial number is discovered and exposed as a read-only diagnostic value
+- base-unit designation is discovered and exposed independently from the user-defined device name
+- base-unit error code and human-readable error status are exposed diagnostically
+- a non-zero base-unit error code activates the base-unit error indicator
 - Viega modules can be added through the Home Assistant UI without YAML or JSON
     editing
 - each module accepts an IP address or hostname and a configurable Modbus TCP port

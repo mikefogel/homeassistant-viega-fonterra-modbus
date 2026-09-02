@@ -67,6 +67,31 @@ def test_climate_entity_uses_feature_flags():
     assert not entity.supported_features
 
 
+def test_climate_entity_writes_scaled_target_temperature():
+    """A target temperature is written as tenths of a degree."""
+    import asyncio
+    from types import SimpleNamespace
+
+    class FakeClient:
+        async def write_register(self, address, value):
+            self.address = address
+            self.value = value
+
+    client = FakeClient()
+    entity = ViegaRoomClimateEntity(
+        "entry_1", "room_1", "Wohnzimmer", 21.5, 22.0, 1200
+    )
+    entity.hass = SimpleNamespace(
+        data={"viega_fonterra_modbus": {"entry_1": {"client": client}}}
+    )
+
+    asyncio.run(entity.async_set_temperature(temperature=20.5))
+
+    assert client.address == 1200
+    assert client.value == 205
+    assert entity.target_temperature == 20.5
+
+
 def test_basic_switch_can_be_enabled_and_disabled():
     """A simple switch entity must support the no-frills operation mode."""
     switch = ViegaBasicSwitch("heating_enable")

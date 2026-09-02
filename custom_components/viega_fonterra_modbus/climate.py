@@ -26,6 +26,12 @@ async def async_setup_entry(
             room_config.get("name", room_id) if isinstance(room_config, dict) else room_id,
             21.5,
             22.0,
+            (
+                int(room_config["target_temperature_register"])
+                if isinstance(room_config, dict)
+                and room_config.get("target_temperature_register", 0)
+                else None
+            ),
         )
         for room_id, room_config in rooms.items()
     ]
@@ -38,8 +44,6 @@ class ViegaRoomClimateEntity(ClimateEntity):
     _attr_has_entity_name = True
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_hvac_modes = ["heat"]
-    _attr_supported_features = ClimateEntityFeature(0)
-
     def __init__(
         self,
         entry_id: str,
@@ -47,6 +51,7 @@ class ViegaRoomClimateEntity(ClimateEntity):
         room_name: str,
         current_temperature: float,
         target_temperature: float,
+        target_temperature_register: int | None = None,
     ) -> None:
         self._entry_id = entry_id
         self.room_id = room_id
@@ -54,10 +59,30 @@ class ViegaRoomClimateEntity(ClimateEntity):
         self._attr_name = room_name
         self._attr_current_temperature = current_temperature
         self._attr_target_temperature = target_temperature
+        self._target_temperature_register = target_temperature_register
+        self._attr_supported_features = (
+            ClimateEntityFeature.TARGET_TEMPERATURE
+            if target_temperature_register is not None
+            else ClimateEntityFeature(0)
+        )
 
     @property
     def hvac_mode(self) -> str:
         return "heat"
+
+    async def async_set_temperature(self, **kwargs) -> None:
+        """Write the requested target temperature to the room register."""
+        temperature = kwargs.get("temperature")
+        if temperature is None or self._target_temperature_register is None:
+            return
+
+        register_value = round(float(temperature) * 10)
+        if not 0 <= register_value <= 65535:
+            raise ValueError("target temperature is outside the register range")
+
+        client = self.hass.data[DOMAIN][self._entry_id]["client"]
+        await client.write_register(self._target_temperature_register, register_value)
+        self._attr_target_temperature = float(temperature)
 
     @property
     def device_info(self):
