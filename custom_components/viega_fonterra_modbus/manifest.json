@@ -1,7 +1,7 @@
 {
   "domain": "viega_fonterra_modbus",
   "name": "Viega Fonterra Smart Control",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "documentation": "https://github.com/deinname/homeassistant-viega-fonterra-modbus",
   "issue_tracker": "https://github.com/deinname/homeassistant-viega-fonterra-modbus/issues",
   "requirements": [],
