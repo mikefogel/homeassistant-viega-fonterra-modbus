@@ -148,15 +148,20 @@ guessed by the entity layer. The mapping may contain at least:
     "room_number": 1,
     "actor": 1,
     "sensor": 10,
-    "target_temperature_register": 1200,
-    "power_level_register": 1201,
-    "actuator_position_register": 1202,
-    "operating_mode_register": 1203,
-    "profile_mode_register": 1204,
-    "flow_temperature_register": 1000,
-    "return_temperature_register": 1001,
+    "target_temperature_register": 50,
+    "power_level_register": 49,
+    "actuator_position_register": 249,
+    "flow_temperature_register": 24,
+    "return_temperature_register": 250,
 }
 ```
+
+    The values above are Modbus PDU addresses derived from the manual's one-based
+    addresses: room 1 uses holding registers `40050`/`40051` for power and target
+    temperature, input registers `30050`/`30051` for room value and error, and
+    actuator 1 uses input registers `30250`/`30251` for position and return
+    temperature. The base-unit operating and profile modes use holding registers
+    `40001` and `40002`.
 
 Each writable register must define its data type, valid range, and scaling. A
 temperature register using tenths of a degree, for example, must declare a

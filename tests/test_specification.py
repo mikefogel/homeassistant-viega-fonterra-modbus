@@ -64,7 +64,7 @@ def test_climate_entity_uses_feature_flags():
     """Climate capabilities must use a Home Assistant feature flag container."""
     entity = ViegaRoomClimateEntity("entry_1", "room_1", "Wohnzimmer", 21.5, 22.0)
 
-    assert not entity.supported_features
+    assert entity.supported_features
 
 
 def test_climate_entity_writes_scaled_target_temperature():

@@ -122,6 +122,20 @@ class ViegaModbusClient:
             raise ModbusClientError("Modbus device reported an invalid register state")
         return values
 
+    @staticmethod
+    def decode_int16_response(response: bytes) -> list[int]:
+        """Decode signed Int16 values from an input-register response."""
+        if len(response) < 9:
+            raise ModbusClientError("Modbus response is too short")
+        byte_count = response[8]
+        if len(response) != 9 + byte_count or byte_count % 2:
+            raise ModbusClientError("Modbus response length is invalid")
+        data = response[9:]
+        return [
+            int.from_bytes(data[index : index + 2], byteorder="big", signed=True)
+            for index in range(0, len(data), 2)
+        ]
+
     async def connect(self) -> None:
         """Open a TCP socket to the configured Modbus endpoint."""
         try:
@@ -159,6 +173,27 @@ class ViegaModbusClient:
         self._log_frame("RX", response)
         self.validate_transaction_id(response, expected_transaction_id)
         return self.decode_register_response(response)
+
+    async def read_input_registers(self, address: int, count: int = 1) -> list[int]:
+        """Read signed Int16 input registers using function code 0x04."""
+        if not self._connected or self._reader is None or self._writer is None:
+            raise ModbusClientError("Modbus client is not connected")
+
+        request = self.build_read_request(address, count, unit_id=self.UNIT_ID)
+        request = request[:7] + b"\x04" + request[8:]
+        expected_transaction_id = int.from_bytes(request[0:2], byteorder="big")
+        self._log_frame("TX", request)
+        self._writer.write(request)
+        await self._writer.drain()
+        try:
+            response = await asyncio.wait_for(
+                self._reader.read(256), timeout=self.timeout
+            )
+        except asyncio.TimeoutError:
+            raise ModbusClientError(f"Modbus input read timeout after {self.timeout}s")
+        self._log_frame("RX", response)
+        self.validate_transaction_id(response, expected_transaction_id)
+        return self.decode_int16_response(response)
 
     async def write_register(self, address: int, value: int) -> None:
         """Write a single register via Modbus function code 0x06."""

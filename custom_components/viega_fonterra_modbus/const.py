@@ -8,7 +8,7 @@ DEFAULT_HOST = "192.168.8.20"
 DEFAULT_PORT = 1502
 DEFAULT_POLLING_INTERVAL = 30  # seconds
 DEFAULT_MODBUS_TIMEOUT = 5  # seconds
-PLATFORMS = ["sensor", "switch", "climate"]
+PLATFORMS = ["sensor", "switch", "climate", "number"]
 
 CONF_DEVICE_NAME = "device_name"
 CONF_POLLING_INTERVAL = "polling_interval"

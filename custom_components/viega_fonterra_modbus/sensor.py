@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant
 from .const import DOMAIN
 from .diagnostic import ViegaDiagnosticTextEntity
 from .modbus_handler import ViegaModbusClient
-from .registers import REGISTER_DEFINITIONS
+from .registers import BASE_UNIT_REGISTERS, REGISTER_DEFINITIONS
 
 
 async def async_setup_entry(
@@ -37,6 +37,39 @@ async def async_setup_entry(
             else f"{room_id}_diagnostic",
         )
         for room_id, room_config in rooms.items()
+    )
+    entities.extend(
+        ViegaBaseUnitIdentitySensor(entry, key, name, address, count, text)
+        for key, name, address, count, text in (
+            (
+                "wlan_serial_number",
+                "WLAN module serial number",
+                BASE_UNIT_REGISTERS["wlan_serial_number"],
+                5,
+                True,
+            ),
+            (
+                "base_unit_serial_number",
+                "Base unit serial number",
+                BASE_UNIT_REGISTERS["base_unit_serial_number"],
+                5,
+                True,
+            ),
+            (
+                "base_unit_name",
+                "Base unit name",
+                BASE_UNIT_REGISTERS["base_unit_name"],
+                12,
+                True,
+            ),
+            (
+                "base_unit_error_code",
+                "Base unit error code",
+                BASE_UNIT_REGISTERS["error_code"],
+                1,
+                False,
+            ),
+        )
     )
     async_add_entities(entities)
 
@@ -104,6 +137,58 @@ class ViegaRegisterSensor(SensorEntity):
         if "pressure" in self._sensor_key:
             return "mdi:gauge"
         return "mdi:information-outline"
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, self._entry_id)},
+            "name": "Viega Fonterra Smart Control",
+            "manufacturer": "Viega",
+            "model": "Smart Control",
+        }
+
+
+class ViegaBaseUnitIdentitySensor(SensorEntity):
+    """Expose base-unit identity and error registers as diagnostic sensors."""
+
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        entry: ConfigEntry,
+        sensor_key: str,
+        name: str,
+        address: int,
+        count: int,
+        text: bool,
+    ) -> None:
+        self._entry_id = entry.entry_id
+        self._sensor_key = sensor_key
+        self._address = address
+        self._count = count
+        self._text = text
+        self._attr_unique_id = f"{entry.entry_id}_{sensor_key}"
+        self._attr_name = name
+        self._attr_native_value = None
+        self.last_error_message = ""
+
+    async def async_update(self) -> None:
+        """Read and decode the identity or base-unit error register."""
+        client = self.hass.data[DOMAIN][self._entry_id]["client"]
+        try:
+            values = await client.read_input_registers(self._address, self._count)
+        except Exception:
+            self.last_error_message = "error: communication timeout"
+            return
+        if not values or values[0] == ViegaModbusClient.ERROR_SENTINEL:
+            self.last_error_message = "error: sensor invalid"
+            return
+        if self._text:
+            raw = b"".join((value & 0xFFFF).to_bytes(2, "little") for value in values)
+            self._attr_native_value = raw.decode("ascii", errors="replace").rstrip("\x00 ")
+        else:
+            self._attr_native_value = values[0]
+        self.last_error_message = ""
 
     @property
     def device_info(self):
