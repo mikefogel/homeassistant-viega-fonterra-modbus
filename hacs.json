@@ -4,5 +4,5 @@
   "domains": ["viega_fonterra_modbus"],
   "country": "DE",
   "homeassistant": "2024.6.0",
-  "iot_class": "local_poll"
+  "iot_class": "local_polling"
 }
