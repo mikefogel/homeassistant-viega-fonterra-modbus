@@ -1,146 +1,128 @@
-# Viega Fonterra Smart Control Integration für Home Assistant
+# Viega Fonterra Smart Control for Home Assistant
 
-Eine lokale Home Assistant Custom Integration für die Steuerung und Überwachung des Viega Fonterra Smart Control Systems über Modbus TCP.
+This custom integration connects one or more Viega Fonterra Smart Control systems to Home Assistant over local Modbus TCP. It provides room thermostats, register sensors, actuator controls, and diagnostic information.
 
-## Inhaltsverzeichnis
-- [Funktionen](#funktionen)
-- [Installation](#installation)
-- [Konfiguration](#konfiguration)
-- [Verwendung](#verwendung)
-- [Fehlerbehebung](#fehlerbehebung)
-- [FAQ](#faq)
-- [Lizenz](#lizenz)
+## Features
 
-## Funktionen
+- Multiple independently configured Viega modules
+- Home Assistant UI setup and reconfiguration
+- IP address or hostname and configurable Modbus TCP port
+- Editable module and room names
+- Room climate entities with current and target temperature
+- Target-temperature writes through documented holding registers
+- Operating mode and profile mode controls
+- Room power-level Number entities
+- Flow, actuator return, and actuator-position values
+- WLAN module and base-unit identity diagnostics
+- Base-unit error code and error status
+- Optional Modbus TX/RX frame-level debug logging
+- Transaction-ID validation
+- Preservation of the last valid value for invalid readings (`-99`) and communication failures
 
-✅ **Multi-Device-Support**: Mehrere Fonterra-Geräte unabhängig konfigurierbar  
-✅ **Raumthermostate**: Climate-Entitäten pro Raum mit Ziel- und Ist-Temperatur  
-✅ **Sensoren**: Register-basierte Werte (Vorlauf-, Rücklauf-, Raumtemperatur, Druck, Pumpenzustand)  
-✅ **Schalter**: Ein/Aus-Steuerung für Aktuatoren  
-✅ **Diagnose-Entitäten**: Textuelle Fehlerzustände  
-✅ **Konfigurierbar**: Polling-Intervall, Modbus-Timeout, Raumbezeichnungen  
-✅ **Fehlertoleranz**: Letzten Wert bei Kommunikationsfehlern beibehalten  
-✅ **Sicher**: Modbus/TCP-Transaktions-ID-Validierung  
+## Requirements
+
+- Home Assistant with custom integrations enabled
+- A Viega Fonterra Smart Control system with Modbus TCP enabled
+- Network access from Home Assistant to the WLAN module or base unit
+
+The Fonterra manual states that Modbus TCP must be enabled in the device software. The documented default endpoint for this integration is:
+
+- Host: `192.168.8.20`
+- Port: `1502`
+
+Both values can be changed during setup or later through reconfiguration.
 
 ## Installation
 
-### Voraussetzungen
-- Home Assistant 2022.5+
-- HACS installiert
-- Viega Fonterra Smart Control mit Modbus TCP Zugang
+### HACS
 
-### Schritt-für-Schritt
+1. Open HACS in Home Assistant.
+2. Search for **Viega Fonterra Smart Control**.
+3. Install the integration.
+4. Restart Home Assistant.
 
-1. **HACS öffnen**
-   - Gehe zu `Einstellungen > Geräte & Services > Integrationen > +`
-   - Suche nach "Viega Fonterra Smart Control"
-   - Klicke auf "Installieren"
+### Manual
 
-2. **Home Assistant neu starten**
-   - `Einstellungen > System > Neu starten`
+Copy the `custom_components/viega_fonterra_modbus` directory into the `custom_components` directory of your Home Assistant configuration, then restart Home Assistant.
 
-3. **Integration hinzufügen**
-   - `Einstellungen > Geräte & Services > + Integration erstellen`
-   - Wähle "Viega Fonterra Smart Control"
+## Setup
 
-## Konfiguration
+Open **Settings > Devices & services > Add integration** and select **Viega Fonterra Smart Control**.
 
-### Konfigurationsschritte
+The setup form accepts:
 
-**Schritt 1: Geräteverbindung**
-- **Host**: IP-Adresse des Fonterra Smart Control (z.B. `192.168.1.50`)
-- **Port**: Modbus TCP Port (Standard: `502`)
-- **Gerätename**: Lesbar z.B. "Heizung Wohnzimmer"
-- **Polling-Intervall**: Updateintervall in Sekunden (5–300, Standard: 30)
-- **Modbus-Timeout**: Wartezeit auf Antwort in Sekunden (1–30, Standard: 5)
+- **Host**: an IPv4 address or resolvable hostname
+- **Port**: Modbus TCP port, default `1502`
+- **Device name**: the Home Assistant device name
+- **Polling interval**: `5` to `300` seconds, default `30`
+- **Modbus timeout**: `1` to `30` seconds, default `5`
+- **Room mapping**: optional JSON mapping of room IDs to actors and sensors
 
-**Schritt 2: Räume konfigurieren**
+The integration validates the connection before creating the entry. To add another Fonterra module, repeat the setup flow. Each module receives its own connection, device, polling configuration, and entities.
 
-JSON-Format mit Rauminformationen:
+Example room mapping:
+
 ```json
 {
   "room_1": {
-    "name": "Wohnzimmer",
+    "name": "Living room",
+    "room_number": 1,
     "actor": 1,
     "sensor": 10
   },
   "room_2": {
-    "name": "Schlafzimmer",
+    "name": "Bedroom",
+    "room_number": 2,
     "actor": 2,
     "sensor": 11
   }
 }
 ```
 
-Jeder Raum erzeugt:
-- **Climate-Entity**: Thermostat mit Name aus Konfiguration
-- **Switch-Entity**: Aktuator-Steuerung
-- **Diagnostic-Entity**: Fehlerstatus
+Room names are used for climate, switch, Number, and diagnostic entity names. Room mappings can also contain explicit register overrides when a device installation requires them.
 
-## Verwendung
+## Reconfiguration
 
-### Entitäten in Home Assistant
+Open the integration entry and select **Configure** to change the module name, host, port, polling interval, timeout, room names, room numbers, and actor or sensor mappings. The connection is tested before changes are accepted. The integration reloads the module automatically after a successful change.
 
-Nach der Konfiguration erscheinen automatisch:
+Entity unique IDs are based on the config entry and room ID, so renaming a module or room does not create duplicate entities.
 
-- `climate.wohnzimmer` - Raumthermostat
-- `switch.wohnzimmer` - Aktuator
-- `sensor.viega_fonterra_*` - Register-Sensoren
-- `sensor.*_diagnostic` - Fehlerzustände
+## Entities
 
-### Beispiel-Automation
+Depending on the configured room mapping and available registers, the integration creates:
 
-```yaml
-automation:
-  - alias: Heizung bei Temperaturabfall erhöhen
-    trigger:
-      platform: state
-      entity_id: climate.wohnzimmer
-      attribute: current_temperature
-      to: "19.0"
-    action:
-      service: climate.set_temperature
-      target:
-        entity_id: climate.wohnzimmer
-      data:
-        temperature: 22
-```
+- **Climate**: room current temperature, target temperature, operating mode, and profile mode
+- **Number**: room actuator power level (`0` to `10`)
+- **Sensors**: flow temperature, actuator return temperature, actuator position, room error, and base-unit values
+- **Switch**: basic actuator control
+- **Diagnostics**: communication status and base-unit error information
 
-## Fehlerbehebung
+The Fonterra register map uses signed 16-bit input values. Temperatures are scaled according to the manual: room and target temperatures use tenths of a degree Celsius, as do flow and return temperatures. The integration converts these values before exposing them to Home Assistant.
 
-### Verbindungsfehler
-- **Problem**: "Verbindung konnte nicht hergestellt werden"
-- **Lösung**: 
-  - Überprüfe IP-Adresse und Port des Fonterra-Geräts
-  - Teste die Verbindung: `telnet 192.168.1.50 502`
-  - Erhöhe Modbus-Timeout auf 10 Sekunden
+## Modbus debug logging
 
-### Sensoren zeigen `unavailable`
-- **Problem**: Sensoren sind nicht verfügbar
-- **Lösung**:
-  - Überprüfe die Register-Adressen in der Konfiguration
-  - Kontrolliere die Gerätelogs: `Einstellungen > System > Protokolle > Viega Fonterra`
-  - Erhöhe Polling-Intervall auf 60 Sekunden
+Frame logging is disabled by default. It can be enabled on the Modbus client for troubleshooting. Debug entries contain direction, host, port, frame length, transaction ID, unit ID, function code, and hexadecimal frame data. Do not enable verbose logging permanently on a busy installation.
 
-### Diagnostic-Entitäten zeigen Fehler
-- Normale Funktion bei Kommunikationsfehlern
-- Sensor behält letzten gültigen Wert
-- Fehler wird in Diagnostic-Entity angezeigt
+## Troubleshooting
 
-## FAQ
+### Connection failed
 
-**F: Kann ich mehrere Fonterra-Geräte hinzufügen?**  
-A: Ja! Wiederhole den Konfigurationsprozess für jedes Gerät.
+Check that Modbus TCP is enabled in the Fonterra software and that Home Assistant can reach the configured host and port. The default endpoint is `192.168.8.20:1502`.
 
-**F: Wie erhöhe ich das Polling-Intervall?**  
-A: In der Config-Flow unter "Polling-Intervall" oder später in den Optionen.
+### Values are unavailable
 
-**F: Welche Register sind unterstützt?**  
-A: Siehe `spec.md` im Repository oder `registers.py`.
+Check the room and actor mappings and confirm that the corresponding sensors are configured in the Fonterra system. A register value of `-99` means that the device considers the value unavailable. The integration keeps the previous valid value and exposes the error through diagnostics.
 
-**F: Kann ich den Fehler `-99` selbst behandeln?**  
-A: Nein, die Integration verarbeitet `-99` automatisch und behält den letzten Wert.
+### Home Assistant reports an integration or platform error
 
-## Lizenz
+Restart Home Assistant after installing or upgrading the integration. Confirm that `manifest.json` contains `config_flow: true` and that the integration is located at `custom_components/viega_fonterra_modbus/`.
 
-MIT License - siehe [LICENSE](LICENSE) für Details
+## Documentation
+
+- [System specification](spec.md)
+- [Viega Fonterra Smart Control manual](Fonterra%20Smart%20Control-de-DE.pdf)
+- [Home Assistant documentation](https://www.home-assistant.io/)
+
+## License
+
+MIT. See [LICENSE](LICENSE).

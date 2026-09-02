@@ -11,7 +11,6 @@ Erstelle eine vollständige Home Assistant Custom Integration für:
 - Viega Fonterra Smart Control
 - Kommunikation über Modbus TCP
 - Bereitstellung von Sensoren, Services und Konfigurationsflow
-- Später: KI-Funktionen über Claude (Analyse, Empfehlungen, Automationen)
 
 ## Repository Structure
 custom_components/
@@ -55,11 +54,6 @@ developer.md
 - modbus_handler.py: Modbus-Client
 - __init__.py: Setup/Unload
 - translations: UI-Texte
-
-## KI-Funktionen (später)
-- Hooks für Sensorwerte → Claude
-- Skills für Analyse und Empfehlungen
-- Aktionen über Home Assistant Services
 
 ## Workflow
 1. Michael sagt, was er braucht.

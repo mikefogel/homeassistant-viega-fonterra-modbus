@@ -1,0 +1,47 @@
+{
+  "title": "Viega Fonterra Smart Control",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add Viega Fonterra module",
+        "description": "Enter the module IP address or hostname, Modbus port, and device name.",
+        "data": {
+          "host": "IP address or hostname",
+          "port": "Modbus port",
+          "device_name": "Device name",
+          "polling_interval": "Polling interval (seconds)",
+          "modbus_timeout": "Modbus timeout (seconds)",
+          "rooms": "Room mapping"
+        },
+        "errors": {
+          "cannot_connect": "Unable to connect to the Viega module."
+        }
+      },
+      "rooms": {
+        "title": "Configure rooms",
+        "description": "Enter the room mapping as a JSON object.",
+        "data": {
+          "rooms": "Room mapping"
+        },
+        "errors": {
+          "invalid_rooms": "The room mapping must be a valid JSON object."
+        }
+      },
+      "init": {
+        "title": "Configure Viega Fonterra module",
+        "description": "Edit the module connection and room configuration.",
+        "data": {
+          "host": "IP address or hostname",
+          "port": "Modbus port",
+          "device_name": "Device name",
+          "polling_interval": "Polling interval (seconds)",
+          "modbus_timeout": "Modbus timeout (seconds)",
+          "room_target_register": "Target-temperature holding register"
+        },
+        "errors": {
+          "cannot_connect": "Unable to connect to the Viega module."
+        }
+      }
+    }
+  }
+}
