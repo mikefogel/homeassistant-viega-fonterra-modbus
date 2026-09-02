@@ -50,6 +50,18 @@ class ViegaFonterraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
+            rooms = user_input.get("rooms", {})
+            if isinstance(rooms, str):
+                try:
+                    rooms = json.loads(rooms)
+                except json.JSONDecodeError:
+                    errors["rooms"] = "invalid_rooms"
+                else:
+                    if not isinstance(rooms, dict):
+                        errors["rooms"] = "invalid_rooms"
+            if errors:
+                return self._show_user_form(user_input, errors)
+
             # Validate connection to the device
             timeout = float(user_input.get(CONF_MODBUS_TIMEOUT, DEFAULT_MODBUS_TIMEOUT))
             try:
@@ -64,24 +76,58 @@ class ViegaFonterraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.error("Failed to connect to device: %s", err)
                 errors["base"] = "cannot_connect"
             else:
-                self._device_config = user_input
-                return await self.async_step_rooms()
+                self._device_config = {
+                    key: value
+                    for key, value in user_input.items()
+                    if key != "rooms"
+                }
+                self._discovered_rooms = rooms
+                return await self.async_step_finalize()
 
+        return self._show_user_form(user_input, errors)
+
+    def _show_user_form(
+        self,
+        user_input: dict[str, object] | None,
+        errors: dict[str, str],
+    ) -> config_entries.FlowResult:
+        """Show the single-step module setup form."""
+        example = {
+            "room_1": {"name": "Wohnzimmer", "actor": 1, "sensor": 10},
+            "room_2": {"name": "Schlafzimmer", "actor": 2, "sensor": 11},
+        }
+        defaults = user_input or {}
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_HOST, default="192.168.1.10"): str,
-                    vol.Required(CONF_PORT, default=DEFAULT_PORT): vol.All(
+                    vol.Required(
+                        CONF_HOST, default=defaults.get(CONF_HOST, "192.168.1.10")
+                    ): str,
+                    vol.Required(
+                        CONF_PORT, default=defaults.get(CONF_PORT, DEFAULT_PORT)
+                    ): vol.All(
                         vol.Coerce(int), vol.Range(min=1, max=65535)
                     ),
-                    vol.Required(CONF_DEVICE_NAME, default="Fonterra"): str,
+                    vol.Required(
+                        CONF_DEVICE_NAME,
+                        default=defaults.get(CONF_DEVICE_NAME, "Fonterra"),
+                    ): str,
                     vol.Optional(
-                        CONF_POLLING_INTERVAL, default=DEFAULT_POLLING_INTERVAL
+                        CONF_POLLING_INTERVAL,
+                        default=defaults.get(
+                            CONF_POLLING_INTERVAL, DEFAULT_POLLING_INTERVAL
+                        ),
                     ): vol.All(vol.Coerce(int), vol.Range(min=5, max=300)),
                     vol.Optional(
-                        CONF_MODBUS_TIMEOUT, default=DEFAULT_MODBUS_TIMEOUT
+                        CONF_MODBUS_TIMEOUT,
+                        default=defaults.get(
+                            CONF_MODBUS_TIMEOUT, DEFAULT_MODBUS_TIMEOUT
+                        ),
                     ): vol.All(vol.Coerce(float), vol.Range(min=1, max=30)),
+                    vol.Optional(
+                        "rooms", default=defaults.get("rooms", example)
+                    ): vol.Any(dict, str),
                 }
             ),
             errors=errors,

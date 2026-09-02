@@ -10,7 +10,8 @@
           "port": "Modbus-Port",
           "device_name": "Gerätename",
           "polling_interval": "Polling-Intervall (Sekunden)",
-          "modbus_timeout": "Modbus-Timeout (Sekunden)"
+          "modbus_timeout": "Modbus-Timeout (Sekunden)",
+          "rooms": "Raumzuordnung"
         }
       },
       "rooms": {
