@@ -4,10 +4,34 @@
     "step": {
       "user": {
         "title": "Viega Fonterra hinzufügen",
-        "description": "Gib die Modbus-IP-Adresse und den Port des Geräts ein.",
+        "description": "Gib IP-Adresse oder Hostname, Port und den Namen des Geräts ein.",
         "data": {
-          "host": "IP-Adresse",
-          "port": "Port"
+          "host": "IP-Adresse oder Hostname",
+          "port": "Modbus-Port",
+          "device_name": "Gerätename",
+          "polling_interval": "Polling-Intervall (Sekunden)",
+          "modbus_timeout": "Modbus-Timeout (Sekunden)"
+        }
+      },
+      "rooms": {
+        "title": "Räume konfigurieren",
+        "description": "Konfiguriere die Raumzuordnung als JSON.",
+        "data": {
+          "rooms": "Raumzuordnung"
+        },
+        "errors": {
+          "invalid_rooms": "Die Raumzuordnung muss ein gültiges JSON-Objekt sein."
+        }
+      },
+      "init": {
+        "title": "Viega Fonterra konfigurieren",
+        "description": "Bearbeite Modul, Verbindung und erkannte Räume.",
+        "data": {
+          "host": "IP-Adresse oder Hostname",
+          "port": "Modbus-Port",
+          "device_name": "Gerätename",
+          "polling_interval": "Polling-Intervall (Sekunden)",
+          "modbus_timeout": "Modbus-Timeout (Sekunden)"
         }
       }
     }

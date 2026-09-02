@@ -69,7 +69,53 @@ This entity represents a room-level thermostat and is the primary control surfac
 
 The integration must allow multiple devices to be configured and stored independently. Each entry must remain separate and should not overwrite the others.
 
-## 6a. Configuration parameters
+## 6a. Home Assistant UI configuration
+
+The integration must provide a native Home Assistant configuration flow. Users
+must be able to configure Viega modules through the Home Assistant UI without
+editing YAML or JSON files manually.
+
+### Adding a module
+
+The setup form for each Viega module must provide these fields:
+
+- `host`: IP address or DNS hostname of the Modbus TCP device
+- `port`: Modbus TCP port, default `502`
+- `device_name`: editable display name for the module
+- `polling_interval`: polling interval in seconds
+- `modbus_timeout`: Modbus response timeout in seconds
+
+The `host` field must accept IPv4 addresses such as `192.168.1.10` and
+resolvable hostnames such as `fonterra-01.local`. The connection must be
+validated before the config entry is created. Invalid host, port, polling, or
+timeout values must be reported in the form.
+
+### Multiple modules
+
+The UI must allow more than one Viega module to be configured in the same Home
+Assistant installation. Every module must have its own config entry, device
+registry entry, connection, polling schedule, and entities. A failure or reload
+of one module must not overwrite or disable another module.
+
+### Editing an existing module
+
+An options flow must be available from each integration entry so users can edit
+the following values after setup:
+
+- module display name
+- IP address or hostname
+- Modbus TCP port
+- polling interval
+- Modbus timeout
+- room names and room-to-actor/sensor assignments
+
+After saving, the integration must reconnect using the new host or port and
+apply the new settings without manual file edits. Entity unique IDs must remain
+stable when only the display name changes. The configured module name must be
+used as the Home Assistant device name, while configured room names remain the
+entity names for the corresponding thermostats, switches, and diagnostics.
+
+## 6b. Configuration parameters
 
 When setting up a Viega Fonterra device, the user must configure:
 
@@ -158,6 +204,12 @@ Required behavior:
 The integration is considered ready for the next phase when:
 
 - multiple devices can be configured and kept separate
+- Viega modules can be added through the Home Assistant UI without YAML or JSON
+    editing
+- each module accepts an IP address or hostname and a configurable Modbus TCP port
+- each module has an editable display name in the setup and options flows
+- changing a module's name, host, or port through the UI is persisted and applied
+    to that module only
 - initial room discovery reveals actor/sensor mappings including non-1:1 topologies
 - room thermostats exist as entities with target and current temperature
 - simple switch functionality is present
