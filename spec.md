@@ -158,6 +158,31 @@ The register map is a flexible, modular schema. The initial set must include:
 - system_pressure: address 1010, unit bar
 - pump_state: address 1020, unit None
 
+## 9a. int16 read compatibility
+
+For Home Assistant Modbus configuration syntax, an `int16` register must not
+receive an explicit `count` parameter. Recent Home Assistant and base-unit
+firmware combinations can reject `count` for `data_type: int16`, which may lead
+to cyclic connection failures. The `count` parameter is reserved for data types
+that require an explicit length, such as `custom` or `string`.
+
+This rule is based on the reported Fonterra Smart Control update issue:
+[Modbus-Problem nach Update Fonterra Smart Control (Viega)](https://community.simon42.com/t/modbus-problem-nach-update-fonterra-smart-control-viega/29014).
+
+The current integration uses its own raw Modbus/TCP client rather than Home
+Assistant's YAML Modbus platform. Its binary function-code `0x03` request must
+still contain the Modbus protocol quantity field. For a single `int16` register,
+the wire-level quantity is therefore `1`; this is not the Home Assistant YAML
+`count` option and must not be removed from the protocol frame.
+
+Any future Home Assistant Modbus YAML or native platform adapter must verify:
+
+- `int16` entities omit the user-facing `count` option
+- `custom` and `string` entities set an explicit length only where required
+- raw Modbus frames retain the protocol quantity field
+- a representative `int16` read is tested after Home Assistant or base-unit
+    firmware updates to detect connection cycling
+
 ## 10. Error handling and data validity
 
 The Modbus communication layer must treat the device error sentinel value `-99` as a failed read, not as a valid measurement.
