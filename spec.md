@@ -71,13 +71,11 @@ The register map must define the address, encoding, and length for each serial
 number and text field. Serial numbers and names may span multiple registers.
 
 Text fields (serial numbers, base-unit name) are decoded as two ASCII
-characters per register, high byte first (big-endian byte order within each
-register), with trailing NUL and space characters stripped. This convention
-is provisional: it is the implementation's best-effort reading of common
-Modbus text-register practice, not a value confirmed against the Viega
-device manual. It must be corrected to match the manual as soon as real
-hardware or documentation is available to verify it, and any change must be
-applied consistently to `ViegaBaseUnitIdentitySensor` in `sensor.py`.
+characters per register using the Viega-documented Little-Endian byte order
+within each register, with trailing NUL and space characters stripped. This
+encoding is normative and must be covered by fixtures containing normal text
+and padding. The same decoder must be used consistently by
+`ViegaBaseUnitIdentitySensor` and all future text-register entities.
 
 ### 3b. Base-unit error codes
 
@@ -131,6 +129,40 @@ Climate model supports the value. Values that do not have a native Climate
 property must be exposed as linked entities belonging to the same Home
 Assistant device and carrying the same `room_id`.
 
+The room thermostat must use Home Assistant's native `ClimateEntity` presentation
+so it appears as a thermostat rather than as separate temperature sensors. The
+visual and behavioral model should follow the Daikin Onecta climate integration
+([reference implementation](https://github.com/jwillemsen/daikin_onecta/blob/master/custom_components/daikin_onecta/climate.py)):
+
+- The Climate entity is the single primary control surface for the room. Its
+  state must provide both `current_temperature` (Ist-Temperatur) and
+  `target_temperature` (Soll-Temperatur), in degrees Celsius.
+- The entity must set `temperature_unit`,
+  `target_temperature_step`, `min_temp`, and `max_temp` from the Viega register
+  definition. These values allow the standard Home Assistant thermostat card to
+  render the temperature control with the correct range and increment.
+- `ClimateEntityFeature.TARGET_TEMPERATURE` must be advertised only when a
+  writable target-temperature holding register is configured and supported.
+  Read-only rooms must still expose the current and target values when available,
+  but must not show a non-functional temperature control.
+- `async_set_temperature` must accept the Home Assistant `temperature` service
+  field, convert Celsius to the register's declared scale, validate the declared
+  range, write the holding register, and update `target_temperature` only after
+  the Modbus write is acknowledged. A failed write must leave the previous target
+  value unchanged and be reported through the integration's normal diagnostics.
+- After a successful write, the entity may update the displayed target
+  optimistically, but the next read cycle must reconcile it with the device value.
+  The current temperature must always come from the room sensor and must never be
+  replaced with the requested target.
+- The entity must expose the normal Climate state (`hvac_mode`) and only advertise
+  additional features such as presets when their registers are actually
+  readable and writable. Unsupported controls must not be rendered as available
+  controls.
+- Use a stable unique ID based on the config entry and `room_id`; use the
+  configured room name as the display name and the module's configured device
+  information for device association. Renaming must not create a second
+  thermostat entity.
+
 | Requirement | Home Assistant representation | Behavior |
 | --- | --- | --- |
 | Show current room temperature | Climate `current_temperature` | Read from the room sensor |
@@ -150,6 +182,46 @@ Assistant device and carrying the same `room_id`.
 | Show profile mode | Climate preset or linked Select entity | Read the active profile mode |
 | Change profile mode | Climate `set_preset_mode` or linked Select entity | Write the profile-mode holding register |
 
+### 5a.1. Heating and cooling operation
+
+The thermostat must also model the room's heating/cooling operating function,
+not only display two temperature values. The standard Home Assistant Climate
+card must be able to show the current operating mode and, where the controller
+supports it, let the user switch between:
+
+- `HVACMode.HEAT` for heating,
+- `HVACMode.COOL` for cooling, and
+- `HVACMode.OFF` for standby/frost protection.
+
+The Viega manual confirms exactly these three modes in holding register `40001`
+(manual page 91): raw `0` = standby, raw `1` = heating, and raw `2` = cooling.
+Therefore `heat_cool`/automatic mode must not be advertised. The manual
+describes automatic changeover only as an external installation function using
+the optional relay box and its Change-over contact (manual pages 11 and 21);
+it is not a fourth Modbus operating-mode value.
+
+`hvac_mode` must reflect the value read from the device, and
+`async_set_hvac_mode` must validate the requested mode, translate it to the
+documented register value, perform the write, and update the entity state only
+after an acknowledged response. Selecting a new mode must not change
+`current_temperature` or `target_temperature`; those remain the measured
+Ist-Temperatur and configured Soll-Temperatur. The target-temperature control
+must remain available in every operating mode in which the device reports a
+writable target setpoint.
+
+The register mapping must document the following operating-mode values:
+
+| Climate mode | Register | Raw value | Meaning |
+| --- | --- | --- | --- |
+| `off` | holding `40001` (PDU `0`) | `0` | Standby; frost protection remains active |
+| `heat` | holding `40001` (PDU `0`) | `1` | Regulation in heating mode |
+| `cool` | holding `40001` (PDU `0`) | `2` | Regulation in cooling mode |
+
+All three values are readable and writable through Modbus function `0x06`.
+Unknown raw values must be reported diagnostically and must not be silently
+mapped to a different mode. Automatic changeover must not be modelled as
+`HVACMode.HEAT_COOL` unless a future Viega manual defines such a Modbus value.
+
 All linked entities must use stable unique IDs based on the module entry ID and
 `room_id`, not on the editable room name. Renaming a room must therefore change
 display names without creating duplicate entities. This applies to every
@@ -161,11 +233,11 @@ using the module's configured `device_name` (§6a) as the device's display
 name — never a fixed string, so multiple modules remain distinguishable in
 the device registry.
 
-The operating-mode and profile-mode value sets (`hvac_mode`/`heat`/`off` and
-the `manual`/`profile`/`setback` presets) are implementation-defined
-placeholders pending confirmation against the device manual or firmware
-documentation. They must be treated as provisional and corrected once the
-actual register value semantics are confirmed.
+The operating-mode and profile-mode value sets are based on the Viega manual.
+The operating-mode mapping is `0 = standby`, `1 = heating`, and `2 = cooling`;
+there is no documented automatic heating/cooling value. Profile mode uses
+`0 = manual`, `1 = profile`, and `2 = setback`, and is available only in
+heating mode (manual page 91).
 
 The base-unit error indicator ("Show whether the base unit has an error") and
 the error code/description sensor ("Show which base-unit error exists") are
@@ -478,6 +550,56 @@ interleave on the wire and be misattributed to the wrong request.
 - no placeholder-only final state
 - tests must cover protocol framing, register definitions, room discovery, multi-device support, thermostat behavior, and switch behavior
 
+## 12a. Resolution of previously open points
+
+The following decisions are binding implementation requirements:
+
+### Live diagnostic updates
+
+Diagnostic entities must update through the same coordinator/polling cycle as
+the room and Climate entities. A successful poll distributes the newly read
+error code, identity values, and textual status to all entities of the config
+entry. No diagnostic entity may perform an additional independent Modbus poll.
+On `-99`, timeout, or another read failure, the entity retains its last valid
+value and exposes the communication problem through the existing diagnostic
+status.
+
+### Automatic room discovery
+
+After the first successful connection, the integration must read the documented
+room, actor, and sensor registers and construct the room mapping before
+creating platform entities. The resolved mapping must be persisted in the
+config entry, including non-1:1 room/actor/sensor relationships. Subsequent
+polls refresh values but must not recreate entities or change stable unique IDs.
+If discovery is incomplete, available rooms and diagnostics must still be
+created and the missing registers must be reported explicitly.
+
+### Full configuration-flow tests
+
+The test suite must use the official
+`pytest-homeassistant-custom-component` test harness with a real Home Assistant
+fixture for setup, reconfiguration, reload, connection retry, and removal
+flows. Pure parsing tests remain appropriate for isolated input validation, but
+they do not replace end-to-end flow tests. The harness and its pinned compatible
+dependencies must be declared in `requirements-test.txt`.
+
+### Heating and cooling
+
+The Climate entity must implement the Viega operating-mode register exactly as
+documented: holding register `40001` / PDU `0`, with `0 = off/standby`,
+`1 = heat`, and `2 = cool`. All three modes must be covered by read/write
+tests. The target-temperature range must be mode-dependent: `5-30 °C` in
+heating and `16-30 °C` in cooling. Automatic `heat_cool` remains unsupported
+because Viega documents change-over as an external relay function, not as a
+Modbus mode.
+
+### Text-register encoding
+
+All Viega string registers must use the documented Little-Endian byte order
+within each 16-bit register. Tests must include serial numbers and names with
+padding and verify that trailing NUL and space characters are removed. The
+decoder must be shared by all text-register entities.
+
 ## 13. Acceptance criteria
 
 The integration is considered ready for the next phase when:
@@ -499,6 +621,13 @@ The integration is considered ready for the next phase when:
     affecting any other configured module
 - initial room discovery reveals actor/sensor mappings including non-1:1 topologies
 - room thermostats exist as entities with target and current temperature
+- room thermostats expose the measured Ist-Temperatur and writable Soll-Temperatur
+  through one native Climate entity
+- supported heating, cooling, and off modes are represented by the Climate
+  `hvac_mode`; automatic heating/cooling is not exposed because Viega
+  documents it as an external Change-over relay function
+- changing the heating/cooling mode writes the documented operating-mode value
+  and does not overwrite either temperature value
 - simple switch functionality is present
 - register definitions are externally defined and not hardcoded in the sensor layer
 - Modbus request/response handling is covered by tests
