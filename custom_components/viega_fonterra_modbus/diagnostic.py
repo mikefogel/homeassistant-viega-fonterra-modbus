@@ -8,6 +8,9 @@ from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
 from .device import build_device_info
+from .registers import BASE_UNIT_REGISTERS, describe_error_code
+from .modbus_handler import ViegaModbusClient
+from .polling import PollingGate
 
 DEFAULT_STATUS = "error: sensor invalid"
 
@@ -25,6 +28,7 @@ async def async_setup_entry(
         ViegaDiagnosticTextEntity(
             entry.entry_id,
             f"{room_config.get('name', room_id) if isinstance(room_config, dict) else room_id} diagnostic",
+            room_id=room_id,
         )
         for room_id, room_config in rooms.items()
     ]
@@ -41,18 +45,40 @@ class ViegaDiagnosticTextEntity(SensorEntity):
         entry_id: str | None,
         name: str,
         status: str = DEFAULT_STATUS,
+        room_id: str | None = None,
     ) -> None:
         self._entry_id = entry_id
         self.name = name
         self.status = status
+        self._room_id = room_id
+        self._address = BASE_UNIT_REGISTERS["error_code"]
+        self._polling_gate = PollingGate()
         self._attr_unique_id = (
-            f"{entry_id}_{name}_diagnostic" if entry_id is not None else None
+            f"{entry_id}_{room_id}_diagnostic" if entry_id is not None and room_id else
+            (f"{entry_id}_{name}_diagnostic" if entry_id is not None else None)
         )
         self._attr_native_value = status
 
     @property
     def state(self) -> str:
         return self.status
+
+    async def async_update(self) -> None:
+        """Refresh the diagnostic status from the shared error-code poll."""
+        if self._entry_id is None:
+            return
+        entry_data = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
+        if "polling" not in entry_data and not self._polling_gate.is_due(self.hass, self._entry_id):
+            return
+        try:
+            shared = entry_data.get("polling")
+            values = await (shared.read(self.hass, self._entry_id, "input", self._address, 1)
+                            if shared else entry_data["client"].read_input_registers(self._address, 1))
+            if values and values[0] != ViegaModbusClient.ERROR_SENTINEL:
+                self.status = describe_error_code(values[0])
+                self._attr_native_value = self.status
+        except Exception:
+            return
 
     @property
     def device_info(self):

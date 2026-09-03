@@ -9,6 +9,12 @@ from __future__ import annotations
 
 import re
 
+
+def decode_text_registers(values: list[int] | tuple[int, ...]) -> str:
+    """Decode Viega text registers using little-endian bytes per register."""
+    raw = b"".join((int(value) & 0xFFFF).to_bytes(2, "little") for value in values)
+    return raw.decode("ascii", errors="replace").rstrip("\x00 ")
+
 HOLDING_REGISTER_BASE = 40001
 INPUT_REGISTER_BASE = 30001
 

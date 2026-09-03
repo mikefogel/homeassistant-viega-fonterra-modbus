@@ -62,11 +62,16 @@ class ViegaPowerLevelNumber(NumberEntity):
 
     async def async_update(self) -> None:
         """Read the current actuator power level."""
-        if self.address is None or not self._polling_gate.is_due(self.hass, self._entry_id):
+        entry_data = self.hass.data[DOMAIN][self._entry_id]
+        if self.address is None or (
+            "polling" not in entry_data and not self._polling_gate.is_due(self.hass, self._entry_id)
+        ):
             return
-        client = self.hass.data[DOMAIN][self._entry_id]["client"]
+        client = entry_data["client"]
         try:
-            values = await client.read_holding_registers(self.address, 1)
+            shared = entry_data.get("polling")
+            values = await (shared.read(self.hass, self._entry_id, "holding", self.address, 1)
+                            if shared else client.read_holding_registers(self.address, 1))
         except Exception:
             return
         if values and values[0] != ViegaModbusClient.ERROR_SENTINEL:

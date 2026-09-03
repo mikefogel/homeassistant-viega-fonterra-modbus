@@ -14,7 +14,9 @@ class RoomMappingDiscovery:
         actors and sensors, and one actor/sensor can also participate in multiple
         room mappings depending on the device topology.
         """
-        rooms = device_payload.get("rooms", {})
+        # Some clients return the complete payload while lightweight clients
+        # return the room dictionary itself.
+        rooms = device_payload.get("rooms", device_payload)
         if not isinstance(rooms, dict):
             return {}
 

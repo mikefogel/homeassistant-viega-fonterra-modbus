@@ -51,11 +51,14 @@ class ViegaBaseUnitErrorBinarySensor(BinarySensorEntity):
         self._polling_gate = PollingGate()
 
     async def async_update(self) -> None:
-        if not self._polling_gate.is_due(self.hass, self._entry_id):
+        entry_data = self.hass.data[DOMAIN][self._entry_id]
+        if "polling" not in entry_data and not self._polling_gate.is_due(self.hass, self._entry_id):
             return
-        client = self.hass.data[DOMAIN][self._entry_id]["client"]
+        client = entry_data["client"]
         try:
-            values = await client.read_input_registers(self._address, 1)
+            shared = entry_data.get("polling")
+            values = await (shared.read(self.hass, self._entry_id, "input", self._address, 1)
+                            if shared else client.read_input_registers(self._address, 1))
         except Exception:
             return
         if not values or values[0] == ViegaModbusClient.ERROR_SENTINEL:

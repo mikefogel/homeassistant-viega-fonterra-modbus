@@ -10,6 +10,9 @@ from homeassistant.exceptions import ConfigEntryNotReady
 
 from .const import DOMAIN, PLATFORMS
 from .modbus_handler import ModbusClientError, ViegaModbusClient
+from .polling import SharedPolling
+from .room_mapping import RoomMappingDiscovery
+from .registers import BASE_UNIT_REGISTERS, decode_text_registers
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -29,6 +32,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             f"Could not connect to {entry.data['host']}:{entry.data['port']}: {err}"
         ) from err
 
+    # Discovery is deliberately completed before forwarding platforms: entity
+    # constructors must only see the persisted, resolved topology.
+    rooms = entry.options.get("rooms", {})
+    discover = (
+        getattr(client, "discover", None)
+        or getattr(client, "discover_rooms", None)
+        or getattr(client, "read_discovery", None)
+        or getattr(client, "read_device_configuration", None)
+    )
+    if discover is not None:
+        try:
+            payload = await discover()
+            discovered = RoomMappingDiscovery.discover(payload)
+            if discovered:
+                rooms = discovered
+        except Exception:
+            _LOGGER.debug("Initial room discovery failed", exc_info=True)
+    identity: dict[str, object] = {}
+    for key, count in (("wlan_serial_number", 5), ("base_unit_serial_number", 5), ("base_unit_name", 12)):
+        try:
+            values = await client.read_input_registers(BASE_UNIT_REGISTERS[key], count)
+            if values and values[0] != ViegaModbusClient.ERROR_SENTINEL:
+                identity[key] = decode_text_registers(values)
+        except Exception:
+            _LOGGER.debug("Initial identity read failed for %s", key, exc_info=True)
+
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {
         "host": entry.data["host"],
@@ -37,10 +66,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "device_name": entry.data.get("device_name", "Fonterra"),
         "polling_interval": entry.data.get("polling_interval", 30),
         "modbus_timeout": timeout,
-        "rooms": entry.options.get("rooms", {}),
+        "rooms": rooms,
         "device_id": entry.options.get("device_id", ""),
+        "polling": SharedPolling(),
+        "identity": identity,
     }
 
+    update_entry = getattr(hass.config_entries, "async_update_entry", None)
+    if update_entry and (
+        rooms != entry.options.get("rooms", {}) or identity
+    ):
+        update_entry(
+            entry,
+            options={**entry.options, "rooms": rooms, "_identity": identity},
+        )
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _LOGGER.debug("Set up Viega Fonterra entry %s", entry.entry_id)
     return True

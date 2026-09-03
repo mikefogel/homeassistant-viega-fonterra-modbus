@@ -45,7 +45,7 @@ class ViegaRoomClimateEntity(ClimateEntity):
 
     _attr_has_entity_name = True
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
-    _attr_hvac_modes = ["off", "heat"]
+    _attr_hvac_modes = ["off", "heat", "cool"]
     def __init__(
         self,
         entry_id: str,
@@ -113,7 +113,22 @@ class ViegaRoomClimateEntity(ClimateEntity):
 
     @property
     def hvac_mode(self) -> str:
-        return "heat" if self._operating_mode else "off"
+        return {0: "off", 1: "heat", 2: "cool"}.get(self._operating_mode, "off")
+
+    @property
+    def min_temp(self) -> float:
+        """Return the Viega-valid lower setpoint for the active mode."""
+        return 16.0 if self.hvac_mode == "cool" else 5.0
+
+    @property
+    def max_temp(self) -> float:
+        """Return the Viega-valid upper setpoint for the active mode."""
+        return 30.0
+
+    @property
+    def target_temperature_step(self) -> float:
+        """Viega room setpoints are specified in half-degree increments."""
+        return 0.5
 
     @property
     def preset_modes(self) -> list[str]:
@@ -136,8 +151,9 @@ class ViegaRoomClimateEntity(ClimateEntity):
 
     async def async_update(self) -> None:
         """Read room and controller values from the documented registers."""
-        if not self._polling_gate.is_due(self.hass, self._entry_id):
-            return
+        if "polling" not in self.hass.data.get(DOMAIN, {}).get(self._entry_id, {}):
+            if not self._polling_gate.is_due(self.hass, self._entry_id):
+                return
         client = self.hass.data[DOMAIN][self._entry_id]["client"]
         values = await self._read_values(client)
         if values.get("current_temperature") is not None:
@@ -165,7 +181,12 @@ class ViegaRoomClimateEntity(ClimateEntity):
                     if name in {"target_temperature", "power_level", "operating_mode", "profile_mode"}
                     else client.read_input_registers
                 )
-                result = await reader(int(address), 1)
+                shared = self.hass.data[DOMAIN][self._entry_id].get("polling")
+                result = await (shared.read(
+                    self.hass, self._entry_id,
+                    "holding" if name in {"target_temperature", "power_level", "operating_mode", "profile_mode"} else "input",
+                    int(address), 1
+                ) if shared else reader(int(address), 1))
                 values[name] = result[0] if result else None
             except Exception:
                 values[name] = None
@@ -182,9 +203,11 @@ class ViegaRoomClimateEntity(ClimateEntity):
         if temperature is None or target_register is None:
             return
 
-        register_value = round(float(temperature) * 10)
-        if not 0 <= register_value <= 65535:
-            raise ValueError("target temperature is outside the register range")
+        temperature = float(temperature)
+        low, high = (16, 30) if self.hvac_mode == "cool" else (5, 30)
+        if not low <= temperature <= high:
+            raise ValueError(f"target temperature must be between {low} and {high} °C")
+        register_value = round(temperature * 10)
 
         client = self.hass.data[DOMAIN][self._entry_id]["client"]
         await client.write_register(int(target_register), register_value)
@@ -195,9 +218,10 @@ class ViegaRoomClimateEntity(ClimateEntity):
         if hvac_mode not in self._attr_hvac_modes:
             raise ValueError(f"unsupported HVAC mode: {hvac_mode}")
         await self.hass.data[DOMAIN][self._entry_id]["client"].write_register(
-            int(self._registers["operating_mode"]), 1 if hvac_mode == "heat" else 0
+            int(self._registers["operating_mode"]),
+            {"off": 0, "heat": 1, "cool": 2}[hvac_mode],
         )
-        self._operating_mode = 1 if hvac_mode == "heat" else 0
+        self._operating_mode = {"off": 0, "heat": 1, "cool": 2}[hvac_mode]
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
         """Write the profile mode to holding register 40002."""

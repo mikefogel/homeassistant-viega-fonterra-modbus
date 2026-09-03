@@ -10,6 +10,7 @@ from custom_components.viega_fonterra_modbus.registers import (
     pdu_address,
     resolve_room_number,
     room_registers,
+    decode_text_registers,
 )
 
 
@@ -83,3 +84,7 @@ def test_describe_error_code_reports_no_error_for_zero():
 
 def test_describe_error_code_reports_unknown_for_undocumented_codes():
     assert describe_error_code(7) == "Unknown error (code 7)"
+
+
+def test_decode_text_registers_uses_little_endian_ascii_and_strips_padding():
+    assert decode_text_registers([0x5649, 0x4547, 0x4100, 0x2020]) == "VIEGA"

@@ -19,6 +19,7 @@ from .registers import (
     actor_registers,
     describe_error_code,
     resolve_room_number,
+    decode_text_registers,
 )
 
 SCAN_INTERVAL = timedelta(seconds=MIN_SCAN_INTERVAL)
@@ -41,8 +42,9 @@ async def async_setup_entry(
         for sensor_key, details in REGISTER_DEFINITIONS.items()
     ]
     rooms = hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get("rooms", {})
+    identity = hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get("identity", {})
     entities.extend(
-        ViegaBaseUnitIdentitySensor(entry, key, name, address, count, text)
+        _identity_entity(entry, key, name, address, count, text, identity)
         for key, name, address, count, text in (
             (
                 "wlan_serial_number",
@@ -76,6 +78,13 @@ async def async_setup_entry(
     )
     entities.extend(_extra_actor_sensors(entry, rooms))
     async_add_entities(entities)
+
+
+def _identity_entity(entry, key, name, address, count, text, identity):
+    entity = ViegaBaseUnitIdentitySensor(entry, key, name, address, count, text)
+    if isinstance(identity, dict) and identity.get(key) is not None:
+        entity._attr_native_value = identity[key]
+    return entity
 
 
 def _extra_actor_sensors(entry: ConfigEntry, rooms: dict[str, object]) -> list["ViegaActorLinkedSensor"]:
@@ -162,7 +171,9 @@ class ViegaRegisterSensor(SensorEntity):
             return
 
         try:
-            values = await client.read_holding_registers(self._address, 1)
+            shared = self.hass.data[DOMAIN][self._entry_id].get("polling")
+            values = await (shared.read(self.hass, self._entry_id, "holding", self._address, 1)
+                            if shared else client.read_holding_registers(self._address, 1))
         except Exception:
             self.last_error_message = "error: communication timeout"
             return
@@ -231,6 +242,9 @@ class ViegaBaseUnitIdentitySensor(SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_{sensor_key}"
         self._attr_name = name
         self._attr_native_value = None
+        initial = getattr(entry, "options", {}).get("_identity", {}).get(sensor_key)
+        if initial is not None:
+            self._attr_native_value = initial
         self.last_error_message = ""
         self._polling_gate = PollingGate()
 
@@ -241,7 +255,9 @@ class ViegaBaseUnitIdentitySensor(SensorEntity):
 
         client = self.hass.data[DOMAIN][self._entry_id]["client"]
         try:
-            values = await client.read_input_registers(self._address, self._count)
+            shared = self.hass.data[DOMAIN][self._entry_id].get("polling")
+            values = await (shared.read(self.hass, self._entry_id, "input", self._address, self._count)
+                            if shared else client.read_input_registers(self._address, self._count))
         except Exception:
             self.last_error_message = "error: communication timeout"
             return
@@ -249,8 +265,7 @@ class ViegaBaseUnitIdentitySensor(SensorEntity):
             self.last_error_message = "error: sensor invalid"
             return
         if self._text:
-            raw = b"".join((value & 0xFFFF).to_bytes(2, "big") for value in values)
-            self._attr_native_value = raw.decode("ascii", errors="replace").rstrip("\x00 ")
+            self._attr_native_value = decode_text_registers(values)
         else:
             self._attr_native_value = values[0]
             if self._sensor_key == "base_unit_error_code":
@@ -294,7 +309,9 @@ class ViegaActorLinkedSensor(SensorEntity):
             return
         client = self.hass.data[DOMAIN][self._entry_id]["client"]
         try:
-            values = await client.read_input_registers(self._address, 1)
+            shared = self.hass.data[DOMAIN][self._entry_id].get("polling")
+            values = await (shared.read(self.hass, self._entry_id, "input", self._address, 1)
+                            if shared else client.read_input_registers(self._address, 1))
         except Exception:
             return
         if not values or values[0] == ViegaModbusClient.ERROR_SENTINEL:

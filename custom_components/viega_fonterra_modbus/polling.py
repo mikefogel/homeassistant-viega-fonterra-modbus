@@ -12,6 +12,7 @@ meantime.
 from __future__ import annotations
 
 import time
+import asyncio
 
 from homeassistant.core import HomeAssistant
 
@@ -34,3 +35,27 @@ class PollingGate:
         )
         self._next_due = now + float(interval)
         return True
+
+
+class SharedPolling:
+    """Per-entry cache that ensures entities share each Modbus poll."""
+
+    def __init__(self) -> None:
+        self._gate = PollingGate()
+        self._values: dict[tuple[str, int, int], list[int]] = {}
+        self._lock = asyncio.Lock()
+
+    async def read(self, hass: HomeAssistant, entry_id: str, bank: str, address: int, count: int = 1):
+        """Read a register range, reusing the current polling cycle result."""
+        key = (bank, int(address), int(count))
+        async with self._lock:
+            if self._gate.is_due(hass, entry_id):
+                self._values.clear()
+            if key in self._values:
+                return self._values[key]
+            client = hass.data[DOMAIN][entry_id]["client"]
+            reader = (client.read_holding_registers if bank == "holding"
+                      else client.read_input_registers)
+            values = await reader(int(address), int(count))
+            self._values[key] = values
+            return values
