@@ -68,9 +68,27 @@ missing identity register must not prevent room, sensor, or thermostat entities
 from being created; it must instead be reported by the diagnostic status.
 
 The register map must define the address, encoding, and length for each serial
-number and text field. Serial numbers and names may span multiple registers and
-must be decoded according to the device manual rather than by guessing byte
-order or character encoding.
+number and text field. Serial numbers and names may span multiple registers.
+
+Text fields (serial numbers, base-unit name) are decoded as two ASCII
+characters per register, high byte first (big-endian byte order within each
+register), with trailing NUL and space characters stripped. This convention
+is provisional: it is the implementation's best-effort reading of common
+Modbus text-register practice, not a value confirmed against the Viega
+device manual. It must be corrected to match the manual as soon as real
+hardware or documentation is available to verify it, and any change must be
+applied consistently to `ViegaBaseUnitIdentitySensor` in `sensor.py`.
+
+### 3b. Base-unit error codes
+
+The base-unit error code register (`error_code`, manual address `30024`) is
+`0` when the unit reports no error (see §3a); any other value is an active
+error. A code-to-description table (`BASE_UNIT_ERROR_CODES` in
+`registers.py`) maps known codes to human-readable text. Only `0` → "No
+error" is currently confirmed; every other code must render as
+`"Unknown error (code N)"` until it is added to the table with a
+manual-confirmed description. New codes must be appended to the table
+rather than guessed inline in the entity layer.
 
 ## 4. Initial discovery requirement
 
@@ -88,6 +106,13 @@ payload = {
 This association must be resolved into a room mapping dictionary before sensor and thermostat generation begins.
 
 The mapping must support non-1:1 relationships. One room may map to multiple actors and sensors. One actor may also participate in more than one room configuration, depending on the actual device topology.
+
+When a room maps to a list of actors, its Climate entity (§5) uses only the
+first actor as the primary control surface, matching "the primary control
+surface is the room's Climate entity" in §5a. Every additional actor in the
+list must still be exposed, as linked position and return-temperature
+sensors carrying that actor's own registers — it must not be silently
+dropped.
 
 ## 5. Room thermostat specification
 
@@ -127,8 +152,26 @@ Assistant device and carrying the same `room_id`.
 
 All linked entities must use stable unique IDs based on the module entry ID and
 `room_id`, not on the editable room name. Renaming a room must therefore change
-display names without creating duplicate entities. The Climate entity and all
-linked entities must reference the same Home Assistant device registry entry.
+display names without creating duplicate entities. This applies to every
+platform, including the switch platform (§8) — a switch's unique ID must be
+built from the entry ID and `room_id`, never from the room's display name.
+The Climate entity and all
+linked entities must reference the same Home Assistant device registry entry,
+using the module's configured `device_name` (§6a) as the device's display
+name — never a fixed string, so multiple modules remain distinguishable in
+the device registry.
+
+The operating-mode and profile-mode value sets (`hvac_mode`/`heat`/`off` and
+the `manual`/`profile`/`setback` presets) are implementation-defined
+placeholders pending confirmation against the device manual or firmware
+documentation. They must be treated as provisional and corrected once the
+actual register value semantics are confirmed.
+
+The base-unit error indicator ("Show whether the base unit has an error") and
+the error code/description sensor ("Show which base-unit error exists") are
+two distinct entities: a binary sensor that is `on` when the error code (§3b)
+is non-zero, and a separate diagnostic sensor exposing the raw code plus its
+description from the error-code table.
 
 If a requested value is not supported by a particular firmware version or its
 register address is not configured, the entity must not advertise a write
@@ -162,6 +205,22 @@ guessed by the entity layer. The mapping may contain at least:
     actuator 1 uses input registers `30250`/`30251` for position and return
     temperature. The base-unit operating and profile modes use holding registers
     `40001` and `40002`.
+
+    The conversion from a manual (Modicon-style) address to a PDU address is:
+    `pdu = manual_address - 40001` for holding registers (`4xxxx`) and
+    `pdu = manual_address - 30001` for input registers (`3xxxx`) — each
+    register bank is zero-based on its own `x0001` origin. Subtracting a flat
+    `1` from the full five-digit manual address instead of the correct
+    per-bank origin produces PDU addresses that are off by roughly 30000-40000
+    and must never be used; every address in this section and in
+    `registers.py` must satisfy this formula.
+
+    A room mapping without an explicit `room_number` resolves it from the
+    trailing digits of its `room_id` (e.g. `"room_1"` → `1`), so the minimal
+    room example in §4/§6b (`name`/`actor`/`sensor` only) still gets working
+    default registers via `room_registers()`. Room numbers 1 through 12 are
+    supported, matching the register spacing above; a topology with more
+    rooms or actuators is out of scope for this register map.
 
 Each writable register must define its data type, valid range, and scaling. A
 temperature register using tenths of a degree, for example, must declare a
@@ -234,6 +293,21 @@ stable when only the display name changes. The configured module name must be
 used as the Home Assistant device name, while configured room names remain the
 entity names for the corresponding thermostats, switches, and diagnostics.
 
+### Removing a module
+
+Each Viega module's Home Assistant device must be deletable through the
+standard Home Assistant UI (removing the integration entry from Settings →
+Devices & Services), without editing YAML/JSON or restarting Home Assistant.
+Removal must:
+
+- disconnect that module's Modbus connection and remove all of its entities
+  and its device registry entry
+- succeed even when the device is offline, unreachable, or its socket
+  connection is already broken — a failed disconnect attempt must be logged
+  and must not block the removal
+- affect only that module; every other configured module's connection,
+  polling, and entities must keep working unchanged (see "Multiple modules"
+  above)
 ## 6b. Configuration parameters
 
 When setting up a Viega Fonterra device, the user must configure:
@@ -254,6 +328,24 @@ rooms = {
 ```
 
 Each room's `name` field will be used as the display name for the thermostat entity in Home Assistant.
+
+### 6c. Polling model
+
+`polling_interval` gates how often each entity performs an actual Modbus
+read, not how often Home Assistant calls the entity's update method. Every
+platform polls at a fixed 5-second `SCAN_INTERVAL` (the spec-mandated
+minimum), and each entity tracks the time of its last real read; it skips
+the Modbus request and keeps its last known value whenever less than
+`polling_interval` seconds have passed, and performs the read otherwise.
+This lets each config entry honor its own configured interval without a
+shared per-device scheduler, while still allowing `polling_interval` values
+down to the 5-second minimum.
+
+If the initial Modbus TCP connection cannot be established when a config
+entry is set up, the integration must signal Home Assistant to retry with
+backoff (rather than leaving the entry in a hard error state that requires
+a manual reload). A connection failure or reload of one module must not
+affect any other module's connection, polling, or entities.
 
 ## 7. Multi-device support
 
@@ -325,6 +417,15 @@ These entities are not numeric; they are intended for diagnostics and troublesho
 
 The sensor layer must also record the last error message on each sensor entity itself. When a device value is invalid or a communication error occurs, the sensor keeps the last valid value but stores the latest textual error string in `last_error_message` for downstream diagnosis entities or logs.
 
+Register values (both holding and input registers) must be decoded as signed
+16-bit integers. Decoding holding registers as unsigned would make the `-99`
+sentinel unrepresentable on that read path (`-99` two's-complement is
+`0xFF9D`/`65437` unsigned), silently defeating this section's requirement for
+any register read through function code `0x03`. Ordinary holding-register
+values used by this integration (temperatures, power levels, mode codes) stay
+well under `32768` and are unaffected by signed interpretation; writes remain
+unsigned 16-bit values on the wire as specified in §5b.
+
 ## 11. Modbus transaction validation
 
 If a Modbus/TCP response contains a transaction ID, the client must validate it before accepting the payload as valid.
@@ -358,6 +459,17 @@ The same response transaction-ID validation used by normal operation must run
 after an RX frame is logged. This ensures that debug output can be correlated
 with the request while mismatched responses are still rejected.
 
+## 11b. Request serialization
+
+A single Modbus/TCP connection is shared by every entity belonging to a
+config entry (one room's Climate entity alone can perform several reads per
+cycle, plus separate sensor, number, and binary sensor entities). Home
+Assistant may invoke these entities' update methods concurrently, so the
+transport must serialize requests on a given connection — at most one
+request may be in flight, and its response must be read before the next
+request is sent — so that TX/RX frames from different entities can never
+interleave on the wire and be misattributed to the wrong request.
+
 ## 12. Technical implementation requirements
 
 - Python 3.12 compatible code
@@ -382,6 +494,9 @@ The integration is considered ready for the next phase when:
 - each module has an editable display name in the setup and options flows
 - changing a module's name, host, or port through the UI is persisted and applied
     to that module only
+- a module (its device, entities, and connection) can be deleted through the
+    Home Assistant UI, including while the device is offline, without
+    affecting any other configured module
 - initial room discovery reveals actor/sensor mappings including non-1:1 topologies
 - room thermostats exist as entities with target and current temperature
 - simple switch functionality is present
@@ -392,6 +507,13 @@ The integration is considered ready for the next phase when:
 - optional DEBUG logging records every Modbus TX/RX frame with protocol metadata
 - frame logging is disabled by default and does not alter normal communication
 - failed unit values are exposed via diagnosis text entities that show the textual error state
+- each config entry's `polling_interval` governs how often its entities perform actual Modbus reads
+- a connection failure during setup lets Home Assistant retry instead of leaving the entry broken
+- concurrent entity updates on one config entry never interleave requests on the shared connection
+- every linked entity's (including switches) unique ID is based on entry ID and `room_id`, not the display name
+- the configured `device_name` is used as the Home Assistant device name everywhere, not a fixed string
+- a room mapping without an explicit `room_number` still resolves working default registers from its `room_id`
+- additional actuators in a multi-actor room are exposed as their own linked sensors, not dropped
 
 ## 14. Session lessons and resolved errors
 
@@ -429,3 +551,28 @@ The release push failed because the configured GitHub SSH remote rejected the
 local key with `Permission denied (publickey)`. Creating a local commit or tag
 does not publish it. A release is only complete after both the branch and tag
 are confirmed on the remote, using a configured SSH key or authenticated HTTPS.
+
+### PDU address offset
+
+`registers.py::pdu_address` subtracted a flat `1` from the full five-digit
+manual address (e.g. `40001 - 1 = 40000`) instead of the correct per-bank
+origin (`40001` for holding registers, `30001` for input registers), so
+`BASE_UNIT_REGISTERS`, `room_registers()`, and `actor_registers()` all
+produced PDU addresses roughly 30000-40000 too high — while other code paths
+(`climate.py`'s hard-coded fallbacks for `flow_temperature`/`error_code`/
+`operating_mode`/`profile_mode`) already used the correct values, so the two
+never agreed. No test exercised these functions, only `REGISTER_DEFINITIONS`.
+Any change to register-address arithmetic must be covered by a test that
+checks the resulting PDU address against the worked example in §5b, not just
+against the module's own formula.
+
+### Ambiguous constructor overloads
+
+`ViegaDiagnosticTextEntity` originally branched its behavior on the number of
+positional constructor arguments (2 vs. 3) to support two call shapes. Both
+real call sites (`diagnostic.py` and a duplicate in `sensor.py`) passed only
+two arguments, always hitting the unintended branch, and the accompanying
+test only ever exercised the 2-argument form directly — so the bug was
+invisible in CI. An entity's constructor must have a single, unambiguous
+signature (default values instead of argument-count branching), and any test
+covering it must call it the same way `async_setup_entry` does.

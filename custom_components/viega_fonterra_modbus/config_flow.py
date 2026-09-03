@@ -27,6 +27,29 @@ from .modbus_handler import ViegaModbusClient
 _LOGGER = logging.getLogger(__name__)
 
 
+def parse_rooms_input(value: object) -> tuple[dict[str, object], str | None]:
+    """Parse the raw `rooms` form field into a room mapping dict.
+
+    Accepts either an already-parsed dict (as options-flow callers may pass)
+    or a JSON string (as the setup form submits it). Returns `(rooms, None)`
+    on success or `({}, "invalid_rooms")` when the value cannot be parsed as
+    a JSON object. Pulled out of `async_step_user` as a pure function so the
+    parsing/validation logic is unit-testable without a running Home
+    Assistant flow-manager context.
+    """
+    if isinstance(value, dict):
+        return value, None
+    if not isinstance(value, str):
+        return {}, "invalid_rooms"
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return {}, "invalid_rooms"
+    if not isinstance(parsed, dict):
+        return {}, "invalid_rooms"
+    return parsed, None
+
+
 class ViegaFonterraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Viega Fonterra."""
 
@@ -51,15 +74,9 @@ class ViegaFonterraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            rooms = user_input.get("rooms", {})
-            if isinstance(rooms, str):
-                try:
-                    rooms = json.loads(rooms)
-                except json.JSONDecodeError:
-                    errors["rooms"] = "invalid_rooms"
-                else:
-                    if not isinstance(rooms, dict):
-                        errors["rooms"] = "invalid_rooms"
+            rooms, rooms_error = parse_rooms_input(user_input.get("rooms", {}))
+            if rooms_error:
+                errors["rooms"] = rooms_error
             if errors:
                 return self._show_user_form(user_input, errors)
 
@@ -131,49 +148,6 @@ class ViegaFonterraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     ): str,
                 }
             ),
-            errors=errors,
-        )
-
-    async def async_step_rooms(
-        self, user_input: dict[str, object] | None = None
-    ) -> config_entries.FlowResult:
-        """Discover and configure room mappings with names."""
-        errors: dict[str, str] = {}
-
-        if user_input is not None:
-            rooms = user_input.get("rooms", {})
-            if isinstance(rooms, str):
-                try:
-                    rooms = json.loads(rooms)
-                except json.JSONDecodeError:
-                    errors["rooms"] = "invalid_rooms"
-                else:
-                    if not isinstance(rooms, dict):
-                        errors["rooms"] = "invalid_rooms"
-            if errors:
-                return self.async_show_form(
-                    step_id="rooms",
-                    data_schema=vol.Schema(
-                        {vol.Optional("rooms", default=json.dumps(rooms)): str}
-                    ),
-                    errors=errors,
-                )
-            self._discovered_rooms = rooms
-            return await self.async_step_finalize()
-
-        example = {
-            "room_1": {"name": "Wohnzimmer", "actor": 1, "sensor": 10},
-            "room_2": {"name": "Schlafzimmer", "actor": 2, "sensor": 11},
-        }
-
-        return self.async_show_form(
-            step_id="rooms",
-            data_schema=vol.Schema(
-                {
-                    vol.Optional("rooms", default=json.dumps(example)): str,
-                }
-            ),
-            description_placeholders={"example": str(example)},
             errors=errors,
         )
 

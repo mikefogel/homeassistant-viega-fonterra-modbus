@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from homeassistant.components.climate import ClimateEntity, ClimateEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTemperature
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN
-from .registers import actor_registers, room_registers
+from .const import DOMAIN, MIN_SCAN_INTERVAL
+from .device import build_device_info
+from .polling import PollingGate
+from .registers import actor_registers, resolve_room_number, room_registers
+
+SCAN_INTERVAL = timedelta(seconds=MIN_SCAN_INTERVAL)
 
 
 async def async_setup_entry(
@@ -52,14 +58,19 @@ class ViegaRoomClimateEntity(ClimateEntity):
         if isinstance(room_config, int):
             room_config = {"target_temperature_register": room_config}
         room_config = room_config or {}
-        room_number = int(room_config.get("room_number", 0))
+        room_number = resolve_room_number(room_id, room_config)
         defaults = room_registers(room_number) if room_number else {}
         actor_number = room_config.get("actor")
         if isinstance(actor_number, list):
+            # Only the primary actuator drives the Climate entity; any
+            # additional actuators in a multi-actor room (spec.md 4) get
+            # their own linked sensors from sensor.py instead of being
+            # dropped silently.
             actor_number = actor_number[0] if actor_number else None
         actor = actor_registers(int(actor_number)) if actor_number else {}
         self._entry_id = entry_id
         self.room_id = room_id
+        self._polling_gate = PollingGate()
         self._attr_unique_id = f"{entry_id}_{room_id}_thermostat"
         self._attr_name = room_name
         self._attr_current_temperature = current_temperature
@@ -125,6 +136,8 @@ class ViegaRoomClimateEntity(ClimateEntity):
 
     async def async_update(self) -> None:
         """Read room and controller values from the documented registers."""
+        if not self._polling_gate.is_due(self.hass, self._entry_id):
+            return
         client = self.hass.data[DOMAIN][self._entry_id]["client"]
         values = await self._read_values(client)
         if values.get("current_temperature") is not None:
@@ -198,9 +211,4 @@ class ViegaRoomClimateEntity(ClimateEntity):
 
     @property
     def device_info(self):
-        return {
-            "identifiers": {(DOMAIN, self._entry_id)},
-            "name": "Viega Fonterra Smart Control",
-            "manufacturer": "Viega",
-            "model": "Smart Control",
-        }
+        return build_device_info(self.hass, self._entry_id)

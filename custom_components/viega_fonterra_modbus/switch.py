@@ -7,6 +7,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
+from .device import build_device_info
 
 
 class ViegaBasicSwitch:
@@ -37,6 +38,7 @@ async def async_setup_entry(
     entities = [
         ViegaBasicSwitchEntity(
             entry.entry_id,
+            room_id,
             room_config.get("name", room_id) if isinstance(room_config, dict) else room_id,
             False,
         )
@@ -50,9 +52,12 @@ class ViegaBasicSwitchEntity(SwitchEntity):
 
     _attr_has_entity_name = True
 
-    def __init__(self, entry_id: str, name: str, is_on: bool = False) -> None:
+    def __init__(self, entry_id: str, room_id: str, name: str, is_on: bool = False) -> None:
         self._entry_id = entry_id
-        self._attr_unique_id = f"{entry_id}_{name}"
+        # Unique ID is based on the stable room_id, not the editable display
+        # name (spec.md 5a) - renaming a room must not create a duplicate
+        # entity.
+        self._attr_unique_id = f"{entry_id}_{room_id}_switch"
         self._attr_name = name
         self._attr_is_on = is_on
 
@@ -64,9 +69,4 @@ class ViegaBasicSwitchEntity(SwitchEntity):
 
     @property
     def device_info(self):
-        return {
-            "identifiers": {(DOMAIN, self._entry_id)},
-            "name": "Viega Fonterra Smart Control",
-            "manufacturer": "Viega",
-            "model": "Smart Control",
-        }
+        return build_device_info(self.hass, self._entry_id)

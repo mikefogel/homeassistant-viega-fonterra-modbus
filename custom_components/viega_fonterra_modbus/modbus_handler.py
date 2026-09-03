@@ -33,6 +33,7 @@ class ViegaModbusClient:
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
         self._connected = False
+        self._lock = asyncio.Lock()
 
     def set_debug(self, enabled: bool) -> None:
         """Enable or disable frame-level debug logging."""
@@ -107,20 +108,17 @@ class ViegaModbusClient:
 
     @staticmethod
     def decode_register_response(response: bytes) -> list[int]:
-        """Decode a function code 0x03 response into register values."""
-        if len(response) < 9:
-            raise ModbusClientError("Modbus response is too short")
-        byte_count = response[8]
-        if len(response) != 9 + byte_count:
-            raise ModbusClientError("Modbus response length does not match the byte count")
-        data = response[9:]
-        values = [
-            int.from_bytes(data[index : index + 2], byteorder="big", signed=False)
-            for index in range(0, len(data), 2)
-        ]
-        if values and any(value == 0xFFFF for value in values):
-            raise ModbusClientError("Modbus device reported an invalid register state")
-        return values
+        """Decode a function code 0x03 (holding register) response.
+
+        Values are decoded as signed 16-bit integers, matching
+        `decode_int16_response`. This is required so the `-99` error
+        sentinel (spec.md 10) can actually be detected on holding-register
+        reads: decoding as unsigned would turn -99 into 65437 and the
+        sentinel comparison would never match. Regular holding-register
+        values (temperatures, power levels, modes) are always well below
+        32768 and are unaffected by this interpretation.
+        """
+        return ViegaModbusClient.decode_int16_response(response)
 
     @staticmethod
     def decode_int16_response(response: bytes) -> list[int]:
@@ -162,17 +160,18 @@ class ViegaModbusClient:
 
         request = self.build_read_request(address, count, unit_id=self.UNIT_ID)
         expected_transaction_id = int.from_bytes(request[0:2], byteorder="big")
-        self._log_frame("TX", request)
-        self._writer.write(request)
-        await self._writer.drain()
+        async with self._lock:
+            self._log_frame("TX", request)
+            self._writer.write(request)
+            await self._writer.drain()
 
-        try:
-            response = await asyncio.wait_for(self._reader.read(256), timeout=self.timeout)
-        except asyncio.TimeoutError:
-            raise ModbusClientError(f"Modbus read timeout after {self.timeout}s")
-        self._log_frame("RX", response)
-        self.validate_transaction_id(response, expected_transaction_id)
-        return self.decode_register_response(response)
+            try:
+                response = await asyncio.wait_for(self._reader.read(256), timeout=self.timeout)
+            except asyncio.TimeoutError:
+                raise ModbusClientError(f"Modbus read timeout after {self.timeout}s")
+            self._log_frame("RX", response)
+            self.validate_transaction_id(response, expected_transaction_id)
+            return self.decode_register_response(response)
 
     async def read_input_registers(self, address: int, count: int = 1) -> list[int]:
         """Read signed Int16 input registers using function code 0x04."""
@@ -182,18 +181,19 @@ class ViegaModbusClient:
         request = self.build_read_request(address, count, unit_id=self.UNIT_ID)
         request = request[:7] + b"\x04" + request[8:]
         expected_transaction_id = int.from_bytes(request[0:2], byteorder="big")
-        self._log_frame("TX", request)
-        self._writer.write(request)
-        await self._writer.drain()
-        try:
-            response = await asyncio.wait_for(
-                self._reader.read(256), timeout=self.timeout
-            )
-        except asyncio.TimeoutError:
-            raise ModbusClientError(f"Modbus input read timeout after {self.timeout}s")
-        self._log_frame("RX", response)
-        self.validate_transaction_id(response, expected_transaction_id)
-        return self.decode_int16_response(response)
+        async with self._lock:
+            self._log_frame("TX", request)
+            self._writer.write(request)
+            await self._writer.drain()
+            try:
+                response = await asyncio.wait_for(
+                    self._reader.read(256), timeout=self.timeout
+                )
+            except asyncio.TimeoutError:
+                raise ModbusClientError(f"Modbus input read timeout after {self.timeout}s")
+            self._log_frame("RX", response)
+            self.validate_transaction_id(response, expected_transaction_id)
+            return self.decode_int16_response(response)
 
     async def write_register(self, address: int, value: int) -> None:
         """Write a single register via Modbus function code 0x06."""
@@ -202,16 +202,17 @@ class ViegaModbusClient:
 
         request = self.build_write_request(address, value, unit_id=self.UNIT_ID)
         expected_transaction_id = int.from_bytes(request[0:2], byteorder="big")
-        self._log_frame("TX", request)
-        self._writer.write(request)
-        await self._writer.drain()
+        async with self._lock:
+            self._log_frame("TX", request)
+            self._writer.write(request)
+            await self._writer.drain()
 
-        try:
-            response = await asyncio.wait_for(
-                self._reader.read(256), timeout=self.timeout
-            )
-        except asyncio.TimeoutError:
-            raise ModbusClientError(f"Modbus write timeout after {self.timeout}s")
-        self._log_frame("RX", response)
-        self.validate_transaction_id(response, expected_transaction_id)
+            try:
+                response = await asyncio.wait_for(
+                    self._reader.read(256), timeout=self.timeout
+                )
+            except asyncio.TimeoutError:
+                raise ModbusClientError(f"Modbus write timeout after {self.timeout}s")
+            self._log_frame("RX", response)
+            self.validate_transaction_id(response, expected_transaction_id)
 

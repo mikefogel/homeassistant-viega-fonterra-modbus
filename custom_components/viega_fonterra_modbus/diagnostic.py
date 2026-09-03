@@ -7,6 +7,9 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
+from .device import build_device_info
+
+DEFAULT_STATUS = "error: sensor invalid"
 
 
 async def async_setup_entry(
@@ -21,9 +24,7 @@ async def async_setup_entry(
     entities = [
         ViegaDiagnosticTextEntity(
             entry.entry_id,
-            f"{room_config.get('name', room_id) if isinstance(room_config, dict) else room_id}_diagnostic"
-            if isinstance(room_config, dict)
-            else f"{room_id}_diagnostic",
+            f"{room_config.get('name', room_id) if isinstance(room_config, dict) else room_id} diagnostic",
         )
         for room_id, room_config in rooms.items()
     ]
@@ -37,25 +38,17 @@ class ViegaDiagnosticTextEntity(SensorEntity):
 
     def __init__(
         self,
-        first: str,
-        second: str = "error: sensor invalid",
-        third: str | None = None,
+        entry_id: str | None,
+        name: str,
+        status: str = DEFAULT_STATUS,
     ) -> None:
-        if third is None:
-            # Backwards-compatible compatibility: ViegaDiagnosticTextEntity(name, status)
-            self._entry_id = None
-            self.name = first
-            self.status = second
-        else:
-            # Home Assistant entry-based setup: ViegaDiagnosticTextEntity(entry_id, name, status)
-            self._entry_id = first
-            self.name = second
-            self.status = third
-
+        self._entry_id = entry_id
+        self.name = name
+        self.status = status
         self._attr_unique_id = (
-            f"{self._entry_id}_{self.name}_diagnostic" if self._entry_id is not None else None
+            f"{entry_id}_{name}_diagnostic" if entry_id is not None else None
         )
-        self._attr_native_value = self.status
+        self._attr_native_value = status
 
     @property
     def state(self) -> str:
@@ -65,9 +58,4 @@ class ViegaDiagnosticTextEntity(SensorEntity):
     def device_info(self):
         if self._entry_id is None:
             return None
-        return {
-            "identifiers": {(DOMAIN, self._entry_id)},
-            "name": "Viega Fonterra Smart Control",
-            "manufacturer": "Viega",
-            "model": "Smart Control",
-        }
+        return build_device_info(self.hass, self._entry_id)

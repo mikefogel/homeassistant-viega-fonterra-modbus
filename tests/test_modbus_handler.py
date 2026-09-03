@@ -1,11 +1,23 @@
 """Tests for the Viega Fonterra Modbus client."""
 
+import asyncio
 import logging
 from types import SimpleNamespace
 
 from custom_components.viega_fonterra_modbus.const import DOMAIN
-from custom_components.viega_fonterra_modbus.modbus_handler import ViegaModbusClient
+from custom_components.viega_fonterra_modbus.modbus_handler import (
+    ModbusClientError,
+    ViegaModbusClient,
+)
 from custom_components.viega_fonterra_modbus.sensor import ViegaRegisterSensor
+
+
+def _next_transaction_id() -> int:
+    """The class-level transaction counter is shared across the whole test
+    session, so frame-building tests must compute the expected transaction
+    ID relative to its current value rather than assuming they run first.
+    """
+    return (ViegaModbusClient._transaction_counter + 1) & 0xFFFF
 
 
 def test_client_initialization():
@@ -19,14 +31,41 @@ def test_client_initialization():
 
 def test_read_request_is_built_with_modbus_tcp_frame():
     """The read request must be encoded as a valid Modbus/TCP frame."""
+    expected_transaction_id = _next_transaction_id()
     request = ViegaModbusClient.build_read_request(1000, count=2)
 
     assert len(request) == 12
-    assert request[0:2] == b"\x00\x01"
+    assert request[0:2] == expected_transaction_id.to_bytes(2, "big")
     assert request[2:4] == b"\x00\x00"
     assert request[4:6] == b"\x00\x06"
     assert request[6] == 0x01
     assert request[7] == 0x03
+    assert request[8:10] == (1000).to_bytes(2, "big")
+    assert request[10:12] == (2).to_bytes(2, "big")
+
+
+def test_write_request_is_built_with_modbus_tcp_frame():
+    """The write request must be encoded as a valid function-code 0x06 frame."""
+    expected_transaction_id = _next_transaction_id()
+    request = ViegaModbusClient.build_write_request(1200, 205)
+
+    assert len(request) == 12
+    assert request[0:2] == expected_transaction_id.to_bytes(2, "big")
+    assert request[2:4] == b"\x00\x00"
+    assert request[4:6] == b"\x00\x06"
+    assert request[6] == 0x01
+    assert request[7] == 0x06
+    assert request[8:10] == (1200).to_bytes(2, "big")
+    assert request[10:12] == (205).to_bytes(2, "big")
+
+
+def test_build_read_request_rejects_an_out_of_range_count():
+    try:
+        ViegaModbusClient.build_read_request(0, count=126)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected a ValueError for count > 125")
 
 
 def test_decode_register_response_works_for_two_registers():
@@ -159,6 +198,57 @@ def test_frame_debug_logging_includes_protocol_metadata(caplog):
     assert "hex=00 01 00 00 00 06 01 03 00 00 00 01" in caplog.text
 
 
+def test_decode_register_response_is_signed_and_detects_error_sentinel():
+    """Holding-register decoding must be signed so the -99 sentinel (spec.md
+    10) is representable; unsigned decoding would turn it into 65437."""
+    payload = b"\x00\x01\x00\x00\x00\x06\x01\x03\x02\xff\x9d"
+
+    values = ViegaModbusClient.decode_register_response(payload)
+
+    assert values == [-99]
+
+
+def test_concurrent_reads_are_serialized_on_shared_connection():
+    """Two concurrent reads on the same client must not interleave their
+    TX/RX frames on the wire (spec.md 11b), since a real device only ever
+    sees one connection shared by every entity of a config entry."""
+    import asyncio
+
+    log: list[tuple[str, bytes]] = []
+
+    class FakeWriter:
+        def write(self, data: bytes) -> None:
+            log.append(("TX", bytes(data)))
+
+        async def drain(self) -> None:
+            await asyncio.sleep(0)
+
+    class FakeReader:
+        async def read(self, n: int) -> bytes:
+            await asyncio.sleep(0.01)
+            direction, last_tx = log[-1]
+            assert direction == "TX", "a second request was sent before the first response was read"
+            transaction_id = last_tx[0:2]
+            response = transaction_id + b"\x00\x00\x00\x06\x01\x03\x02\x00\x01"
+            log.append(("RX", response))
+            return response
+
+    client = ViegaModbusClient("192.168.1.50", 502)
+    client._reader = FakeReader()
+    client._writer = FakeWriter()
+    client._connected = True
+
+    async def run() -> None:
+        await asyncio.gather(
+            client.read_holding_registers(0, 1),
+            client.read_holding_registers(1, 1),
+        )
+
+    asyncio.run(run())
+
+    assert [direction for direction, _ in log] == ["TX", "RX", "TX", "RX"]
+
+
 def test_frame_debug_logging_is_disabled_by_default(caplog):
     """No frame log should be emitted unless debug logging is enabled."""
     client = ViegaModbusClient("192.168.8.20", 1502)
@@ -170,3 +260,261 @@ def test_frame_debug_logging_is_disabled_by_default(caplog):
         client._log_frame("TX", b"\x00\x01")
 
     assert not caplog.records
+
+
+def test_frame_logging_is_safe_for_a_malformed_or_truncated_frame(caplog):
+    """spec.md 11a: a malformed/truncated frame must still be safe to log
+    and must not cause a secondary logging exception."""
+    client = ViegaModbusClient("192.168.8.20", 1502, debug=True)
+
+    with caplog.at_level(
+        logging.DEBUG,
+        logger="custom_components.viega_fonterra_modbus.modbus",
+    ):
+        client._log_frame("RX", b"")
+        client._log_frame("RX", b"\x00")
+        client._log_frame("RX", b"\x00\x01\x00\x00\x00")
+
+    assert len(caplog.records) == 3
+
+
+def test_set_debug_toggles_frame_logging(caplog):
+    client = ViegaModbusClient("192.168.8.20", 1502)
+
+    with caplog.at_level(
+        logging.DEBUG,
+        logger="custom_components.viega_fonterra_modbus.modbus",
+    ):
+        client._log_frame("TX", b"\x00\x01\x00\x00\x00\x06\x01\x03\x00\x00\x00\x01")
+        assert not caplog.records
+
+        client.set_debug(True)
+        client._log_frame("TX", b"\x00\x01\x00\x00\x00\x06\x01\x03\x00\x00\x00\x01")
+        assert len(caplog.records) == 1
+
+
+def test_validate_transaction_id_accepts_a_matching_response():
+    response = b"\x00\x05\x00\x00\x00\x06\x01\x03\x04\x00\x1e\x00\x2a"
+
+    # Must not raise.
+    ViegaModbusClient.validate_transaction_id(response, expected=5)
+
+
+def test_validate_transaction_id_rejects_a_response_too_short_to_contain_one():
+    try:
+        ViegaModbusClient.validate_transaction_id(b"\x00\x01", expected=1)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected a ValueError for a response shorter than 6 bytes")
+
+
+def test_decode_register_response_rejects_a_response_that_is_too_short():
+    try:
+        ViegaModbusClient.decode_register_response(b"\x00\x01\x00\x00\x00\x06\x01")
+    except ModbusClientError:
+        pass
+    else:
+        raise AssertionError("expected a ModbusClientError for a truncated response")
+
+
+def test_decode_int16_response_rejects_an_odd_byte_count():
+    # byte_count (index 8) is 3, which cannot represent whole 16-bit registers.
+    payload = b"\x00\x01\x00\x00\x00\x06\x01\x04\x03\x00\x01\x00"
+    try:
+        ViegaModbusClient.decode_int16_response(payload)
+    except ModbusClientError:
+        pass
+    else:
+        raise AssertionError("expected a ModbusClientError for an odd byte_count")
+
+
+def test_read_holding_registers_raises_when_not_connected():
+    client = ViegaModbusClient("192.168.1.50", 502)
+
+    try:
+        asyncio.run(client.read_holding_registers(0, 1))
+    except ModbusClientError:
+        pass
+    else:
+        raise AssertionError("expected a ModbusClientError when not connected")
+
+
+def test_read_input_registers_raises_when_not_connected():
+    client = ViegaModbusClient("192.168.1.50", 502)
+
+    try:
+        asyncio.run(client.read_input_registers(0, 1))
+    except ModbusClientError:
+        pass
+    else:
+        raise AssertionError("expected a ModbusClientError when not connected")
+
+
+def test_write_register_raises_when_not_connected():
+    client = ViegaModbusClient("192.168.1.50", 502)
+
+    try:
+        asyncio.run(client.write_register(0, 1))
+    except ModbusClientError:
+        pass
+    else:
+        raise AssertionError("expected a ModbusClientError when not connected")
+
+
+def test_read_input_registers_uses_function_code_0x04():
+    """read_input_registers must send function code 0x04 on the wire, not
+    the 0x03 used for holding registers."""
+    log: list[bytes] = []
+
+    class FakeWriter:
+        def write(self, data: bytes) -> None:
+            log.append(bytes(data))
+
+        async def drain(self) -> None:
+            return None
+
+    class FakeReader:
+        async def read(self, n: int) -> bytes:
+            transaction_id = log[-1][0:2]
+            return transaction_id + b"\x00\x00\x00\x06\x01\x04\x02\x00\x2a"
+
+    client = ViegaModbusClient("192.168.1.50", 502)
+    client._reader = FakeReader()
+    client._writer = FakeWriter()
+    client._connected = True
+
+    values = asyncio.run(client.read_input_registers(49, 1))
+
+    assert log[-1][7] == 0x04
+    assert values == [42]
+
+
+def test_write_register_sends_the_value_and_validates_the_response():
+    log: list[bytes] = []
+
+    class FakeWriter:
+        def write(self, data: bytes) -> None:
+            log.append(bytes(data))
+
+        async def drain(self) -> None:
+            return None
+
+    class FakeReader:
+        async def read(self, n: int) -> bytes:
+            transaction_id = log[-1][0:2]
+            # Echo response for function code 0x06: address + value.
+            return transaction_id + b"\x00\x00\x00\x06\x01\x06\x00\x32\x00\xcd"
+
+    client = ViegaModbusClient("192.168.1.50", 502)
+    client._reader = FakeReader()
+    client._writer = FakeWriter()
+    client._connected = True
+
+    asyncio.run(client.write_register(50, 205))
+
+    assert log[-1][7] == 0x06
+    assert log[-1][8:10] == (50).to_bytes(2, "big")
+    assert log[-1][10:12] == (205).to_bytes(2, "big")
+
+
+def test_read_holding_registers_raises_on_timeout():
+    class FakeWriter:
+        def write(self, data: bytes) -> None:
+            return None
+
+        async def drain(self) -> None:
+            return None
+
+    class HangingReader:
+        async def read(self, n: int) -> bytes:
+            await asyncio.sleep(10)
+            return b""
+
+    client = ViegaModbusClient("192.168.1.50", 502, timeout=0.01)
+    client._reader = HangingReader()
+    client._writer = FakeWriter()
+    client._connected = True
+
+    try:
+        asyncio.run(client.read_holding_registers(0, 1))
+    except ModbusClientError:
+        pass
+    else:
+        raise AssertionError("expected a ModbusClientError on read timeout")
+
+
+def test_connect_opens_a_connection_and_marks_the_client_connected(monkeypatch):
+    class FakeWriter:
+        def close(self) -> None:
+            return None
+
+        async def wait_closed(self) -> None:
+            return None
+
+    class FakeReader:
+        pass
+
+    async def fake_open_connection(host, port):
+        assert host == "192.168.1.50"
+        assert port == 502
+        return FakeReader(), FakeWriter()
+
+    monkeypatch.setattr(asyncio, "open_connection", fake_open_connection)
+
+    client = ViegaModbusClient("192.168.1.50", 502)
+    asyncio.run(client.connect())
+
+    assert client._connected is True
+    assert client._reader is not None
+    assert client._writer is not None
+
+
+def test_connect_raises_modbus_client_error_on_timeout(monkeypatch):
+    async def hanging_open_connection(host, port):
+        await asyncio.sleep(10)
+
+    monkeypatch.setattr(asyncio, "open_connection", hanging_open_connection)
+
+    client = ViegaModbusClient("192.168.1.50", 502, timeout=0.01)
+
+    try:
+        asyncio.run(client.connect())
+    except ModbusClientError:
+        pass
+    else:
+        raise AssertionError("expected a ModbusClientError on connection timeout")
+
+    assert client._connected is False
+
+
+def test_disconnect_closes_the_writer_and_resets_state():
+    closed = {"close": False, "wait_closed": False}
+
+    class FakeWriter:
+        def close(self) -> None:
+            closed["close"] = True
+
+        async def wait_closed(self) -> None:
+            closed["wait_closed"] = True
+
+    client = ViegaModbusClient("192.168.1.50", 502)
+    client._writer = FakeWriter()
+    client._reader = object()
+    client._connected = True
+
+    asyncio.run(client.disconnect())
+
+    assert closed == {"close": True, "wait_closed": True}
+    assert client._reader is None
+    assert client._writer is None
+    assert client._connected is False
+
+
+def test_disconnect_is_a_noop_when_never_connected():
+    """Must not raise even if disconnect() is called on a fresh client."""
+    client = ViegaModbusClient("192.168.1.50", 502)
+
+    asyncio.run(client.disconnect())
+
+    assert client._connected is False
