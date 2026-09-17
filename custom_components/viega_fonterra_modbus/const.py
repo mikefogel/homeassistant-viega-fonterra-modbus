@@ -9,7 +9,7 @@ DEFAULT_PORT = 1502
 DEFAULT_POLLING_INTERVAL = 30  # seconds
 DEFAULT_MODBUS_TIMEOUT = 5  # seconds
 MIN_SCAN_INTERVAL = 5  # seconds; also the minimum accepted `polling_interval`
-PLATFORMS = ["sensor", "binary_sensor", "switch", "climate", "number", "diagnostic"]
+PLATFORMS = ["sensor", "binary_sensor", "switch", "climate", "number"]
 
 CONF_DEVICE_NAME = "device_name"
 CONF_POLLING_INTERVAL = "polling_interval"

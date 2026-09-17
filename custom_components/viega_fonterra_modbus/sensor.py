@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN, MIN_SCAN_INTERVAL
 from .device import build_device_info
+from .diagnostic import ViegaDiagnosticTextEntity
 from .modbus_handler import ViegaModbusClient
 from .polling import PollingGate
 from .registers import (
@@ -31,6 +32,8 @@ async def async_setup_entry(
     async_add_entities,
 ) -> None:
     """Set up the sensor entities from a config entry."""
+
+    # First, set up regular sensors (existing logic)
     entities = [
         ViegaRegisterSensor(
             entry,
@@ -41,8 +44,10 @@ async def async_setup_entry(
         )
         for sensor_key, details in REGISTER_DEFINITIONS.items()
     ]
+
     rooms = hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get("rooms", {})
     identity = hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get("identity", {})
+
     entities.extend(
         _identity_entity(entry, key, name, address, count, text, identity)
         for key, name, address, count, text in (
@@ -76,7 +81,20 @@ async def async_setup_entry(
             ),
         )
     )
+
     entities.extend(_extra_actor_sensors(entry, rooms))
+
+    # NEW: Add diagnostic text entities
+    rooms = hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get("rooms", {})
+    entities.extend(
+        ViegaDiagnosticTextEntity(
+            entry.entry_id,
+            f"{room_config.get('name', room_id)} diagnostic",
+            room_id=room_id,
+        )
+        for room_id, room_config in rooms.items()
+    )
+
     async_add_entities(entities)
 
 
@@ -88,14 +106,8 @@ def _identity_entity(entry, key, name, address, count, text, identity):
 
 
 def _extra_actor_sensors(entry: ConfigEntry, rooms: dict[str, object]) -> list["ViegaActorLinkedSensor"]:
-    """Build linked sensors for actuators beyond the first in a multi-actor room.
+    """Build linked sensors for actuators beyond the first in a multi-actor room."""
 
-    spec.md 4 requires support for a room mapping to more than one actuator.
-    The room's Climate entity (climate.py) exposes only the primary
-    actuator, so any additional actuators in the list get their own
-    position/return-temperature sensors here instead of being silently
-    dropped.
-    """
     sensors: list[ViegaActorLinkedSensor] = []
     for room_id, room_config in rooms.items():
         if not isinstance(room_config, dict):
@@ -157,10 +169,12 @@ class ViegaRegisterSensor(SensorEntity):
         self._address = address
         self._attr_native_value = 0
         self.last_error_message = ""
+
         self._polling_gate = PollingGate()
 
     async def async_update(self) -> None:
         """Read the current register value from the Modbus client."""
+
         if not self._polling_gate.is_due(self.hass, self._entry_id):
             return
 
@@ -186,11 +200,12 @@ class ViegaRegisterSensor(SensorEntity):
         if value == ViegaModbusClient.ERROR_SENTINEL:
             self.last_error_message = "error: sensor invalid"
             return
+
         self.last_error_message = ""
         self._attr_native_value = value
 
     @property
-    def state(self):
+    def state(self) -> str:
         """Return the current sensor reading."""
         return self._attr_native_value
 
@@ -212,15 +227,7 @@ class ViegaRegisterSensor(SensorEntity):
 
 
 class ViegaBaseUnitIdentitySensor(SensorEntity):
-    """Expose base-unit identity and error registers as diagnostic sensors.
-
-    Text fields (serial numbers, base-unit name) are decoded as two ASCII
-    characters per register, high byte first (big-endian byte order within
-    each register) and stripped of trailing NUL/space padding. This is the
-    documented convention for this register range (spec.md 3a) and must not
-    be changed without confirming the actual byte order against the device
-    manual.
-    """
+    """Expose base-unit identity and error registers as diagnostic sensors."""
 
     _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -240,38 +247,46 @@ class ViegaBaseUnitIdentitySensor(SensorEntity):
         self._count = count
         self._text = text
         self._attr_unique_id = f"{entry.entry_id}_{sensor_key}"
+
         self._attr_name = name
         self._attr_native_value = None
         initial = getattr(entry, "options", {}).get("_identity", {}).get(sensor_key)
         if initial is not None:
             self._attr_native_value = initial
         self.last_error_message = ""
+
         self._polling_gate = PollingGate()
 
     async def async_update(self) -> None:
         """Read and decode the identity or base-unit error register."""
+
         if not self._polling_gate.is_due(self.hass, self._entry_id):
             return
 
         client = self.hass.data[DOMAIN][self._entry_id]["client"]
         try:
             shared = self.hass.data[DOMAIN][self._entry_id].get("polling")
+
             values = await (shared.read(self.hass, self._entry_id, "input", self._address, self._count)
                             if shared else client.read_input_registers(self._address, self._count))
         except Exception:
             self.last_error_message = "error: communication timeout"
             return
+
         if not values or values[0] == ViegaModbusClient.ERROR_SENTINEL:
             self.last_error_message = "error: sensor invalid"
             return
+
         if self._text:
             self._attr_native_value = decode_text_registers(values)
         else:
             self._attr_native_value = values[0]
+
             if self._sensor_key == "base_unit_error_code":
                 self._attr_extra_state_attributes = {
                     "description": describe_error_code(values[0])
                 }
+
         self.last_error_message = ""
 
     @property
@@ -280,7 +295,7 @@ class ViegaBaseUnitIdentitySensor(SensorEntity):
 
 
 class ViegaActorLinkedSensor(SensorEntity):
-    """Expose a register for an actuator beyond the first one in a room."""
+    """Expose a register for an actuator beyond the first in a room."""
 
     _attr_has_entity_name = True
 
@@ -307,15 +322,19 @@ class ViegaActorLinkedSensor(SensorEntity):
     async def async_update(self) -> None:
         if not self._polling_gate.is_due(self.hass, self._entry_id):
             return
+
         client = self.hass.data[DOMAIN][self._entry_id]["client"]
         try:
             shared = self.hass.data[DOMAIN][self._entry_id].get("polling")
+
             values = await (shared.read(self.hass, self._entry_id, "input", self._address, 1)
                             if shared else client.read_input_registers(self._address, 1))
         except Exception:
             return
+
         if not values or values[0] == ViegaModbusClient.ERROR_SENTINEL:
             return
+
         value = values[0]
         self._attr_native_value = value / self._scale if self._scale else value
 
