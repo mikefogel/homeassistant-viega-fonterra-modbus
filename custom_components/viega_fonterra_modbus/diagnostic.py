@@ -2,17 +2,26 @@
 
 from __future__ import annotations
 
+import logging
+
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
 from .device import build_device_info
-from .registers import BASE_UNIT_REGISTERS, describe_error_code
+from .registers import (
+    BASE_UNIT_REGISTERS,
+    describe_error_code,
+    resolve_room_number,
+    room_registers,
+)
 from .modbus_handler import ViegaModbusClient
 from .polling import PollingGate
 
 DEFAULT_STATUS = "error: sensor invalid"
+
+_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
@@ -29,10 +38,28 @@ async def async_setup_entry(
             entry.entry_id,
             f"{room_config.get('name', room_id) if isinstance(room_config, dict) else room_id} diagnostic",
             room_id=room_id,
+            address=_room_error_address(room_id, room_config),
         )
         for room_id, room_config in rooms.items()
     ]
     async_add_entities(entities)
+
+
+def _room_error_address(room_id: str, room_config: object) -> int:
+    """Return the room's own error-code register, not the shared base-unit one.
+
+    Each room has its own error/warning register (manual 30051/30053/...,
+    codes 21/22/24 - thermostat connectivity/battery). Falling back to the
+    shared base-unit error register (as this entity previously always did)
+    made every room's diagnostic text identical regardless of that room's
+    actual state.
+    """
+    room_number = resolve_room_number(
+        room_id, room_config if isinstance(room_config, dict) else {}
+    )
+    if room_number:
+        return room_registers(room_number)["error_code"]
+    return BASE_UNIT_REGISTERS["error_code"]
 
 
 class ViegaDiagnosticTextEntity(SensorEntity):
@@ -46,12 +73,13 @@ class ViegaDiagnosticTextEntity(SensorEntity):
         name: str,
         status: str = DEFAULT_STATUS,
         room_id: str | None = None,
+        address: int | None = None,
     ) -> None:
         self._entry_id = entry_id
         self.name = name
         self.status = status
         self._room_id = room_id
-        self._address = BASE_UNIT_REGISTERS["error_code"]
+        self._address = address if address is not None else BASE_UNIT_REGISTERS["error_code"]
         self._polling_gate = PollingGate()
         self._attr_unique_id = (
             f"{entry_id}_{room_id}_diagnostic" if entry_id is not None and room_id else
@@ -77,6 +105,11 @@ class ViegaDiagnosticTextEntity(SensorEntity):
             if values and values[0] != ViegaModbusClient.ERROR_SENTINEL:
                 self.status = describe_error_code(values[0])
                 self._attr_native_value = self.status
+                if _LOGGER.isEnabledFor(logging.DEBUG):
+                    _LOGGER.debug(
+                        "Diagnostic %s (room=%s, register PDU=%s): code=%s -> %r",
+                        self.name, self._room_id, self._address, values[0], self.status,
+                    )
         except Exception:
             return
 

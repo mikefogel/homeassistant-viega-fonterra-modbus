@@ -4,12 +4,16 @@ from __future__ import annotations
 
 DOMAIN = "viega_fonterra_modbus"
 DEFAULT_NAME = "Viega Fonterra Smart Control"
-DEFAULT_HOST = "192.168.8.20"
-DEFAULT_PORT = 1502
+DEFAULT_HOST = "192.168.0.188"
+DEFAULT_PORT = 502
 DEFAULT_POLLING_INTERVAL = 30  # seconds
 DEFAULT_MODBUS_TIMEOUT = 5  # seconds
 DEFAULT_MODBUS_DEBUG = False
 MIN_SCAN_INTERVAL = 5  # seconds; also the minimum accepted `polling_interval`
+# "diagnostic" is not a real Home Assistant platform/integration domain (unlike
+# sensor/binary_sensor/switch/climate/number) and must never be added here:
+# diagnostic.py's entities are created directly by sensor.py's
+# async_setup_entry instead of being forwarded as their own platform.
 PLATFORMS = ["sensor", "binary_sensor", "switch", "climate", "number"]
 
 CONF_DEVICE_NAME = "device_name"

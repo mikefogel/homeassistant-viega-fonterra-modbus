@@ -12,6 +12,7 @@ from custom_components.viega_fonterra_modbus.sensor import (
     ViegaBaseUnitIdentitySensor,
     ViegaRegisterSensor,
     _extra_actor_sensors,
+    async_setup_entry,
 )
 
 
@@ -48,13 +49,13 @@ def test_text_field_decodes_little_endian_ascii_and_strips_padding():
 
 def test_error_code_sensor_stores_raw_code_and_unknown_description():
     sensor = _identity_sensor(
-        "base_unit_error_code", 23, 1, False, _FakeInputClient([7])
+        "base_unit_error_code", 24, 1, False, _FakeInputClient([99])
     )
 
     asyncio.run(sensor.async_update())
 
-    assert sensor._attr_native_value == 7
-    assert sensor._attr_extra_state_attributes == {"description": "Unknown error (code 7)"}
+    assert sensor._attr_native_value == 99
+    assert sensor._attr_extra_state_attributes == {"description": "Unknown error (code 99)"}
 
 
 def test_error_code_sensor_reports_no_error_for_zero():
@@ -179,3 +180,22 @@ def test_register_sensor_device_info_uses_the_configured_device_name():
     )
 
     assert sensor.device_info["name"] == "Heizung Wohnzimmer"
+
+
+def test_setup_entry_does_not_create_the_placeholder_register_definitions_sensors():
+    """REGISTER_DEFINITIONS (temperature_flow/return/room, system_pressure,
+    pump_state at addresses 1000-1020) are spec.md 9 illustrative
+    placeholders, not real Viega registers - the actual device map
+    (confirmed against `Fonterra Smart Control-de-DE.pdf`) only spans
+    roughly PDU 0-285. They must not be instantiated as live entities that
+    read undefined registers on real hardware."""
+    hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"rooms": {}, "identity": {}}}})
+    entry = SimpleNamespace(entry_id="entry_1")
+    added: list = []
+
+    asyncio.run(async_setup_entry(hass, entry, added.extend))
+
+    sensor_keys = {getattr(entity, "_sensor_key", None) for entity in added}
+    assert sensor_keys.isdisjoint(
+        {"temperature_flow", "temperature_return", "temperature_room", "system_pressure", "pump_state"}
+    )

@@ -15,19 +15,25 @@ def decode_text_registers(values: list[int] | tuple[int, ...]) -> str:
     raw = b"".join((int(value) & 0xFFFF).to_bytes(2, "little") for value in values)
     return raw.decode("ascii", errors="replace").rstrip("\x00 ")
 
-HOLDING_REGISTER_BASE = 40001
-INPUT_REGISTER_BASE = 30001
+HOLDING_REGISTER_BASE = 40000
+INPUT_REGISTER_BASE = 30000
 
 
 def pdu_address(manual_address: int) -> int:
     """Convert a one-based Modicon-style manual address to a Modbus PDU address.
 
-    Holding registers (4xxxx) are zero-based relative to 40001 and input
-    registers (3xxxx) are zero-based relative to 30001, per the device
-    manual's addressing convention (see spec.md 5b). Subtracting a flat `1`
-    from the full five-digit address (the previous behavior of this
-    function) produced PDU addresses tens of thousands too high and must
-    not be reintroduced.
+    Holding registers (4xxxx) are relative to 40000 and input registers
+    (3xxxx) are relative to 30000. This is confirmed by the device manual's
+    own worked wire examples (`Fonterra Smart Control-de-DE.pdf`, pages
+    94-95): manual address 40001 ("Betriebsmodus") is sent on the wire as
+    PDU `0001`, manual 40053 as PDU `0035` (53 decimal), and manual 30250
+    ("Aktor 1 Stellung") as PDU `00FA` (250 decimal) - i.e. the last four
+    digits of the manual address *are* the PDU address, with no further `-1`.
+    A previous version of this function subtracted 40001/30001 (the more
+    common Modicon convention of treating x0001 as PDU 0), which matched
+    neither the manual's own examples nor real hardware and made every
+    register in this module off by exactly one from the device's actual
+    map - do not reintroduce that offset.
     """
     if 40001 <= manual_address <= 49999:
         return manual_address - HOLDING_REGISTER_BASE
@@ -64,7 +70,15 @@ def room_registers(room_number: int) -> dict[str, int]:
 
 
 def actor_registers(actor_number: int) -> dict[str, int]:
-    """Return the manual input-register addresses for an actuator (1 through 12)."""
+    """Return the manual input-register addresses for an actuator (1 through 12).
+
+    `room_id` (manual base+2) is documented in the device manual as "Aktor N
+    Raum ID", an int16 in range 1-12 reporting which room this actuator is
+    currently assigned to. This is the device's own source of truth for
+    actor-to-room association and is used by `RoomMappingDiscovery` to build
+    the room mapping automatically instead of relying only on manually
+    entered configuration.
+    """
     if not 1 <= actor_number <= 12:
         raise ValueError("actor_number must be between 1 and 12")
     base = 30250 + (actor_number - 1) * 3
@@ -73,6 +87,19 @@ def actor_registers(actor_number: int) -> dict[str, int]:
         "return_temperature": pdu_address(base + 1),
         "room_id": pdu_address(base + 2),
     }
+
+
+def room_name_register(room_number: int) -> tuple[int, int]:
+    """Return `(address, length)` for a room's name text register.
+
+    Manual addresses 30074/30086/.../30206 hold each room's 24-character
+    name as 12 string registers (device manual page 90), spaced 12 registers
+    apart to match the 24-character/12-register field width.
+    """
+    if not 1 <= room_number <= 12:
+        raise ValueError("room_number must be between 1 and 12")
+    base = 30074 + (room_number - 1) * 12
+    return pdu_address(base), 12
 
 
 _TRAILING_DIGITS = re.compile(r"(\d+)$")
@@ -94,11 +121,23 @@ def resolve_room_number(room_id: str, room_config: dict[str, object]) -> int:
     return int(match.group(1)) if match else 0
 
 
-# Known base-unit error codes. `0` is the documented no-error value (see
-# spec.md 3a); additional codes should be added here as they are confirmed
-# against the device manual rather than guessed.
+# Base-unit and room error/warning codes from the device manual's
+# "Fehlercodes" table (`Fonterra Smart Control-de-DE.pdf`, page 94). Codes
+# 3-10 are reported on the base-unit error register (manual 30024); codes
+# 21/22/24 are reported per-room (manual 30051/30053/.../30073). `0` is
+# shared and means no error on either register.
 BASE_UNIT_ERROR_CODES: dict[int, str] = {
     0: "No error",
+    3: "Base unit: at least one room thermostat is no longer connected",
+    4: "Base unit: fault on the actuator bus",
+    5: "Base unit: fault at the flow-temperature sensor",
+    6: "Base unit: fault at the return-temperature sensor",
+    7: "Base unit: no further room thermostats can be registered",
+    9: "Base unit: replace the backup battery",
+    10: "Base unit warning: risk of condensation - flow temperature too low",
+    21: "Room: no connection to the room thermostat",
+    22: "Room warning: room thermostat battery is weak",
+    24: "Room warning: connection to the room thermostat is weak",
 }
 
 

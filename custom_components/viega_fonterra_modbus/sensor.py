@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 
 from homeassistant.components.sensor import SensorEntity
@@ -11,19 +12,19 @@ from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN, MIN_SCAN_INTERVAL
 from .device import build_device_info
-from .diagnostic import ViegaDiagnosticTextEntity
+from .diagnostic import ViegaDiagnosticTextEntity, _room_error_address
 from .modbus_handler import ViegaModbusClient
 from .polling import PollingGate
 from .registers import (
     BASE_UNIT_REGISTERS,
-    REGISTER_DEFINITIONS,
     actor_registers,
     describe_error_code,
-    resolve_room_number,
     decode_text_registers,
 )
 
 SCAN_INTERVAL = timedelta(seconds=MIN_SCAN_INTERVAL)
+
+_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
@@ -31,19 +32,19 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities,
 ) -> None:
-    """Set up the sensor entities from a config entry."""
+    """Set up the sensor entities from a config entry.
 
-    # First, set up regular sensors (existing logic)
-    entities = [
-        ViegaRegisterSensor(
-            entry,
-            sensor_key,
-            details["name"],
-            details["unit"],
-            details["address"],
-        )
-        for sensor_key, details in REGISTER_DEFINITIONS.items()
-    ]
+    Does *not* instantiate `REGISTER_DEFINITIONS` (temperature_flow/return/
+    room, system_pressure, pump_state) as live entities: those addresses
+    (1000/1001/1002/1010/1020) are illustrative placeholders from spec.md 9's
+    initial/example register schema, not real Viega registers - the actual
+    device map (confirmed against `Fonterra Smart Control-de-DE.pdf`) only
+    spans roughly PDU 0-285. Creating entities at those addresses against
+    real hardware reads undefined registers, producing wrong or unavailable
+    values. `ViegaRegisterSensor`/`REGISTER_DEFINITIONS` remain available for
+    genuinely mapped registers to be added later.
+    """
+    entities: list[SensorEntity] = []
 
     rooms = hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get("rooms", {})
     identity = hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get("identity", {})
@@ -84,17 +85,22 @@ async def async_setup_entry(
 
     entities.extend(_extra_actor_sensors(entry, rooms))
 
-    # NEW: Add diagnostic text entities
-    rooms = hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get("rooms", {})
     entities.extend(
         ViegaDiagnosticTextEntity(
             entry.entry_id,
             f"{room_config.get('name', room_id)} diagnostic",
             room_id=room_id,
+            address=_room_error_address(room_id, room_config),
         )
         for room_id, room_config in rooms.items()
+        if isinstance(room_config, dict)
     )
 
+    if _LOGGER.isEnabledFor(logging.DEBUG):
+        _LOGGER.debug(
+            "Entry %s: sensor platform created %d entities: %s",
+            entry.entry_id, len(entities), [e.unique_id for e in entities if hasattr(e, "unique_id")],
+        )
     async_add_entities(entities)
 
 

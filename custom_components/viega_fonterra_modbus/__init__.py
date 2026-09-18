@@ -12,7 +12,13 @@ from .const import CONF_MODBUS_DEBUG, DOMAIN, PLATFORMS
 from .modbus_handler import ModbusClientError, ViegaModbusClient
 from .polling import SharedPolling
 from .room_mapping import RoomMappingDiscovery
-from .registers import BASE_UNIT_REGISTERS, decode_text_registers
+from .registers import (
+    BASE_UNIT_REGISTERS,
+    actor_registers,
+    decode_text_registers,
+    resolve_room_number,
+    room_registers,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -34,22 +40,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ) from err
 
     # Discovery is deliberately completed before forwarding platforms: entity
-    # constructors must only see the persisted, resolved topology.
+    # constructors must only see the persisted, resolved topology. Rooms are
+    # (re)discovered from the device's own actor "Raum ID" and room-name
+    # registers (manual pages 90-91) on every setup, since that reflects the
+    # actual installed topology; the manually configured/options-flow rooms
+    # are used only as a fallback when the device can't be read (e.g. some
+    # actuators unreachable this cycle).
     rooms = entry.options.get("rooms", {})
-    discover = (
-        getattr(client, "discover", None)
-        or getattr(client, "discover_rooms", None)
-        or getattr(client, "read_discovery", None)
-        or getattr(client, "read_device_configuration", None)
-    )
-    if discover is not None:
-        try:
-            payload = await discover()
-            discovered = RoomMappingDiscovery.discover(payload)
-            if discovered:
-                rooms = discovered
-        except Exception:
-            _LOGGER.debug("Initial room discovery failed", exc_info=True)
+    try:
+        discovered = await RoomMappingDiscovery.discover_from_device(client)
+    except Exception:
+        discovered = {}
+        _LOGGER.debug("Automatic room discovery failed", exc_info=True)
+    if discovered:
+        rooms = discovered
+    elif not rooms:
+        _LOGGER.warning(
+            "Viega Fonterra entry %s: no rooms discovered from the device and "
+            "none configured manually; no room, climate, switch, or number "
+            "entities will be created until at least one actuator reports a "
+            "valid room ID or a room mapping is entered in the options flow",
+            entry.entry_id,
+        )
     identity: dict[str, object] = {}
     for key, count in (("wlan_serial_number", 5), ("base_unit_serial_number", 5), ("base_unit_name", 12)):
         try:
@@ -81,9 +93,64 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry,
             options={**entry.options, "rooms": rooms, "_identity": identity},
         )
+    if _LOGGER.isEnabledFor(logging.DEBUG):
+        _log_resolved_topology(entry.entry_id, rooms, identity)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _LOGGER.debug("Set up Viega Fonterra entry %s", entry.entry_id)
     return True
+
+
+def _log_resolved_topology(
+    entry_id: str, rooms: dict[str, object], identity: dict[str, object]
+) -> None:
+    """Log which registers each room/actor decision was derived from.
+
+    This is the "what did the integration decide, and why" counterpart to
+    the raw TX/RX frame log in `modbus_handler.py`: it lets an installer
+    cross-check a room's name, its assigned actuator(s), and the exact
+    registers backing its entities against the physical installation and
+    the device manual, both gated by the same `logger.logs:
+    custom_components.viega_fonterra_modbus: debug` setting (see README).
+    """
+    _LOGGER.debug("Entry %s: resolved base-unit identity=%s", entry_id, identity)
+    if not rooms:
+        _LOGGER.debug("Entry %s: no rooms in the resolved topology", entry_id)
+        return
+    for room_id, room_config in rooms.items():
+        if not isinstance(room_config, dict):
+            _LOGGER.debug(
+                "Entry %s: room %s has a non-dict config=%r, skipped",
+                entry_id, room_id, room_config,
+            )
+            continue
+        room_number = resolve_room_number(room_id, room_config)
+        registers = room_registers(room_number) if room_number else {}
+        actor = room_config.get("actor")
+        actor_numbers = actor if isinstance(actor, list) else (
+            [actor] if actor is not None else []
+        )
+        actor_regs = {}
+        for actor_number in actor_numbers:
+            try:
+                actor_regs[actor_number] = actor_registers(int(actor_number))
+            except (TypeError, ValueError):
+                continue
+        _LOGGER.debug(
+            "Entry %s: room %s -> name=%r room_number=%s actor(s)=%s sensor=%s | "
+            "room registers (PDU) current_temperature=%s error_code=%s "
+            "power_level=%s target_temperature=%s | actor registers (PDU)=%s",
+            entry_id,
+            room_id,
+            room_config.get("name", room_id),
+            room_number,
+            actor,
+            room_config.get("sensor"),
+            registers.get("current_temperature"),
+            registers.get("error_code"),
+            registers.get("power_level"),
+            registers.get("target_temperature"),
+            actor_regs,
+        )
 
 
 async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
