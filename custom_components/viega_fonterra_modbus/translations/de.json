@@ -11,6 +11,7 @@
           "device_name": "Gerätename",
           "polling_interval": "Polling-Intervall (Sekunden)",
           "modbus_timeout": "Modbus-Timeout (Sekunden)",
+          "modbus_debug": "Modbus-Frame-Debug-Logging aktivieren",
           "rooms": "Raumzuordnung"
         }
       },
@@ -33,6 +34,7 @@
           "device_name": "Gerätename",
           "polling_interval": "Polling-Intervall (Sekunden)",
           "modbus_timeout": "Modbus-Timeout (Sekunden)",
+          "modbus_debug": "Modbus-Frame-Debug-Logging aktivieren",
           "room_target_register": "Solltemperatur-Holding-Register"
         }
       }

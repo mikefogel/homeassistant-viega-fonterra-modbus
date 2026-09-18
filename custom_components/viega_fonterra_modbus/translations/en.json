@@ -11,6 +11,7 @@
           "device_name": "Device name",
           "polling_interval": "Polling interval (seconds)",
           "modbus_timeout": "Modbus timeout (seconds)",
+          "modbus_debug": "Enable Modbus frame debug logging",
           "rooms": "Room mapping"
         },
         "errors": {
@@ -36,6 +37,7 @@
           "device_name": "Device name",
           "polling_interval": "Polling interval (seconds)",
           "modbus_timeout": "Modbus timeout (seconds)",
+          "modbus_debug": "Enable Modbus frame debug logging",
           "room_target_register": "Target-temperature holding register"
         },
         "errors": {

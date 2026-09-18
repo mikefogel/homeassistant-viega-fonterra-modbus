@@ -101,7 +101,19 @@ The Fonterra register map uses signed 16-bit input values. Temperatures are scal
 
 ## Modbus debug logging
 
-Frame logging is disabled by default. It can be enabled on the Modbus client for troubleshooting. Debug entries contain direction, host, port, frame length, transaction ID, unit ID, function code, and hexadecimal frame data. Do not enable verbose logging permanently on a busy installation.
+Frame logging is disabled by default. To see the raw communication between Home Assistant and the Fonterra base unit, two things must both be enabled:
+
+1. In the integration's setup dialog (or **Settings → Devices & services → Viega Fonterra → Configure**), turn on **Enable Modbus frame debug logging**.
+2. In `configuration.yaml`, set the logger for this integration's Modbus transport to `debug`, otherwise Home Assistant filters the messages out before they reach any log:
+
+   ```yaml
+   logger:
+     default: info
+     logs:
+       custom_components.viega_fonterra_modbus.modbus: debug
+   ```
+
+With both enabled, every transmitted (`TX`) and received (`RX`) frame appears in the Home Assistant log (or **Settings → System → Logs**) with direction, host, port, frame length, transaction ID, unit ID, function code, and the complete frame in hexadecimal. Do not leave this enabled permanently on a busy installation — it logs a line for every single register read/write.
 
 ## Troubleshooting
 

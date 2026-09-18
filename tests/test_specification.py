@@ -1,10 +1,19 @@
 """Specification-driven tests for the expanded Fonterra integration."""
 
+from custom_components.viega_fonterra_modbus.const import PLATFORMS
 from custom_components.viega_fonterra_modbus.device_registry import DeviceRegistry
 from custom_components.viega_fonterra_modbus.climate import ViegaRoomClimateEntity
 from custom_components.viega_fonterra_modbus.room_mapping import RoomMappingDiscovery
 from custom_components.viega_fonterra_modbus.switch import ViegaBasicSwitch
 from custom_components.viega_fonterra_modbus.thermostat import ViegaRoomThermostatEntity
+
+
+def test_diagnostic_platform_is_registered_and_forwarded():
+    """Regression test: a prior commit accidentally dropped "diagnostic" from
+    PLATFORMS (see git history of const.py), which silently turned every
+    room diagnostic entity defined in diagnostic.py into dead code - HA never
+    forwards config entry setup to a platform that isn't listed here."""
+    assert "diagnostic" in PLATFORMS
 
 
 def test_room_mapping_discovers_actor_and_sensor_pairs():
