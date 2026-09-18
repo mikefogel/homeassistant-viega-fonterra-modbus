@@ -24,24 +24,25 @@ class ViegaModbusClient:
     _transaction_counter = 0
 
     def __init__(
-        self, host: str, port: int = 1502, timeout: float = 5, debug: bool = False
+        self, host: str, port: int = 502, timeout: float = 5
     ) -> None:
         self.host = host
         self.port = port
         self.timeout = timeout
-        self.debug = debug
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
         self._connected = False
         self._lock = asyncio.Lock()
 
-    def set_debug(self, enabled: bool) -> None:
-        """Enable or disable frame-level debug logging."""
-        self.debug = enabled
-
     def _log_frame(self, direction: str, frame: bytes) -> None:
-        """Log a Modbus frame with decoded header fields at DEBUG level."""
-        if not self.debug:
+        """Log a Modbus frame with decoded header fields at DEBUG level.
+
+        Gated purely on the standard Home Assistant logger mechanism (see
+        README "Modbus debug logging") rather than a separate config-entry
+        toggle, so there is exactly one switch to enable frame logging and it
+        can never end up silently out of sync with the logger level.
+        """
+        if not _LOGGER.isEnabledFor(logging.DEBUG):
             return
         transaction_id = (
             int.from_bytes(frame[0:2], byteorder="big") if len(frame) >= 2 else None

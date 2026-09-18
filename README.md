@@ -25,10 +25,10 @@ This custom integration connects one or more Viega Fonterra Smart Control system
 - A Viega Fonterra Smart Control system with Modbus TCP enabled
 - Network access from Home Assistant to the WLAN module or base unit
 
-The Fonterra manual states that Modbus TCP must be enabled in the device software. The documented default endpoint for this integration is:
+The Fonterra manual states that Modbus TCP must be enabled in the device software. The device manual documents port `502` for a normal (DHCP) network connection; `192.168.1.1` is only used in point-to-point mode. This integration's default endpoint is:
 
-- Host: `192.168.8.20`
-- Port: `1502`
+- Host: `192.168.0.188`
+- Port: `502`
 
 Both values can be changed during setup or later through reconfiguration.
 
@@ -60,7 +60,11 @@ The setup form accepts:
 
 The integration validates the connection before creating the entry. To add another Fonterra module, repeat the setup flow. Each module receives its own connection, device, polling configuration, and entities.
 
-Example room mapping:
+### Automatic room discovery
+
+On every setup, the integration reads each actuator's own "room ID" register and each room's name register directly from the device (documented in the Viega manual) and builds the room mapping from that - which actuator serves which room, and that room's real name - instead of relying only on what you typed in. A successful live discovery **replaces** the room mapping below; the manually entered JSON is only used as a fallback for a cycle where the device can't be read (e.g. actuators temporarily unreachable). If a room looks wrong (missing, wrong name, actuator in the wrong room), see [Modbus debug logging](#modbus-debug-logging) below to see exactly what the integration read and decided.
+
+Example room mapping (used before the first successful discovery, or as a fallback):
 
 ```json
 {
@@ -101,13 +105,29 @@ The Fonterra register map uses signed 16-bit input values. Temperatures are scal
 
 ## Modbus debug logging
 
-Frame logging is disabled by default. It can be enabled on the Modbus client for troubleshooting. Debug entries contain direction, host, port, frame length, transaction ID, unit ID, function code, and hexadecimal frame data. Do not enable verbose logging permanently on a busy installation.
+Debug logging is disabled by default and controlled by a single switch: the standard Home Assistant `logger.logs` setting for this integration, in `configuration.yaml`:
+
+```yaml
+logger:
+  default: info
+  logs:
+    custom_components.viega_fonterra_modbus: debug
+```
+
+With this enabled, the log (or **Settings → System → Logs**) shows two kinds of information, both useful when a room or value looks wrong:
+
+- **Raw Modbus frames**: every transmitted (`TX`) and received (`RX`) frame, with direction, host, port, frame length, transaction ID, unit ID, function code, and the complete frame in hexadecimal.
+- **Resolved decisions**: on setup, which room each actuator was assigned to and which registers (target temperature, power level, flow/return temperature, actuator position, error code) were resolved for it; on every poll, the raw register values a room's Climate entity just read and what it decoded them into.
+
+This makes it possible to see, for a specific room, exactly which registers were read, what came back on the wire, and what the integration concluded from it - the fastest way to tell whether a wrong-looking entity is a device-side issue or a mapping issue in the integration. Do not leave this enabled permanently on a busy installation — it logs a line for every register read/write.
+
+To scope logging to only raw frames or only the base module (without entity-level decisions), use `custom_components.viega_fonterra_modbus.modbus` or `custom_components.viega_fonterra_modbus.__init__` instead of the parent logger above.
 
 ## Troubleshooting
 
 ### Connection failed
 
-Check that Modbus TCP is enabled in the Fonterra software and that Home Assistant can reach the configured host and port. The default endpoint is `192.168.8.20:1502`.
+Check that Modbus TCP is enabled in the Fonterra software and that Home Assistant can reach the configured host and port. The default endpoint is `192.168.0.188:502`.
 
 ### Values are unavailable
 

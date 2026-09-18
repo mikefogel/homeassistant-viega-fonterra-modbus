@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 
 from homeassistant.components.climate import ClimateEntity, ClimateEntityFeature
@@ -12,9 +13,11 @@ from homeassistant.core import HomeAssistant
 from .const import DOMAIN, MIN_SCAN_INTERVAL
 from .device import build_device_info
 from .polling import PollingGate
-from .registers import actor_registers, resolve_room_number, room_registers
+from .registers import BASE_UNIT_REGISTERS, actor_registers, resolve_room_number, room_registers
 
 SCAN_INTERVAL = timedelta(seconds=MIN_SCAN_INTERVAL)
+
+_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
@@ -84,7 +87,7 @@ class ViegaRoomClimateEntity(ClimateEntity):
                 "power_level_register", defaults.get("power_level")
             ),
             "flow_temperature": room_config.get(
-                "flow_temperature_register", 24
+                "flow_temperature_register", BASE_UNIT_REGISTERS["flow_temperature"]
             ),
             "return_temperature": room_config.get(
                 "return_temperature_register", actor.get("return_temperature")
@@ -92,9 +95,15 @@ class ViegaRoomClimateEntity(ClimateEntity):
             "actuator_position": room_config.get(
                 "actuator_position_register", actor.get("position")
             ),
-            "operating_mode": room_config.get("operating_mode_register", 0),
-            "profile_mode": room_config.get("profile_mode_register", 1),
-            "error_code": room_config.get("error_code_register", 23),
+            "operating_mode": room_config.get(
+                "operating_mode_register", BASE_UNIT_REGISTERS["operating_mode"]
+            ),
+            "profile_mode": room_config.get(
+                "profile_mode_register", BASE_UNIT_REGISTERS["profile_mode"]
+            ),
+            "error_code": room_config.get(
+                "error_code_register", BASE_UNIT_REGISTERS["error_code"]
+            ),
         }
         self.room_number = room_number or room_config.get("room_id", room_id)
         self._power_level: int | None = None
@@ -156,6 +165,11 @@ class ViegaRoomClimateEntity(ClimateEntity):
                 return
         client = self.hass.data[DOMAIN][self._entry_id]["client"]
         values = await self._read_values(client)
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug(
+                "Room %s (%s): raw register values=%s registers(PDU)=%s",
+                self.room_id, self._attr_name, values, self._registers,
+            )
         if values.get("current_temperature") is not None:
             self._attr_current_temperature = values["current_temperature"] / 10
         if values.get("target_temperature") is not None:

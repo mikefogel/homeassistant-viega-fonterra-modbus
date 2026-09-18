@@ -43,7 +43,7 @@ def test_power_level_number_resolves_register_from_room_id():
     """"room_1" resolves room_number=1, which has a real power_level register."""
     entity = ViegaPowerLevelNumber("entry_1", "room_1", {"name": "Wohnzimmer"})
 
-    assert entity.address == 49
+    assert entity.address == 50
 
 
 def test_power_level_number_setting_value_without_address_raises():
@@ -75,7 +75,7 @@ def test_power_level_number_writes_to_the_resolved_register():
 
     asyncio.run(entity.async_set_native_value(5))
 
-    assert client.writes == [(49, 5)]
+    assert client.writes == [(50, 5)]
 
 
 class _FakeInputClient:

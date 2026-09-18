@@ -1,10 +1,23 @@
 """Specification-driven tests for the expanded Fonterra integration."""
 
+from custom_components.viega_fonterra_modbus.const import PLATFORMS
 from custom_components.viega_fonterra_modbus.device_registry import DeviceRegistry
 from custom_components.viega_fonterra_modbus.climate import ViegaRoomClimateEntity
 from custom_components.viega_fonterra_modbus.room_mapping import RoomMappingDiscovery
 from custom_components.viega_fonterra_modbus.switch import ViegaBasicSwitch
 from custom_components.viega_fonterra_modbus.thermostat import ViegaRoomThermostatEntity
+
+
+def test_platforms_never_includes_the_non_existent_diagnostic_domain():
+    """Regression test: "diagnostic" was briefly re-added to PLATFORMS,
+    reversing a deliberate earlier fix (see spec.md 14, ""diagnostic" is not
+    a Home Assistant platform"). "diagnostic" is not a real HA
+    platform/integration domain like sensor/binary_sensor/switch/climate/
+    number, so `hass.config_entries.async_forward_entry_setups(entry,
+    PLATFORMS)` (__init__.py) cannot forward to it; diagnostic.py's entities
+    are created directly by sensor.py's async_setup_entry instead."""
+    assert "diagnostic" not in PLATFORMS
+    assert set(PLATFORMS) == {"sensor", "binary_sensor", "switch", "climate", "number"}
 
 
 def test_room_mapping_discovers_actor_and_sensor_pairs():

@@ -77,16 +77,21 @@ encoding is normative and must be covered by fixtures containing normal text
 and padding. The same decoder must be used consistently by
 `ViegaBaseUnitIdentitySensor` and all future text-register entities.
 
-### 3b. Base-unit error codes
+### 3b. Base-unit and room error codes
 
-The base-unit error code register (`error_code`, manual address `30024`) is
-`0` when the unit reports no error (see §3a); any other value is an active
-error. A code-to-description table (`BASE_UNIT_ERROR_CODES` in
-`registers.py`) maps known codes to human-readable text. Only `0` → "No
-error" is currently confirmed; every other code must render as
-`"Unknown error (code N)"` until it is added to the table with a
-manual-confirmed description. New codes must be appended to the table
-rather than guessed inline in the entity layer.
+The base-unit error code register (`error_code`, manual address `30024`) and
+each room's own error register (manual `30051`/`30053`/.../`30073`, one per
+room, §5b) are `0` when no error/warning is active (see §3a); any other value
+is active. A single code-to-description table (`BASE_UNIT_ERROR_CODES` in
+`registers.py`) maps known codes to human-readable text, since the two
+registers share one code space per the device manual's "Fehlercodes" table
+(page 94): codes `3`, `4`, `5`, `6`, `7`, `9`, `10` are base-unit-scoped
+faults/warnings, and codes `21`, `22`, `24` are room-scoped (thermostat
+connectivity/battery). A room's diagnostic text entity (§10) must read that
+room's own error register, not the shared base-unit one, so two different
+rooms' diagnostics do not always show identical text. Every code not in the
+table must render as `"Unknown error (code N)"`. New codes must be appended
+to the table rather than guessed inline in the entity layer.
 
 ## 4. Initial discovery requirement
 
@@ -111,6 +116,29 @@ surface is the room's Climate entity" in §5a. Every additional actor in the
 list must still be exposed, as linked position and return-temperature
 sensors carrying that actor's own registers — it must not be silently
 dropped.
+
+### 4a. Automatic discovery via the actuator Raum-ID register
+
+The device itself is the source of truth for the room mapping above; it must
+not be left to guesswork in a manually typed configuration field. Each of the
+up to 12 actuators reports its own current room assignment in a dedicated
+input register (manual `30252`/`30255`/.../`30285`, i.e. actuator base
+address `+2`, PDU per §5b): an `int16` in range `1`-`12` naming the room that
+actuator serves (device manual page 91, "Aktor N Raum ID"). Each room's
+display name is likewise stored on the device as a 24-character string
+register (manual `30074`/`30086`/.../`30206`, one set of 12 registers per
+room, spaced 12 registers apart — device manual page 90).
+
+On every `async_setup_entry`, after connecting, the integration must read all
+12 actuators' position/return-temperature/Raum-ID registers (one 3-register
+read per actuator) and every reporting actuator's room's name register, and
+build the room mapping from that — actor-to-room association and room names
+both come from the device, not from user input. A manually configured room
+mapping (§6b) is used only as a fallback when the device can't be read for a
+given setup cycle (e.g. actuators temporarily unreachable); it must not
+silently override a successful live discovery, since a manual mapping can
+drift from the physical installation (an actuator moved to a different room,
+a room renamed on the base unit) with nothing to catch the mismatch.
 
 ## 5. Room thermostat specification
 
@@ -275,17 +303,24 @@ guessed by the entity layer. The mapping may contain at least:
     addresses: room 1 uses holding registers `40050`/`40051` for power and target
     temperature, input registers `30050`/`30051` for room value and error, and
     actuator 1 uses input registers `30250`/`30251` for position and return
-    temperature. The base-unit operating and profile modes use holding registers
-    `40001` and `40002`.
+    temperature (plus `30252` for its Raum-ID register, §4a). The base-unit
+    operating and profile modes use holding registers `40001` and `40002`.
 
     The conversion from a manual (Modicon-style) address to a PDU address is:
-    `pdu = manual_address - 40001` for holding registers (`4xxxx`) and
-    `pdu = manual_address - 30001` for input registers (`3xxxx`) — each
-    register bank is zero-based on its own `x0001` origin. Subtracting a flat
-    `1` from the full five-digit manual address instead of the correct
-    per-bank origin produces PDU addresses that are off by roughly 30000-40000
-    and must never be used; every address in this section and in
-    `registers.py` must satisfy this formula.
+    `pdu = manual_address - 40000` for holding registers (`4xxxx`) and
+    `pdu = manual_address - 30000` for input registers (`3xxxx`) — i.e. the
+    last four digits of the manual address *are* the PDU address, unchanged.
+    This is confirmed by the device manual's own worked wire examples
+    (`Fonterra Smart Control-de-DE.pdf`, "Beispiele", pages 94-95): manual
+    `40001` is sent on the wire as PDU `0001`, manual `40053` as PDU `0035`
+    (53), and manual `30250` as PDU `00FA` (250). A formula that instead
+    treats `x0001` as PDU `0` (`pdu = manual_address - 40001` /
+    `manual_address - 30001`, the more common Modicon convention, and the
+    formula this document previously specified — see §14 "PDU address
+    offset, take two") does not match the manual's examples or real hardware
+    and makes every register in `registers.py` off by exactly one from the
+    device's actual map; it must never be reintroduced. Every address in this
+    section and in `registers.py` must satisfy the `-40000`/`-30000` formula.
 
     A room mapping without an explicit `room_number` resolves it from the
     trailing digits of its `room_id` (e.g. `"room_1"` → `1`), so the minimal
@@ -329,8 +364,10 @@ editing YAML or JSON files manually.
 The setup form for each Viega module must provide these fields:
 
 - `host`: IP address or DNS hostname of the Modbus TCP device, default
-    `192.168.8.20`
-- `port`: Modbus TCP port, default `1502`
+    `192.168.0.188`
+- `port`: Modbus TCP port, default `502` (per the device manual: port `502`
+    for a normal/DHCP network connection; `192.168.1.1` is only used in
+    point-to-point mode)
 - `device_name`: editable display name for the module
 - `polling_interval`: polling interval in seconds
 - `modbus_timeout`: Modbus response timeout in seconds
@@ -384,8 +421,8 @@ Removal must:
 
 When setting up a Viega Fonterra device, the user must configure:
 
-- `host`: IP address of the Modbus TCP device (default `192.168.8.20`)
-- `port`: Modbus TCP port (default `1502`)
+- `host`: IP address of the Modbus TCP device (default `192.168.0.188`)
+- `port`: Modbus TCP port (default `502`)
 - `device_name`: Human-readable name for the device (e.g., "Heizung Wohnzimmer")
 - `polling_interval`: How often to update sensor values, in seconds (default 30, minimum 5)
 - `modbus_timeout`: Maximum time to wait for a Modbus response, in seconds (default 5, minimum 1)
@@ -433,13 +470,24 @@ The project must support a minimal switch entity for basic actuator control, wit
 
 ## 9. Register mapping
 
-The register map is a flexible, modular schema. The initial set must include:
+The register map is a flexible, modular schema. `REGISTER_DEFINITIONS` in
+`registers.py` illustrates the schema's shape with a placeholder example set:
 
 - temperature_flow: address 1000, unit °C
 - temperature_return: address 1001, unit °C
 - temperature_room: address 1002, unit °C
 - system_pressure: address 1010, unit bar
 - pump_state: address 1020, unit None
+
+These addresses are illustrative only, not confirmed Viega register
+addresses — the real device map (§3a-§5b, confirmed against `Fonterra Smart
+Control-de-DE.pdf`) only spans roughly PDU 0-285, nowhere near 1000. The
+sensor platform must not instantiate `REGISTER_DEFINITIONS` as live entities
+against real hardware (see §14, "Automatic discovery was never wired to
+anything real" — the same "placeholder treated as real" mistake applies
+here); it remains available as a mechanism for genuinely mapped registers to
+be added to later, each with its real address confirmed against the manual
+or logged frame data first.
 
 ## 9a. int16 read compatibility
 
@@ -684,16 +732,39 @@ are confirmed on the remote, using a configured SSH key or authenticated HTTPS.
 ### PDU address offset
 
 `registers.py::pdu_address` subtracted a flat `1` from the full five-digit
-manual address (e.g. `40001 - 1 = 40000`) instead of the correct per-bank
-origin (`40001` for holding registers, `30001` for input registers), so
+manual address (e.g. `40001 - 1 = 40000`) instead of a per-bank origin, so
 `BASE_UNIT_REGISTERS`, `room_registers()`, and `actor_registers()` all
-produced PDU addresses roughly 30000-40000 too high — while other code paths
-(`climate.py`'s hard-coded fallbacks for `flow_temperature`/`error_code`/
-`operating_mode`/`profile_mode`) already used the correct values, so the two
-never agreed. No test exercised these functions, only `REGISTER_DEFINITIONS`.
-Any change to register-address arithmetic must be covered by a test that
-checks the resulting PDU address against the worked example in §5b, not just
-against the module's own formula.
+produced PDU addresses roughly 30000-40000 too high. No test exercised these
+functions, only `REGISTER_DEFINITIONS`. Any change to register-address
+arithmetic must be covered by a test that checks the resulting PDU address
+against a worked example, not just against the module's own formula.
+
+### PDU address offset, take two
+
+The fix above replaced the flat `-1` with `manual_address - 40001` (holding)
+/ `manual_address - 30001` (input) — the common Modicon convention that
+treats `x0001` as PDU `0` — and a new test (`test_pdu_address_uses_the_
+correct_bank_origin`) plus a §5b "worked example" were written to match that
+formula. Both the test and the spec text were themselves wrong: they were
+never checked against the device manual's own worked wire examples
+(`Fonterra Smart Control-de-DE.pdf`, "Beispiele", pages 94-95), which show
+manual `40001` on the wire as PDU `0001` (not `0000`) and manual `30250` as
+PDU `00FA`/250 (not `249`) — i.e. the correct formula is `manual_address -
+40000` / `manual_address - 30000`, with no `-1` at all. Because
+`climate.py`'s hard-coded fallback registers (`flow_temperature=24`,
+`error_code=23`, `operating_mode=0`, `profile_mode=1`) had been updated to
+match the same wrong formula, every code path agreed with every other code
+path while still being off by exactly one register from the real device —
+internal self-consistency and passing tests gave no signal that the
+addresses were wrong. This is why every register read/write against real
+hardware landed one register away from the intended one (§14 "Session
+lessons" exists precisely so this class of error is written down): a test
+asserting a formula's own arithmetic, or a spec worked example authored from
+that same formula, cannot catch the formula itself being wrong. Register
+arithmetic must be verified against the vendor's own documented protocol
+bytes (a full request/response frame from the manual, decoded field by
+field), not only against a written-down "worked example" that could itself
+have been transcribed from the same incorrect assumption.
 
 ### Ambiguous constructor overloads
 
@@ -705,3 +776,46 @@ test only ever exercised the 2-argument form directly — so the bug was
 invisible in CI. An entity's constructor must have a single, unambiguous
 signature (default values instead of argument-count branching), and any test
 covering it must call it the same way `async_setup_entry` does.
+
+### "diagnostic" is not a Home Assistant platform
+
+A later commit moved diagnostic-entity creation out of a separate
+`diagnostic` platform and into `sensor.py`'s `async_setup_entry`, removing
+`"diagnostic"` from `PLATFORMS` (§9) because Home Assistant's
+`async_forward_entry_setups`/`async_unload_platforms` resolve every entry in
+`PLATFORMS` to a real core integration domain, and no `homeassistant.
+components.diagnostic` domain exists. A subsequent, unrelated change re-added
+`"diagnostic"` to `PLATFORMS`, misreading the earlier removal as accidental
+(it was not — see git history of `const.py`) and adding a regression test
+that only asserted string membership in the list, never that forwarding to
+it actually works. `"diagnostic"` must never be added to `PLATFORMS`; a
+change to that list must be checked against what each entry's
+`async_setup_entry`/`async_unload_entry` actually does, not just against
+whichever behavior the most recent commit happened to leave behind.
+
+### A working debug switch is one switch
+
+Frame-level debug logging (§11a) was briefly implemented as two independent
+gates: a `modbus_debug` config-entry option (an instance flag on the client)
+*and* Home Assistant's own logger level, both of which had to be enabled for
+a frame to actually be logged, with no code keeping them in sync. This is
+strictly worse than gating solely on `_LOGGER.isEnabledFor(logging.DEBUG)`
+(the standard Home Assistant pattern): it adds a second place to look when
+"I turned on debug logging and see nothing" is reported, for no additional
+capability. A debug/diagnostic toggle must have exactly one control surface.
+
+### Automatic discovery was never wired to anything real
+
+`__init__.py`'s `async_setup_entry` probed for a `discover`/`discover_rooms`/
+`read_discovery`/`read_device_configuration` method on `ViegaModbusClient`
+via `getattr(..., None)` before ever implementing any of them, so the
+probe always resolved to `None` and the "automatic room discovery"
+code path documented in §4/§12a silently never ran on any installation —
+every room mapping came from whatever was typed into the setup or options
+flow's JSON/UI fields, with nothing to verify it against the physical
+topology, and no log line indicating discovery wasn't happening. §4a now
+documents the device's own actuator Raum-ID and room-name registers, which
+make real discovery possible; a "best effort, silently falls back" pattern
+like the old `getattr` chain must not be reintroduced for a capability the
+client does not actually implement — either implement it, or don't claim to
+attempt it.

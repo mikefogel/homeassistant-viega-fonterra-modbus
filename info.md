@@ -7,10 +7,11 @@ This custom integration connects Home Assistant to one or more Viega Fonterra Sm
 ### Features
 
 - **Multi-device support**: Configure and manage multiple Viega Fonterra devices independently
+- **Automatic room discovery**: Actor-to-room association and room names read directly from the device's own registers, not just from manual configuration
 - **Room thermostats**: Climate entities per room with configurable target and current temperature
 - **Writable thermostat controls**: Target temperature, operating mode, and profile mode through holding registers
 - **Power-level control**: Room actuator power level as a Number entity
-- **Sensor monitoring**: Room, flow, actuator return, actuator position, system pressure, and pump values
+- **Sensor monitoring**: Room, flow, actuator return, and actuator position values
 - **Device diagnostics**: WLAN module serial number, base-unit serial number and name, and base-unit error code
 - **Simple actuators**: Switch entities for basic on/off control
 - **Diagnostic entities**: Textual error states for failed unit values and communication issues
@@ -27,7 +28,7 @@ This custom integration connects Home Assistant to one or more Viega Fonterra Sm
 2. Restart Home Assistant
 3. Add the integration: `Settings > Devices & Services > + Add Integration > Viega Fonterra Smart Control`
 4. Follow the config flow:
-  - Enter device IP or hostname and port (defaults: `192.168.8.20`, `502`)
+  - Enter device IP or hostname and port (defaults: `192.168.0.188`, `502`)
    - Set device name, polling interval, and Modbus timeout
   - Optionally configure rooms with names, room numbers, and actor/sensor mappings
 

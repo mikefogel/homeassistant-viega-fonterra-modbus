@@ -182,7 +182,7 @@ def test_transaction_id_is_checked_on_response():
 
 def test_frame_debug_logging_includes_protocol_metadata(caplog):
     """Debug logging must expose enough metadata to trace a frame exchange."""
-    client = ViegaModbusClient("192.168.8.20", 1502, debug=True)
+    client = ViegaModbusClient("192.168.8.20", 502)
     frame = b"\x00\x01\x00\x00\x00\x06\x01\x03\x00\x00\x00\x01"
 
     with caplog.at_level(
@@ -250,11 +250,18 @@ def test_concurrent_reads_are_serialized_on_shared_connection():
 
 
 def test_frame_debug_logging_is_disabled_by_default(caplog):
-    """No frame log should be emitted unless debug logging is enabled."""
-    client = ViegaModbusClient("192.168.8.20", 1502)
+    """No frame log should be emitted unless the Modbus logger is at DEBUG.
+
+    Frame logging (spec.md 11a) is gated purely on Home Assistant's standard
+    `logger.logs` mechanism (`_LOGGER.isEnabledFor(logging.DEBUG)`) - there
+    is no separate per-client flag to keep in sync (see spec.md 14, "A
+    working debug switch is one switch"). Without raising the logger's level,
+    `isEnabledFor(DEBUG)` is false and nothing is logged.
+    """
+    client = ViegaModbusClient("192.168.8.20", 502)
 
     with caplog.at_level(
-        logging.DEBUG,
+        logging.WARNING,
         logger="custom_components.viega_fonterra_modbus.modbus",
     ):
         client._log_frame("TX", b"\x00\x01")
@@ -265,7 +272,7 @@ def test_frame_debug_logging_is_disabled_by_default(caplog):
 def test_frame_logging_is_safe_for_a_malformed_or_truncated_frame(caplog):
     """spec.md 11a: a malformed/truncated frame must still be safe to log
     and must not cause a secondary logging exception."""
-    client = ViegaModbusClient("192.168.8.20", 1502, debug=True)
+    client = ViegaModbusClient("192.168.8.20", 502)
 
     with caplog.at_level(
         logging.DEBUG,
@@ -278,18 +285,20 @@ def test_frame_logging_is_safe_for_a_malformed_or_truncated_frame(caplog):
     assert len(caplog.records) == 3
 
 
-def test_set_debug_toggles_frame_logging(caplog):
-    client = ViegaModbusClient("192.168.8.20", 1502)
+def test_frame_logging_follows_the_logger_level_directly(caplog):
+    """Raising the Modbus logger to DEBUG is the only thing needed to turn
+    frame logging on, and dropping back below DEBUG turns it back off - one
+    control surface, not a separate per-client toggle."""
+    client = ViegaModbusClient("192.168.8.20", 502)
+    frame = b"\x00\x01\x00\x00\x00\x06\x01\x03\x00\x00\x00\x01"
+    logger_name = "custom_components.viega_fonterra_modbus.modbus"
 
-    with caplog.at_level(
-        logging.DEBUG,
-        logger="custom_components.viega_fonterra_modbus.modbus",
-    ):
-        client._log_frame("TX", b"\x00\x01\x00\x00\x00\x06\x01\x03\x00\x00\x00\x01")
+    with caplog.at_level(logging.WARNING, logger=logger_name):
+        client._log_frame("TX", frame)
         assert not caplog.records
 
-        client.set_debug(True)
-        client._log_frame("TX", b"\x00\x01\x00\x00\x00\x06\x01\x03\x00\x00\x00\x01")
+    with caplog.at_level(logging.DEBUG, logger=logger_name):
+        client._log_frame("TX", frame)
         assert len(caplog.records) == 1
 
 
