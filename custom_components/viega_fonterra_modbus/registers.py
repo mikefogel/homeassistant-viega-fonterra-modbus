@@ -11,8 +11,14 @@ import re
 
 
 def decode_text_registers(values: list[int] | tuple[int, ...]) -> str:
-    """Decode Viega text registers using little-endian bytes per register."""
-    raw = b"".join((int(value) & 0xFFFF).to_bytes(2, "little") for value in values)
+    """Decode Viega text registers using big-endian bytes per register.
+
+    Confirmed against real hardware: decoding with "little" (a previous
+    version of this function) scrambled every string by swapping the two
+    ASCII characters within each register - e.g. "Bad" came back as "aBd"
+    and "Dachgeschoss" as "aDhcegcsohss". Do not reintroduce "little" here.
+    """
+    raw = b"".join((int(value) & 0xFFFF).to_bytes(2, "big") for value in values)
     return raw.decode("ascii", errors="replace").rstrip("\x00 ")
 
 HOLDING_REGISTER_BASE = 40000

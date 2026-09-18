@@ -4,7 +4,7 @@ import asyncio
 from types import SimpleNamespace
 
 from custom_components.viega_fonterra_modbus import async_setup_entry, async_unload_entry
-from custom_components.viega_fonterra_modbus.const import CONF_MODBUS_DEBUG, DOMAIN
+from custom_components.viega_fonterra_modbus.const import DOMAIN
 from custom_components.viega_fonterra_modbus.modbus_handler import ViegaModbusClient
 
 
@@ -92,33 +92,14 @@ def test_unload_disconnects_a_healthy_client():
     assert client.disconnected is True
 
 
-def test_setup_entry_enables_client_debug_logging_when_configured(monkeypatch):
-    """The modbus_debug option must actually reach the client, otherwise
-    users have no way to turn on the TX/RX frame logging documented in the
-    README - the client's set_debug()/debug flag was previously dead code
-    outside of unit tests."""
+def test_setup_entry_does_not_call_a_removed_client_debug_toggle(monkeypatch):
+    """spec.md "A working debug switch is one switch": frame-level debug
+    logging is gated solely on `_LOGGER.isEnabledFor(logging.DEBUG)` inside
+    `ViegaModbusClient._log_frame`, and `ViegaModbusClient` has no
+    `set_debug`/`debug` attribute. `async_setup_entry` must not call a
+    `set_debug()` method that no longer exists - it previously did, which
+    made every setup raise `AttributeError` and crash the whole entry."""
 
-    async def fake_connect(self):
-        self._connected = True
-
-    async def fake_read_input_registers(self, address, count=1):
-        return []
-
-    monkeypatch.setattr(ViegaModbusClient, "connect", fake_connect)
-    monkeypatch.setattr(ViegaModbusClient, "read_input_registers", fake_read_input_registers)
-
-    entry = _make_entry(
-        {"host": "192.168.8.20", "port": 1502, CONF_MODBUS_DEBUG: True}
-    )
-    hass = SimpleNamespace(data={}, config_entries=_FakeConfigEntriesForSetup())
-
-    asyncio.run(async_setup_entry(hass, entry))
-
-    client = hass.data[DOMAIN]["entry_1"]["client"]
-    assert client.debug is True
-
-
-def test_setup_entry_leaves_client_debug_logging_disabled_by_default(monkeypatch):
     async def fake_connect(self):
         self._connected = True
 
@@ -131,7 +112,9 @@ def test_setup_entry_leaves_client_debug_logging_disabled_by_default(monkeypatch
     entry = _make_entry({"host": "192.168.8.20", "port": 1502})
     hass = SimpleNamespace(data={}, config_entries=_FakeConfigEntriesForSetup())
 
-    asyncio.run(async_setup_entry(hass, entry))
+    result = asyncio.run(async_setup_entry(hass, entry))
 
+    assert result is True
     client = hass.data[DOMAIN]["entry_1"]["client"]
-    assert client.debug is False
+    assert not hasattr(client, "set_debug")
+    assert not hasattr(client, "debug")

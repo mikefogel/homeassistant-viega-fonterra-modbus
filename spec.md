@@ -71,11 +71,15 @@ The register map must define the address, encoding, and length for each serial
 number and text field. Serial numbers and names may span multiple registers.
 
 Text fields (serial numbers, base-unit name) are decoded as two ASCII
-characters per register using the Viega-documented Little-Endian byte order
-within each register, with trailing NUL and space characters stripped. This
-encoding is normative and must be covered by fixtures containing normal text
-and padding. The same decoder must be used consistently by
-`ViegaBaseUnitIdentitySensor` and all future text-register entities.
+characters per register using Big-Endian byte order within each register,
+with trailing NUL and space characters stripped. This encoding is confirmed
+against real hardware: decoding with the previously documented
+Little-Endian order scrambled every string by swapping the two characters
+within each register (e.g. "Bad" came back as "aBd" and "Dachgeschoss" as
+"aDhcegcsohss"). This encoding is normative and must be covered by fixtures
+containing normal text and padding. The same decoder must be used
+consistently by `ViegaBaseUnitIdentitySensor` and all future text-register
+entities.
 
 ### 3b. Base-unit and room error codes
 
@@ -643,10 +647,11 @@ Modbus mode.
 
 ### Text-register encoding
 
-All Viega string registers must use the documented Little-Endian byte order
-within each 16-bit register. Tests must include serial numbers and names with
-padding and verify that trailing NUL and space characters are removed. The
-decoder must be shared by all text-register entities.
+All Viega string registers must use Big-Endian byte order within each 16-bit
+register (confirmed against real hardware; Little-Endian was tried first and
+scrambled every decoded string - see §3a). Tests must include serial numbers
+and names with padding and verify that trailing NUL and space characters are
+removed. The decoder must be shared by all text-register entities.
 
 ## 13. Acceptance criteria
 

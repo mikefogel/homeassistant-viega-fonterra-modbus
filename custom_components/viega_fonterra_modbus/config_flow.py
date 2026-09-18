@@ -13,11 +13,9 @@ from homeassistant.core import HomeAssistant
 
 from .const import (
     CONF_DEVICE_NAME,
-    CONF_MODBUS_DEBUG,
     CONF_MODBUS_TIMEOUT,
     CONF_POLLING_INTERVAL,
     DEFAULT_HOST,
-    DEFAULT_MODBUS_DEBUG,
     DEFAULT_MODBUS_TIMEOUT,
     DEFAULT_POLLING_INTERVAL,
     DEFAULT_PORT,
@@ -146,10 +144,6 @@ class ViegaFonterraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         ),
                     ): vol.All(vol.Coerce(float), vol.Range(min=1, max=30)),
                     vol.Optional(
-                        CONF_MODBUS_DEBUG,
-                        default=defaults.get(CONF_MODBUS_DEBUG, DEFAULT_MODBUS_DEBUG),
-                    ): bool,
-                    vol.Optional(
                         "rooms", default=defaults.get("rooms", json.dumps(example))
                     ): str,
                 }
@@ -228,7 +222,6 @@ class ViegaFonterraOptionsFlow(config_entries.OptionsFlow):
                     CONF_DEVICE_NAME: str(user_input[CONF_DEVICE_NAME]),
                     CONF_POLLING_INTERVAL: int(user_input[CONF_POLLING_INTERVAL]),
                     CONF_MODBUS_TIMEOUT: timeout,
-                    CONF_MODBUS_DEBUG: bool(user_input.get(CONF_MODBUS_DEBUG, False)),
                 }
                 self.hass.config_entries.async_update_entry(
                     self.config_entry,
@@ -263,10 +256,6 @@ class ViegaFonterraOptionsFlow(config_entries.OptionsFlow):
                     CONF_MODBUS_TIMEOUT, DEFAULT_MODBUS_TIMEOUT
                 ),
             ): vol.All(vol.Coerce(float), vol.Range(min=1, max=30)),
-            vol.Optional(
-                CONF_MODBUS_DEBUG,
-                default=current_data.get(CONF_MODBUS_DEBUG, DEFAULT_MODBUS_DEBUG),
-            ): bool,
         }
         for room_id, room in current_rooms.items():
             if isinstance(room, dict):

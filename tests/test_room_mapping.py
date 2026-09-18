@@ -54,7 +54,7 @@ def test_discover_keeps_a_room_with_only_a_sensor():
 
 def _encode_name(name: str) -> list[int]:
     raw = name.encode("ascii").ljust(24, b"\x00")
-    return [int.from_bytes(raw[i : i + 2], "little") for i in range(0, 24, 2)]
+    return [int.from_bytes(raw[i : i + 2], "big") for i in range(0, 24, 2)]
 
 
 class _FakeDiscoveryClient:

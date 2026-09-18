@@ -4,16 +4,24 @@ from custom_components.viega_fonterra_modbus.const import PLATFORMS
 from custom_components.viega_fonterra_modbus.device_registry import DeviceRegistry
 from custom_components.viega_fonterra_modbus.climate import ViegaRoomClimateEntity
 from custom_components.viega_fonterra_modbus.room_mapping import RoomMappingDiscovery
+from custom_components.viega_fonterra_modbus.sensor import async_setup_entry as sensor_async_setup_entry
 from custom_components.viega_fonterra_modbus.switch import ViegaBasicSwitch
 from custom_components.viega_fonterra_modbus.thermostat import ViegaRoomThermostatEntity
 
 
-def test_diagnostic_platform_is_registered_and_forwarded():
-    """Regression test: a prior commit accidentally dropped "diagnostic" from
-    PLATFORMS (see git history of const.py), which silently turned every
-    room diagnostic entity defined in diagnostic.py into dead code - HA never
-    forwards config entry setup to a platform that isn't listed here."""
-    assert "diagnostic" in PLATFORMS
+def test_diagnostic_is_not_a_platform_and_is_forwarded_via_sensor():
+    """spec.md "PLATFORMS must list only real HA platform domains": no
+    `homeassistant.components.diagnostic` domain exists, so
+    `async_forward_entry_setups` would raise if "diagnostic" were ever added
+    to PLATFORMS again - a prior commit did that, misreading its earlier,
+    deliberate removal as accidental, backed only by a test asserting string
+    membership rather than that forwarding actually works. Room diagnostic
+    entities are instead created directly by sensor.py's async_setup_entry
+    (see its import of ViegaDiagnosticTextEntity), which *is* forwarded via
+    PLATFORMS' "sensor" entry."""
+    assert "diagnostic" not in PLATFORMS
+    assert "sensor" in PLATFORMS
+    assert sensor_async_setup_entry is not None
 
 
 def test_room_mapping_discovers_actor_and_sensor_pairs():

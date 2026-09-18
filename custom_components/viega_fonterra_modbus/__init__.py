@@ -8,7 +8,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 
-from .const import CONF_MODBUS_DEBUG, DOMAIN, PLATFORMS
+from .const import DOMAIN, PLATFORMS
 from .modbus_handler import ModbusClientError, ViegaModbusClient
 from .polling import SharedPolling
 from .room_mapping import RoomMappingDiscovery
@@ -28,7 +28,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
     timeout = float(entry.data.get("modbus_timeout", 5))
     client = ViegaModbusClient(entry.data["host"], entry.data["port"], timeout=timeout)
-    client.set_debug(bool(entry.data.get(CONF_MODBUS_DEBUG, False)))
     try:
         await client.connect()
     except ModbusClientError as err:

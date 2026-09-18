@@ -36,10 +36,10 @@ def _identity_sensor(sensor_key, address, count, text, client) -> ViegaBaseUnitI
     return sensor
 
 
-def test_text_field_decodes_little_endian_ascii_and_strips_padding():
-    """spec.md 3a: two ASCII chars per register, little-endian, padding stripped."""
+def test_text_field_decodes_big_endian_ascii_and_strips_padding():
+    """spec.md 3a: two ASCII chars per register, big-endian, padding stripped."""
     raw = b"Fonterra\x00\x00\x00\x00"
-    values = [int.from_bytes(raw[i : i + 2], "little") for i in range(0, len(raw), 2)]
+    values = [int.from_bytes(raw[i : i + 2], "big") for i in range(0, len(raw), 2)]
     sensor = _identity_sensor("base_unit_name", 10, len(values), True, _FakeInputClient(values))
 
     asyncio.run(sensor.async_update())

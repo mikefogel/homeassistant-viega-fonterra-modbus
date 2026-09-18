@@ -113,5 +113,5 @@ def test_describe_error_code_reports_unknown_for_undocumented_codes():
     assert describe_error_code(99) == "Unknown error (code 99)"
 
 
-def test_decode_text_registers_uses_little_endian_ascii_and_strips_padding():
-    assert decode_text_registers([0x4956, 0x4745, 0x0041, 0x2020]) == "VIEGA"
+def test_decode_text_registers_uses_big_endian_ascii_and_strips_padding():
+    assert decode_text_registers([0x5649, 0x4547, 0x4100, 0x2020]) == "VIEGA"
