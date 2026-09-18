@@ -56,7 +56,10 @@ class ViegaPowerLevelNumber(NumberEntity):
         # register and would let an unconfigured entity write to it.
         self.address: int | None = int(address) if address is not None else None
         self._attr_unique_id = f"{entry_id}_{room_id}_power_level"
-        self._attr_name = f"{room_config.get('name', room_id)} power level"
+        self._attr_translation_key = "power_level"
+        self._attr_translation_placeholders = {
+            "room": str(room_config.get("name", room_id))
+        }
         self._attr_native_value = None
         self._polling_gate = PollingGate()
 

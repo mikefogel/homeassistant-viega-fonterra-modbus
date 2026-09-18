@@ -1,2 +1,8 @@
 .idea/
 __pycache__
+
+# Third-party Viega manual - no longer bundled (see README "Third-party
+# documentation"); linked from Viega's own site instead. Removed from git
+# tracking; ignored here so an existing local copy isn't re-added by
+# accident.
+Fonterra Smart Control-de-DE.pdf

@@ -39,6 +39,7 @@ async def async_setup_entry(
             f"{room_config.get('name', room_id) if isinstance(room_config, dict) else room_id} diagnostic",
             room_id=room_id,
             address=_room_error_address(room_id, room_config),
+            room_name=room_config.get("name", room_id) if isinstance(room_config, dict) else room_id,
         )
         for room_id, room_config in rooms.items()
     ]
@@ -74,9 +75,19 @@ class ViegaDiagnosticTextEntity(SensorEntity):
         status: str = DEFAULT_STATUS,
         room_id: str | None = None,
         address: int | None = None,
+        room_name: str | None = None,
     ) -> None:
         self._entry_id = entry_id
-        self.name = name
+        if room_id is not None and room_name is not None:
+            # Localized via translations/*.json entity.sensor.room_diagnostic
+            # (spec.md "localize every entity name"). `name` is still kept
+            # below as the fallback for the room_id-less call shape used by
+            # standalone/legacy diagnosis entities, where there is no "room"
+            # to build a translation placeholder from.
+            self._attr_translation_key = "room_diagnostic"
+            self._attr_translation_placeholders = {"room": str(room_name)}
+        else:
+            self.name = name
         self.status = status
         self._room_id = room_id
         self._address = address if address is not None else BASE_UNIT_REGISTERS["error_code"]

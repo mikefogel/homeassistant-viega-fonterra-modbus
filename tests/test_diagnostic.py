@@ -18,6 +18,24 @@ def test_diagnostic_entity_exposes_text_status():
     assert entity.state == "error: sensor invalid"
 
 
+def test_room_scoped_diagnostic_name_is_localized_via_translation_key():
+    """spec.md "localize every entity name": once room_id and room_name are
+    given (the real sensor.py call shape), the name comes from
+    translations/*.json entity.sensor.room_diagnostic, not the raw `name`
+    string - which remains only as the fallback for the room-id-less shape
+    covered by test_diagnostic_entity_exposes_text_status above."""
+    entity = ViegaDiagnosticTextEntity(
+        "entry_1",
+        "Wohnzimmer diagnostic",
+        room_id="room_1",
+        room_name="Wohnzimmer",
+    )
+
+    assert not hasattr(entity, "_attr_name")
+    assert entity._attr_translation_key == "room_diagnostic"
+    assert entity._attr_translation_placeholders == {"room": "Wohnzimmer"}
+
+
 def test_diagnostic_entity_defaults_to_sensor_invalid_status():
     """Without an explicit status, the entity defaults to a sensible message."""
     entity = ViegaDiagnosticTextEntity(None, "temperature_flow")
@@ -71,6 +89,11 @@ def test_setup_entry_creates_one_diagnostic_entity_per_room_with_a_default_statu
     asyncio.run(async_setup_entry(hass, entry, added.extend))
 
     assert len(added) == 2
-    names = {entity.name for entity in added}
-    assert names == {"Wohnzimmer diagnostic", "room_2 diagnostic"}
+    # Room-scoped diagnostic entities are localized via translation_key +
+    # placeholders (translations/*.json entity.sensor.room_diagnostic), not
+    # a hardcoded `.name` string - see test_diagnostic_entity_exposes_text_status
+    # for the (room_id-less) fallback shape that still sets `.name` directly.
+    rooms_shown = {entity._attr_translation_placeholders["room"] for entity in added}
+    assert rooms_shown == {"Wohnzimmer", "room_2"}
+    assert all(entity._attr_translation_key == "room_diagnostic" for entity in added)
     assert all(entity.status == "error: sensor invalid" for entity in added)

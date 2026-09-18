@@ -45,18 +45,25 @@ def test_read_request_is_built_with_modbus_tcp_frame():
 
 
 def test_write_request_is_built_with_modbus_tcp_frame():
-    """The write request must be encoded as a valid function-code 0x06 frame."""
+    """The write request must be encoded as a valid function-code 0x10
+    (Write Multiple Registers) frame, matching the manual's own worked
+    wire example ("Beispiel 2 - Soll-Temperatur für Raum 2 setzen", page
+    95: `00 02 00 00 00 09 01 10 00 35 00 01 02 00 D2`) - not function
+    0x06, which no confirmed wire example in the manual ever uses."""
     expected_transaction_id = _next_transaction_id()
-    request = ViegaModbusClient.build_write_request(1200, 205)
+    request = ViegaModbusClient.build_write_request(0x35, 0xD2)
 
-    assert len(request) == 12
-    assert request[0:2] == expected_transaction_id.to_bytes(2, "big")
-    assert request[2:4] == b"\x00\x00"
-    assert request[4:6] == b"\x00\x06"
+    assert request == expected_transaction_id.to_bytes(2, "big") + bytes.fromhex(
+        "0000000901100035000102" + f"{0xD2:04x}"
+    )
+    assert len(request) == 15
+    assert request[4:6] == b"\x00\x09"
     assert request[6] == 0x01
-    assert request[7] == 0x06
-    assert request[8:10] == (1200).to_bytes(2, "big")
-    assert request[10:12] == (205).to_bytes(2, "big")
+    assert request[7] == 0x10
+    assert request[8:10] == (0x35).to_bytes(2, "big")
+    assert request[10:12] == (1).to_bytes(2, "big")  # quantity of registers
+    assert request[12] == 2  # byte count
+    assert request[13:15] == (0xD2).to_bytes(2, "big")
 
 
 def test_build_read_request_rejects_an_out_of_range_count():
@@ -412,8 +419,10 @@ def test_write_register_sends_the_value_and_validates_the_response():
     class FakeReader:
         async def read(self, n: int) -> bytes:
             transaction_id = log[-1][0:2]
-            # Echo response for function code 0x06: address + value.
-            return transaction_id + b"\x00\x00\x00\x06\x01\x06\x00\x32\x00\xcd"
+            # Echo response for function code 0x10 (manual page 95,
+            # "Beispiel 2"): transaction/protocol/length, unit, function,
+            # start register, quantity written - no value echoed back.
+            return transaction_id + b"\x00\x00\x00\x06\x01\x10\x00\x32\x00\x01"
 
     client = ViegaModbusClient("192.168.1.50", 502)
     client._reader = FakeReader()
@@ -422,9 +431,11 @@ def test_write_register_sends_the_value_and_validates_the_response():
 
     asyncio.run(client.write_register(50, 205))
 
-    assert log[-1][7] == 0x06
+    assert log[-1][7] == 0x10
     assert log[-1][8:10] == (50).to_bytes(2, "big")
-    assert log[-1][10:12] == (205).to_bytes(2, "big")
+    assert log[-1][10:12] == (1).to_bytes(2, "big")  # quantity of registers
+    assert log[-1][12] == 2  # byte count
+    assert log[-1][13:15] == (205).to_bytes(2, "big")
 
 
 def test_read_holding_registers_raises_on_timeout():
@@ -526,4 +537,54 @@ def test_disconnect_is_a_noop_when_never_connected():
 
     asyncio.run(client.disconnect())
 
+    assert client._connected is False
+
+
+def test_disconnect_does_not_hang_when_wait_closed_never_returns():
+    """spec.md 6a/13: removal must succeed even when the device's socket is
+    already broken. `wait_closed()` has no built-in timeout and can hang
+    forever if the peer never completes the TCP close handshake (e.g. the
+    device just went offline) - disconnect() must bound it and still reset
+    state instead of blocking the caller (and thus config entry removal)
+    indefinitely."""
+
+    class HangingWriter:
+        def close(self) -> None:
+            pass
+
+        async def wait_closed(self) -> None:
+            await asyncio.sleep(999)
+
+    client = ViegaModbusClient("192.168.1.50", 502, timeout=0.01)
+    client._writer = HangingWriter()
+    client._reader = object()
+    client._connected = True
+
+    asyncio.run(asyncio.wait_for(client.disconnect(), timeout=2))
+
+    assert client._reader is None
+    assert client._writer is None
+    assert client._connected is False
+
+
+def test_disconnect_resets_state_even_when_wait_closed_raises():
+    """A disconnect failure (e.g. ConnectionResetError) must still leave the
+    client in a clean, reconnectable state rather than stuck 'connected'."""
+
+    class RaisingWriter:
+        def close(self) -> None:
+            pass
+
+        async def wait_closed(self) -> None:
+            raise ConnectionResetError("connection reset by peer")
+
+    client = ViegaModbusClient("192.168.1.50", 502)
+    client._writer = RaisingWriter()
+    client._reader = object()
+    client._connected = True
+
+    asyncio.run(client.disconnect())
+
+    assert client._reader is None
+    assert client._writer is None
     assert client._connected is False

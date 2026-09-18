@@ -10,8 +10,9 @@ from custom_components.viega_fonterra_modbus.modbus_handler import ViegaModbusCl
 from custom_components.viega_fonterra_modbus.sensor import (
     ViegaActorLinkedSensor,
     ViegaBaseUnitIdentitySensor,
+    ViegaBaseUnitTemperatureSensor,
     ViegaRegisterSensor,
-    _extra_actor_sensors,
+    _actor_temperature_sensors,
     async_setup_entry,
 )
 
@@ -31,9 +32,35 @@ class _RaisingClient:
 
 def _identity_sensor(sensor_key, address, count, text, client) -> ViegaBaseUnitIdentitySensor:
     entry = SimpleNamespace(entry_id="entry_1")
-    sensor = ViegaBaseUnitIdentitySensor(entry, sensor_key, sensor_key, address, count, text)
+    sensor = ViegaBaseUnitIdentitySensor(entry, sensor_key, address, count, text)
     sensor.hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"client": client}}})
     return sensor
+
+
+def test_identity_sensor_name_is_localized_via_translation_key():
+    """spec.md "localize every entity name": sensor_key matches a
+    translations/*.json entity.sensor.<key>.name entry 1:1."""
+    sensor = _identity_sensor("base_unit_name", 10, 12, True, _FakeInputClient([]))
+
+    assert not hasattr(sensor, "_attr_name")
+    assert sensor._attr_translation_key == "base_unit_name"
+
+
+def test_actor_linked_sensor_name_is_localized_via_translation_key():
+    sensor = ViegaActorLinkedSensor(
+        "entry_1", "room_1", 2, "return_temperature", "Wohnzimmer", 250, unit="°C", scale=10
+    )
+
+    assert not hasattr(sensor, "_attr_name")
+    assert sensor._attr_translation_key == "actuator_return_temperature"
+    assert sensor._attr_translation_placeholders == {"room": "Wohnzimmer", "actor": "2"}
+
+
+def test_base_unit_temperature_sensor_name_is_localized_via_translation_key():
+    sensor = ViegaBaseUnitTemperatureSensor("entry_1", "flow_temperature", 25)
+
+    assert not hasattr(sensor, "_attr_name")
+    assert sensor._attr_translation_key == "flow_temperature"
 
 
 def test_text_field_decodes_big_endian_ascii_and_strips_padding():
@@ -106,17 +133,10 @@ def test_actor_linked_sensor_applies_scale():
     assert sensor._attr_native_value == 21.5
 
 
-def test_actor_linked_sensor_without_scale_keeps_the_raw_value():
-    sensor = ViegaActorLinkedSensor("entry_1", "room_1", 2, "position", "name", 249, unit="%")
-    sensor.hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"client": _FakeInputClient([42])}}})
-
-    asyncio.run(sensor.async_update())
-
-    assert sensor._attr_native_value == 42
-
-
 def test_actor_linked_sensor_ignores_the_error_sentinel():
-    sensor = ViegaActorLinkedSensor("entry_1", "room_1", 2, "position", "name", 249)
+    sensor = ViegaActorLinkedSensor(
+        "entry_1", "room_1", 2, "return_temperature", "name", 250, unit="°C", scale=10
+    )
     sensor.hass = SimpleNamespace(
         data={DOMAIN: {"entry_1": {"client": _FakeInputClient([ViegaModbusClient.ERROR_SENTINEL])}}}
     )
@@ -126,38 +146,51 @@ def test_actor_linked_sensor_ignores_the_error_sentinel():
     assert sensor._attr_native_value is None
 
 
-def test_extra_actor_sensors_created_for_additional_actors_in_a_room():
-    """spec.md 4: additional actuators in a multi-actor room must not be
-    silently dropped."""
+def test_actor_temperature_sensors_created_for_every_actuator_in_a_room():
+    """spec.md 5a: every actuator's return temperature is a linked sensor,
+    not just the extra actuators beyond the primary one (spec.md 4)."""
     entry = SimpleNamespace(entry_id="entry_1")
     rooms = {"room_1": {"name": "Wohnzimmer", "actor": [1, 2, 3]}}
 
-    sensors = _extra_actor_sensors(entry, rooms)
+    sensors = _actor_temperature_sensors(entry, rooms)
 
-    # Actor 1 is the primary one (handled by climate.py); actors 2 and 3
-    # each get a position and a return-temperature sensor.
-    assert len(sensors) == 4
     unique_ids = {s._attr_unique_id for s in sensors}
     assert unique_ids == {
-        "entry_1_room_1_actor2_position",
+        "entry_1_room_1_actor1_return_temperature",
         "entry_1_room_1_actor2_return_temperature",
-        "entry_1_room_1_actor3_position",
         "entry_1_room_1_actor3_return_temperature",
     }
 
 
-def test_extra_actor_sensors_skipped_when_actor_is_a_single_int():
+def test_actor_temperature_sensors_created_for_a_single_actor_room():
     entry = SimpleNamespace(entry_id="entry_1")
     rooms = {"room_1": {"name": "Wohnzimmer", "actor": 1}}
 
-    assert _extra_actor_sensors(entry, rooms) == []
+    sensors = _actor_temperature_sensors(entry, rooms)
+
+    assert {s._attr_unique_id for s in sensors} == {
+        "entry_1_room_1_actor1_return_temperature"
+    }
 
 
-def test_extra_actor_sensors_skipped_for_a_single_item_actor_list():
-    entry = SimpleNamespace(entry_id="entry_1")
-    rooms = {"room_1": {"name": "Wohnzimmer", "actor": [1]}}
+def test_base_unit_temperature_sensor_applies_scale():
+    sensor = ViegaBaseUnitTemperatureSensor("entry_1", "flow_temperature", 25)
+    sensor.hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"client": _FakeInputClient([264])}}})
 
-    assert _extra_actor_sensors(entry, rooms) == []
+    asyncio.run(sensor.async_update())
+
+    assert sensor._attr_native_value == 26.4
+
+
+def test_base_unit_temperature_sensor_ignores_the_error_sentinel():
+    sensor = ViegaBaseUnitTemperatureSensor("entry_1", "flow_temperature", 25)
+    sensor.hass = SimpleNamespace(
+        data={DOMAIN: {"entry_1": {"client": _FakeInputClient([ViegaModbusClient.ERROR_SENTINEL])}}}
+    )
+
+    asyncio.run(sensor.async_update())
+
+    assert sensor._attr_native_value is None
 
 
 def test_register_sensor_icon_reflects_sensor_kind():
@@ -199,3 +232,36 @@ def test_setup_entry_does_not_create_the_placeholder_register_definitions_sensor
     assert sensor_keys.isdisjoint(
         {"temperature_flow", "temperature_return", "temperature_room", "system_pressure", "pump_state"}
     )
+
+
+def test_setup_entry_creates_the_base_unit_flow_temperature_sensor():
+    """spec.md 5a: manifold flow temperature is a single, device-level
+    linked sensor (manual 30025), not a per-room value."""
+    hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"rooms": {}, "identity": {}}}})
+    entry = SimpleNamespace(entry_id="entry_1")
+    added: list = []
+
+    asyncio.run(async_setup_entry(hass, entry, added.extend))
+
+    unique_ids = {getattr(entity, "_attr_unique_id", None) for entity in added}
+    assert "entry_1_flow_temperature" in unique_ids
+
+
+def test_setup_entry_creates_return_temperature_sensors_for_room_actuators():
+    hass = SimpleNamespace(
+        data={
+            DOMAIN: {
+                "entry_1": {
+                    "rooms": {"room_1": {"name": "Wohnzimmer", "actor": 1}},
+                    "identity": {},
+                }
+            }
+        }
+    )
+    entry = SimpleNamespace(entry_id="entry_1")
+    added: list = []
+
+    asyncio.run(async_setup_entry(hass, entry, added.extend))
+
+    unique_ids = {getattr(entity, "_attr_unique_id", None) for entity in added}
+    assert "entry_1_room_1_actor1_return_temperature" in unique_ids

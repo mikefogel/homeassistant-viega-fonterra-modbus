@@ -1,5 +1,7 @@
 [![hacs_badge](https://img.shields.io/badge/HACS-Default-orange.svg)](https://github.com/custom-components/hacs)
 
+<img src="brands/custom_integrations/viega_fonterra_modbus/icon.png" alt="Viega Fonterra Smart Control icon" width="96" height="96">
+
 ## Viega Fonterra Smart Control for Home Assistant
 
 This custom integration connects Home Assistant to one or more Viega Fonterra Smart Control installations over local Modbus TCP, enabling room-level monitoring and control of heating systems.
@@ -11,9 +13,9 @@ This custom integration connects Home Assistant to one or more Viega Fonterra Sm
 - **Room thermostats**: Climate entities per room with configurable target and current temperature
 - **Writable thermostat controls**: Target temperature, operating mode, and profile mode through holding registers
 - **Power-level control**: Room actuator power level as a Number entity
-- **Sensor monitoring**: Room, flow, actuator return, and actuator position values
+- **Sensor monitoring**: Room temperature, base-unit flow temperature, and per-actuator return temperature
+- **Actuator position**: Per-actuator open/closed binary sensor
 - **Device diagnostics**: WLAN module serial number, base-unit serial number and name, and base-unit error code
-- **Simple actuators**: Switch entities for basic on/off control
 - **Diagnostic entities**: Textual error states for failed unit values and communication issues
 - **Configurable polling**: Adjustable update interval (5–300 seconds, default: 30s)
 - **Configurable timeouts**: Modbus TCP response timeout (1–30 seconds, default: 5s)
@@ -29,31 +31,20 @@ This custom integration connects Home Assistant to one or more Viega Fonterra Sm
 3. Add the integration: `Settings > Devices & Services > + Add Integration > Viega Fonterra Smart Control`
 4. Follow the config flow:
   - Enter device IP or hostname and port (defaults: `192.168.0.188`, `502`)
-   - Set device name, polling interval, and Modbus timeout
-  - Optionally configure rooms with names, room numbers, and actor/sensor mappings
+  - Set device name, polling interval, and Modbus timeout
+  - No room mapping is entered here — rooms and their actuator(s) are
+    discovered automatically from the device once it connects, and can be
+    overridden afterward per room through reconfiguration if needed
 
-### Configuration Example
-
-```json
-{
-  "room_1": {
-    "name": "Living room",
-    "room_number": 1,
-    "actor": 1,
-    "sensor": 10
-  }
-}
-```
-
-Each room creates:
+Each discovered room creates:
 - A climate (thermostat) entity
 - A power-level Number entity
-- A switch entity
+- Per-actuator return-temperature sensor and open/closed binary sensor entities
 - A diagnostic text entity
 
 ### Notes
 
-This repository is a local custom integration for Home Assistant. The register map follows the supplied Viega manual, including signed Int16 input registers and holding-register writes. Room mappings can override register addresses where required by an installation.
+This repository is a local custom integration for Home Assistant. The register map follows the supplied Viega manual, including signed Int16 input registers and holding-register writes. Discovered room mappings can be overridden per room through reconfiguration where required by an installation.
 
 For technical details and specification, see `spec.md` in the repository.
 

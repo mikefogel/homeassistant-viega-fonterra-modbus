@@ -13,7 +13,7 @@ MIN_SCAN_INTERVAL = 5  # seconds; also the minimum accepted `polling_interval`
 # sensor/binary_sensor/switch/climate/number) and must never be added here:
 # diagnostic.py's entities are created directly by sensor.py's
 # async_setup_entry instead of being forwarded as their own platform.
-PLATFORMS = ["sensor", "binary_sensor", "switch", "climate", "number"]
+PLATFORMS = ["sensor", "binary_sensor", "climate", "number"]
 
 CONF_DEVICE_NAME = "device_name"
 CONF_POLLING_INTERVAL = "polling_interval"

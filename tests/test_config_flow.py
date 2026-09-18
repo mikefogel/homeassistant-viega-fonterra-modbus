@@ -11,55 +11,7 @@ this repo yet, so this file only covers the parts that are plain functions
 or `@staticmethod`s and need no Home Assistant runtime at all.
 """
 
-from custom_components.viega_fonterra_modbus.config_flow import (
-    ViegaFonterraOptionsFlow,
-    parse_rooms_input,
-)
-
-
-def test_parse_rooms_input_passes_through_an_already_parsed_dict():
-    rooms = {"room_1": {"name": "Wohnzimmer", "actor": 1, "sensor": 10}}
-
-    parsed, error = parse_rooms_input(rooms)
-
-    assert parsed == rooms
-    assert error is None
-
-
-def test_parse_rooms_input_parses_a_json_string():
-    parsed, error = parse_rooms_input('{"room_1": {"name": "Wohnzimmer"}}')
-
-    assert parsed == {"room_1": {"name": "Wohnzimmer"}}
-    assert error is None
-
-
-def test_parse_rooms_input_rejects_invalid_json():
-    parsed, error = parse_rooms_input("{not valid json")
-
-    assert parsed == {}
-    assert error == "invalid_rooms"
-
-
-def test_parse_rooms_input_rejects_a_json_value_that_is_not_an_object():
-    parsed, error = parse_rooms_input("[1, 2, 3]")
-
-    assert parsed == {}
-    assert error == "invalid_rooms"
-
-
-def test_parse_rooms_input_rejects_non_string_non_dict_values():
-    parsed, error = parse_rooms_input(None)
-
-    assert parsed == {}
-    assert error == "invalid_rooms"
-
-
-def test_parse_rooms_input_defaults_to_empty_dict_when_field_missing():
-    """Mirrors `user_input.get("rooms", {})` when the field was never shown."""
-    parsed, error = parse_rooms_input({})
-
-    assert parsed == {}
-    assert error is None
+from custom_components.viega_fonterra_modbus.config_flow import ViegaFonterraOptionsFlow
 
 
 def test_rooms_from_input_updates_name_actor_sensor_and_target_register():

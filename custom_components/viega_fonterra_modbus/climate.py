@@ -13,7 +13,13 @@ from homeassistant.core import HomeAssistant
 from .const import DOMAIN, MIN_SCAN_INTERVAL
 from .device import build_device_info
 from .polling import PollingGate
-from .registers import BASE_UNIT_REGISTERS, actor_registers, resolve_room_number, room_registers
+from .registers import (
+    BASE_UNIT_REGISTERS,
+    actor_registers,
+    resolve_room_number,
+    room_actor_numbers,
+    room_registers,
+)
 
 SCAN_INTERVAL = timedelta(seconds=MIN_SCAN_INTERVAL)
 
@@ -49,6 +55,12 @@ class ViegaRoomClimateEntity(ClimateEntity):
     _attr_has_entity_name = True
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_hvac_modes = ["off", "heat", "cool"]
+    # Localizes preset_mode's raw values ("manual"/"profile"/"setback") via
+    # translations/*.json's entity.climate.room.state_attributes.preset_mode
+    # block - without a translation_key, Home Assistant has no key to look
+    # the state translations up under and falls back to the raw English
+    # value (spec.md 5a.1).
+    _attr_translation_key = "room"
     def __init__(
         self,
         entry_id: str,
@@ -63,14 +75,12 @@ class ViegaRoomClimateEntity(ClimateEntity):
         room_config = room_config or {}
         room_number = resolve_room_number(room_id, room_config)
         defaults = room_registers(room_number) if room_number else {}
-        actor_number = room_config.get("actor")
-        if isinstance(actor_number, list):
-            # Only the primary actuator drives the Climate entity; any
-            # additional actuators in a multi-actor room (spec.md 4) get
-            # their own linked sensors from sensor.py instead of being
-            # dropped silently.
-            actor_number = actor_number[0] if actor_number else None
-        actor = actor_registers(int(actor_number)) if actor_number else {}
+        # Only the primary (first) actuator drives the Climate entity; any
+        # additional actuators in a multi-actor room (spec.md 4) get their
+        # own linked sensors from sensor.py/binary_sensor.py instead of
+        # being dropped silently.
+        actor_numbers = room_actor_numbers(room_config)
+        actor = actor_registers(actor_numbers[0]) if actor_numbers else {}
         self._entry_id = entry_id
         self.room_id = room_id
         self._polling_gate = PollingGate()
@@ -141,6 +151,10 @@ class ViegaRoomClimateEntity(ClimateEntity):
 
     @property
     def preset_modes(self) -> list[str]:
+        # Raw values written/read on the wire (holding register 40002,
+        # spec.md 5a.1); the localized labels shown in the UI ("Manuell" /
+        # "Profil" / "Absenkbetrieb") come from _attr_translation_key's
+        # entity translation, not from these identifiers.
         return ["manual", "profile", "setback"]
 
     @property

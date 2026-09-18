@@ -93,17 +93,31 @@ class ViegaModbusClient:
 
     @classmethod
     def build_write_request(cls, address: int, value: int, unit_id: int = 1) -> bytes:
-        """Build a Modbus TCP request for function code 0x06."""
+        """Build a Modbus TCP request for function code 0x10 (Write Multiple
+        Registers), writing a single register.
+
+        The manual's own worked wire example ("Beispiel 2 - Soll-Temperatur
+        für Raum 2 setzen", `Fonterra Smart Control-de-DE.pdf`, page 95)
+        writes this way - function 16, quantity 1, byte count 2 - not
+        function 0x06 (Write Single Register), which this method used
+        previously and which was never checked against that example. See
+        spec.md 14 "The write command used the wrong function code": the
+        same class of mistake as the earlier PDU-address-offset bugs -
+        internally self-consistent code and tests that were never checked
+        against the vendor's own documented frame bytes.
+        """
         cls._transaction_counter += 1
         transaction_id = cls._transaction_counter & 0xFFFF
         return struct.pack(
-            ">HHHBBHH",
+            ">HHHBBHHBH",
             transaction_id,
             cls.PROTOCOL_ID,
-            6,
+            9,
             unit_id,
-            0x06,
+            0x10,
             address,
+            1,  # quantity of registers
+            2,  # byte count
             value,
         )
 
@@ -146,10 +160,28 @@ class ViegaModbusClient:
         self._connected = True
 
     async def disconnect(self) -> None:
-        """Close the current TCP connection."""
+        """Close the current TCP connection.
+
+        `StreamWriter.wait_closed()` has no built-in timeout: if the peer
+        never completes the TCP close handshake (e.g. the device just went
+        offline or is unreachable), it can block forever. Bounding it by the
+        configured Modbus timeout ensures a stuck socket can never hang the
+        config entry's removal (spec.md 6a/13: removal must succeed even
+        when the device is offline or its connection is already broken).
+        The state reset below must always run, even when the close itself
+        fails or times out, so the client is never left thinking it is
+        still connected.
+        """
         if self._writer is not None:
             self._writer.close()
-            await self._writer.wait_closed()
+            try:
+                await asyncio.wait_for(self._writer.wait_closed(), timeout=self.timeout)
+            except (asyncio.TimeoutError, OSError):
+                _LOGGER.debug(
+                    "Modbus disconnect from %s:%s did not complete cleanly; "
+                    "closing anyway",
+                    self.host, self.port, exc_info=True,
+                )
         self._reader = None
         self._writer = None
         self._connected = False
@@ -197,7 +229,8 @@ class ViegaModbusClient:
             return self.decode_int16_response(response)
 
     async def write_register(self, address: int, value: int) -> None:
-        """Write a single register via Modbus function code 0x06."""
+        """Write a single register via Modbus function code 0x10 (Write
+        Multiple Registers, quantity 1) - see `build_write_request`."""
         if not self._connected or self._reader is None or self._writer is None:
             raise ModbusClientError("Modbus client is not connected")
 

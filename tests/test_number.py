@@ -24,6 +24,17 @@ class _FakeClient:
         return self._values
 
 
+def test_name_is_localized_via_translation_key_not_hardcoded():
+    """spec.md "localize every entity name": the display name must come
+    from translations/*.json (entity.number.power_level), not a hardcoded
+    English string, so it can be shown in German too."""
+    entity = ViegaPowerLevelNumber("entry_1", "room_1", {"name": "Wohnzimmer"})
+
+    assert not hasattr(entity, "_attr_name")
+    assert entity._attr_translation_key == "power_level"
+    assert entity._attr_translation_placeholders == {"room": "Wohnzimmer"}
+
+
 def test_async_update_reads_the_current_power_level():
     entity = ViegaPowerLevelNumber("entry_1", "room_1", {"name": "Wohnzimmer"})
     entity.hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"client": _FakeClient([4])}}})

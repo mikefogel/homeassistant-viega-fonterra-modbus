@@ -3,7 +3,11 @@
 import asyncio
 from types import SimpleNamespace
 
-from custom_components.viega_fonterra_modbus import async_setup_entry, async_unload_entry
+from custom_components.viega_fonterra_modbus import (
+    async_remove_config_entry_device,
+    async_setup_entry,
+    async_unload_entry,
+)
 from custom_components.viega_fonterra_modbus.const import DOMAIN
 from custom_components.viega_fonterra_modbus.modbus_handler import ViegaModbusClient
 
@@ -118,3 +122,16 @@ def test_setup_entry_does_not_call_a_removed_client_debug_toggle(monkeypatch):
     client = hass.data[DOMAIN]["entry_1"]["client"]
     assert not hasattr(client, "set_debug")
     assert not hasattr(client, "debug")
+
+
+def test_device_can_always_be_removed():
+    """Without this hook, Home Assistant hides the device page's own
+    'Delete' control while the config entry is loaded, because each config
+    entry here always owns exactly one device (spec.md 6a/13)."""
+    result = asyncio.run(
+        async_remove_config_entry_device(
+            SimpleNamespace(), SimpleNamespace(entry_id="entry_1"), SimpleNamespace()
+        )
+    )
+
+    assert result is True

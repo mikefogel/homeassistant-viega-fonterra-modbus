@@ -7,6 +7,7 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers import device_registry as dr
 
 from .const import DOMAIN, PLATFORMS
 from .modbus_handler import ModbusClientError, ViegaModbusClient
@@ -54,11 +55,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if discovered:
         rooms = discovered
     elif not rooms:
+        # Note: the options flow can only edit rooms that already exist in
+        # `rooms` (spec.md "Editing an existing module") - it has no "add a
+        # room from scratch" field, so it cannot recover from this case.
+        # Reloading once the device/actuators are reachable is currently the
+        # only way forward; do not promise an options-flow fix here.
         _LOGGER.warning(
             "Viega Fonterra entry %s: no rooms discovered from the device and "
-            "none configured manually; no room, climate, switch, or number "
+            "none configured previously; no room, climate, or number "
             "entities will be created until at least one actuator reports a "
-            "valid room ID or a room mapping is entered in the options flow",
+            "valid room ID. Check that Modbus TCP is enabled on the base unit "
+            "and that it is reachable, then reload this integration entry",
             entry.entry_id,
         )
     identity: dict[str, object] = {}
@@ -177,3 +184,19 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     "Error disconnecting Viega client for %s", entry.entry_id, exc_info=True
                 )
     return unload_ok
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, entry: ConfigEntry, device_entry: dr.DeviceEntry
+) -> bool:
+    """Allow removing this module's device from the device page.
+
+    Without this hook, Home Assistant does not show a "Delete" control for a
+    device on its own device page while the owning config entry is still
+    loaded - only removing the whole config entry (module) would work. Each
+    config entry here always corresponds to exactly one device (the Fonterra
+    module, `device.py::build_device_info`), so unlinking it is always safe;
+    removing the module entirely still happens through the normal config
+    entry removal flow (spec.md 6a/13).
+    """
+    return True

@@ -5,9 +5,13 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory
+from homeassistant.const import EntityCategory, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN, MIN_SCAN_INTERVAL
@@ -20,6 +24,7 @@ from .registers import (
     actor_registers,
     describe_error_code,
     decode_text_registers,
+    room_actor_numbers,
 )
 
 SCAN_INTERVAL = timedelta(seconds=MIN_SCAN_INTERVAL)
@@ -50,32 +55,28 @@ async def async_setup_entry(
     identity = hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get("identity", {})
 
     entities.extend(
-        _identity_entity(entry, key, name, address, count, text, identity)
-        for key, name, address, count, text in (
+        _identity_entity(entry, key, address, count, text, identity)
+        for key, address, count, text in (
             (
                 "wlan_serial_number",
-                "WLAN module serial number",
                 BASE_UNIT_REGISTERS["wlan_serial_number"],
                 5,
                 True,
             ),
             (
                 "base_unit_serial_number",
-                "Base unit serial number",
                 BASE_UNIT_REGISTERS["base_unit_serial_number"],
                 5,
                 True,
             ),
             (
                 "base_unit_name",
-                "Base unit name",
                 BASE_UNIT_REGISTERS["base_unit_name"],
                 12,
                 True,
             ),
             (
                 "base_unit_error_code",
-                "Base unit error code",
                 BASE_UNIT_REGISTERS["error_code"],
                 1,
                 False,
@@ -83,7 +84,15 @@ async def async_setup_entry(
         )
     )
 
-    entities.extend(_extra_actor_sensors(entry, rooms))
+    entities.append(
+        ViegaBaseUnitTemperatureSensor(
+            entry.entry_id,
+            "flow_temperature",
+            BASE_UNIT_REGISTERS["flow_temperature"],
+        )
+    )
+
+    entities.extend(_actor_temperature_sensors(entry, rooms))
 
     entities.extend(
         ViegaDiagnosticTextEntity(
@@ -91,6 +100,7 @@ async def async_setup_entry(
             f"{room_config.get('name', room_id)} diagnostic",
             room_id=room_id,
             address=_room_error_address(room_id, room_config),
+            room_name=room_config.get("name", room_id),
         )
         for room_id, room_config in rooms.items()
         if isinstance(room_config, dict)
@@ -104,50 +114,49 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-def _identity_entity(entry, key, name, address, count, text, identity):
-    entity = ViegaBaseUnitIdentitySensor(entry, key, name, address, count, text)
+def _identity_entity(entry, key, address, count, text, identity):
+    entity = ViegaBaseUnitIdentitySensor(entry, key, address, count, text)
     if isinstance(identity, dict) and identity.get(key) is not None:
         entity._attr_native_value = identity[key]
     return entity
 
 
-def _extra_actor_sensors(entry: ConfigEntry, rooms: dict[str, object]) -> list["ViegaActorLinkedSensor"]:
-    """Build linked sensors for actuators beyond the first in a multi-actor room."""
+def _actor_temperature_sensors(
+    entry: ConfigEntry, rooms: dict[str, object]
+) -> list["ViegaActorLinkedSensor"]:
+    """Build a return-temperature sensor for every actuator of every room.
+
+    Every actuator (the room's primary one and any additional actuators in
+    a multi-actor room, spec.md 4) gets its own linked temperature sensor
+    for its Rücklauftemperatur register (manual 30251/30254/...), not just
+    the extra actuators beyond the first - spec.md 5a requires "Show
+    actuator return temperature" as a linked entity for the room, and the
+    Climate entity only ever tracks the primary actuator's value as an
+    attribute (climate.py), which is not a substitute for a real entity.
+    Actuator *position* is exposed separately as a binary sensor
+    (binary_sensor.py), matching the manual's 0=closed/1=open encoding
+    rather than a percentage.
+    """
 
     sensors: list[ViegaActorLinkedSensor] = []
     for room_id, room_config in rooms.items():
         if not isinstance(room_config, dict):
             continue
-        actors = room_config.get("actor")
-        if not isinstance(actors, list) or len(actors) <= 1:
-            continue
         room_name = room_config.get("name", room_id)
-        for actor_number in actors[1:]:
+        for actor_number in room_actor_numbers(room_config):
             try:
-                actor_number = int(actor_number)
                 registers = actor_registers(actor_number)
-            except (TypeError, ValueError):
+            except ValueError:
                 continue
             sensors.append(
                 ViegaActorLinkedSensor(
                     entry.entry_id,
                     room_id,
                     actor_number,
-                    "position",
-                    f"{room_name} actuator {actor_number} position",
-                    registers["position"],
-                    unit="%",
-                )
-            )
-            sensors.append(
-                ViegaActorLinkedSensor(
-                    entry.entry_id,
-                    room_id,
-                    actor_number,
                     "return_temperature",
-                    f"{room_name} actuator {actor_number} return temperature",
+                    room_name,
                     registers["return_temperature"],
-                    unit="°C",
+                    unit=UnitOfTemperature.CELSIUS,
                     scale=10,
                 )
             )
@@ -242,7 +251,6 @@ class ViegaBaseUnitIdentitySensor(SensorEntity):
         self,
         entry: ConfigEntry,
         sensor_key: str,
-        name: str,
         address: int,
         count: int,
         text: bool,
@@ -254,7 +262,11 @@ class ViegaBaseUnitIdentitySensor(SensorEntity):
         self._text = text
         self._attr_unique_id = f"{entry.entry_id}_{sensor_key}"
 
-        self._attr_name = name
+        # No _attr_name here: sensor_key matches a translations/*.json
+        # entity.sensor.<key>.name entry 1:1, so Home Assistant's
+        # translation_key mechanism supplies the localized name instead of a
+        # hardcoded English string (spec.md "localize every entity name").
+        self._attr_translation_key = sensor_key
         self._attr_native_value = None
         initial = getattr(entry, "options", {}).get("_identity", {}).get(sensor_key)
         if initial is not None:
@@ -301,7 +313,7 @@ class ViegaBaseUnitIdentitySensor(SensorEntity):
 
 
 class ViegaActorLinkedSensor(SensorEntity):
-    """Expose a register for an actuator beyond the first in a room."""
+    """Expose a register linked to one of a room's actuators."""
 
     _attr_has_entity_name = True
 
@@ -311,7 +323,7 @@ class ViegaActorLinkedSensor(SensorEntity):
         room_id: str,
         actor_number: int,
         kind: str,
-        name: str,
+        room_name: str,
         address: int,
         unit: str | None = None,
         scale: int | None = None,
@@ -320,9 +332,19 @@ class ViegaActorLinkedSensor(SensorEntity):
         self._address = address
         self._scale = scale
         self._attr_unique_id = f"{entry_id}_{room_id}_actor{actor_number}_{kind}"
-        self._attr_name = name
+        # translation_key "actuator_<kind>" (e.g. "actuator_return_temperature")
+        # matches a translations/*.json entity.sensor entry whose name string
+        # uses the {room}/{actor} placeholders below.
+        self._attr_translation_key = f"actuator_{kind}"
+        self._attr_translation_placeholders = {
+            "room": str(room_name),
+            "actor": str(actor_number),
+        }
         self._attr_native_unit_of_measurement = unit
         self._attr_native_value = None
+        if unit == UnitOfTemperature.CELSIUS:
+            self._attr_device_class = SensorDeviceClass.TEMPERATURE
+            self._attr_state_class = SensorStateClass.MEASUREMENT
         self._polling_gate = PollingGate()
 
     async def async_update(self) -> None:
@@ -343,6 +365,53 @@ class ViegaActorLinkedSensor(SensorEntity):
 
         value = values[0]
         self._attr_native_value = value / self._scale if self._scale else value
+
+    @property
+    def device_info(self):
+        return build_device_info(self.hass, self._entry_id)
+
+
+class ViegaBaseUnitTemperatureSensor(SensorEntity):
+    """Expose a base-unit-level temperature register (e.g. manifold flow).
+
+    Unlike room/actuator registers, this value is measured once for the
+    whole base unit (manual 30025 "Vorlauftemperatur", page 89) and is
+    therefore a single entity on the module's device, not one per room -
+    climate.py's per-room `flow_temperature` attribute reads the same
+    shared register redundantly for convenience, but this is the entity
+    spec.md 5a requires ("Show manifold flow temperature | Linked
+    temperature sensor").
+    """
+
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+
+    def __init__(self, entry_id: str, sensor_key: str, address: int) -> None:
+        self._entry_id = entry_id
+        self._address = address
+        self._attr_unique_id = f"{entry_id}_{sensor_key}"
+        self._attr_translation_key = sensor_key
+        self._attr_native_value = None
+        self._polling_gate = PollingGate()
+
+    async def async_update(self) -> None:
+        if not self._polling_gate.is_due(self.hass, self._entry_id):
+            return
+
+        client = self.hass.data[DOMAIN][self._entry_id]["client"]
+        try:
+            shared = self.hass.data[DOMAIN][self._entry_id].get("polling")
+            values = await (shared.read(self.hass, self._entry_id, "input", self._address, 1)
+                            if shared else client.read_input_registers(self._address, 1))
+        except Exception:
+            return
+
+        if not values or values[0] == ViegaModbusClient.ERROR_SENTINEL:
+            return
+
+        self._attr_native_value = values[0] / 10
 
     @property
     def device_info(self):

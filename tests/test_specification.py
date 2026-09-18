@@ -5,7 +5,6 @@ from custom_components.viega_fonterra_modbus.device_registry import DeviceRegist
 from custom_components.viega_fonterra_modbus.climate import ViegaRoomClimateEntity
 from custom_components.viega_fonterra_modbus.room_mapping import RoomMappingDiscovery
 from custom_components.viega_fonterra_modbus.sensor import async_setup_entry as sensor_async_setup_entry
-from custom_components.viega_fonterra_modbus.switch import ViegaBasicSwitch
 from custom_components.viega_fonterra_modbus.thermostat import ViegaRoomThermostatEntity
 
 
@@ -107,14 +106,3 @@ def test_climate_entity_writes_scaled_target_temperature():
     assert client.address == 1200
     assert client.value == 205
     assert entity.target_temperature == 20.5
-
-
-def test_basic_switch_can_be_enabled_and_disabled():
-    """A simple switch entity must support the no-frills operation mode."""
-    switch = ViegaBasicSwitch("heating_enable")
-
-    assert switch.is_on is False
-    switch.turn_on()
-    assert switch.is_on is True
-    switch.turn_off()
-    assert switch.is_on is False

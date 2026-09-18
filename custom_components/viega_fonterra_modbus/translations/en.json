@@ -4,28 +4,17 @@
     "step": {
       "user": {
         "title": "Add Viega Fonterra module",
-        "description": "Enter the module IP address or hostname, Modbus port, and device name.",
+        "description": "Enter the module IP address or hostname, Modbus port, and device name. Rooms are discovered automatically from the device once connected.",
         "data": {
           "host": "IP address or hostname",
           "port": "Modbus port",
           "device_name": "Device name",
           "polling_interval": "Polling interval (seconds)",
           "modbus_timeout": "Modbus timeout (seconds)",
-          "modbus_debug": "Enable Modbus frame debug logging",
-          "rooms": "Room mapping"
+          "modbus_debug": "Enable Modbus frame debug logging"
         },
         "errors": {
           "cannot_connect": "Unable to connect to the Viega module."
-        }
-      },
-      "rooms": {
-        "title": "Configure rooms",
-        "description": "Enter the room mapping as a JSON object.",
-        "data": {
-          "rooms": "Room mapping"
-        },
-        "errors": {
-          "invalid_rooms": "The room mapping must be a valid JSON object."
         }
       },
       "init": {
@@ -43,6 +32,60 @@
         "errors": {
           "cannot_connect": "Unable to connect to the Viega module."
         }
+      }
+    }
+  },
+  "entity": {
+    "climate": {
+      "room": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "manual": "Manual",
+              "profile": "Profile",
+              "setback": "Setback"
+            }
+          }
+        }
+      }
+    },
+    "sensor": {
+      "wlan_serial_number": {
+        "name": "WLAN module serial number"
+      },
+      "base_unit_serial_number": {
+        "name": "Base unit serial number"
+      },
+      "base_unit_name": {
+        "name": "Base unit name"
+      },
+      "base_unit_error_code": {
+        "name": "Base unit error code"
+      },
+      "flow_temperature": {
+        "name": "Flow temperature"
+      },
+      "actuator_return_temperature": {
+        "name": "{room} actuator {actor} return temperature"
+      },
+      "room_diagnostic": {
+        "name": "{room} diagnostic"
+      }
+    },
+    "binary_sensor": {
+      "base_unit_error": {
+        "name": "Base unit error"
+      },
+      "actuator_position": {
+        "name": "{room} actuator {actor} position"
+      },
+      "circulation_pump": {
+        "name": "Circulation pump"
+      }
+    },
+    "number": {
+      "power_level": {
+        "name": "{room} power level"
       }
     }
   }

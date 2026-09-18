@@ -127,6 +127,31 @@ def resolve_room_number(room_id: str, room_config: dict[str, object]) -> int:
     return int(match.group(1)) if match else 0
 
 
+def room_actor_numbers(room_config: dict[str, object]) -> list[int]:
+    """Return every actuator number configured for a room, in order.
+
+    A room's `actor` field is either a single actuator number or a list
+    (spec.md 4: a room may map to more than one actuator). The first entry
+    is always the primary actuator driving the Climate entity; callers that
+    need *every* actuator's own linked entities (return temperature,
+    position) iterate this full list instead of only `actors[1:]`.
+    """
+    actor = room_config.get("actor")
+    if isinstance(actor, list):
+        numbers = actor
+    elif actor is not None:
+        numbers = [actor]
+    else:
+        return []
+    result = []
+    for number in numbers:
+        try:
+            result.append(int(number))
+        except (TypeError, ValueError):
+            continue
+    return result
+
+
 # Base-unit and room error/warning codes from the device manual's
 # "Fehlercodes" table (`Fonterra Smart Control-de-DE.pdf`, page 94). Codes
 # 3-10 are reported on the base-unit error register (manual 30024); codes

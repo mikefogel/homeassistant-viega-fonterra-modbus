@@ -5,7 +5,11 @@ import asyncio
 from types import SimpleNamespace
 
 from custom_components.viega_fonterra_modbus.binary_sensor import (
+    ViegaActuatorPositionBinarySensor,
     ViegaBaseUnitErrorBinarySensor,
+    ViegaCirculationPumpBinarySensor,
+    _actor_position_sensors,
+    _all_actuator_position_addresses,
     async_setup_entry,
 )
 from custom_components.viega_fonterra_modbus.const import DOMAIN
@@ -27,6 +31,21 @@ def _entity_with_client(client) -> ViegaBaseUnitErrorBinarySensor:
     entity = ViegaBaseUnitErrorBinarySensor("entry_1")
     entity.hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"client": client}}})
     return entity
+
+
+def test_base_unit_error_name_is_localized_via_translation_key():
+    entity = ViegaBaseUnitErrorBinarySensor("entry_1")
+
+    assert not hasattr(entity, "_attr_name")
+    assert entity._attr_translation_key == "base_unit_error"
+
+
+def test_actuator_position_name_is_localized_via_translation_key():
+    entity = ViegaActuatorPositionBinarySensor("entry_1", "room_1", 1, "Wohnzimmer", 250)
+
+    assert not hasattr(entity, "_attr_name")
+    assert entity._attr_translation_key == "actuator_position"
+    assert entity._attr_translation_placeholders == {"room": "Wohnzimmer", "actor": "1"}
 
 
 def test_stays_off_and_does_not_crash_on_communication_failure():
@@ -77,3 +96,221 @@ def test_setup_entry_creates_a_single_indicator_per_module():
 
     assert len(added) == 1
     assert added[0]._attr_unique_id == "entry_1_base_unit_error"
+
+
+def test_setup_entry_adds_a_position_sensor_per_actuator():
+    hass = SimpleNamespace(
+        data={
+            DOMAIN: {
+                "entry_1": {
+                    "rooms": {"room_1": {"name": "Wohnzimmer", "actor": [1, 2]}}
+                }
+            }
+        }
+    )
+    entry = SimpleNamespace(entry_id="entry_1")
+    added: list = []
+
+    asyncio.run(async_setup_entry(hass, entry, added.extend))
+
+    unique_ids = {getattr(e, "_attr_unique_id", None) for e in added}
+    assert unique_ids == {
+        "entry_1_base_unit_error",
+        "entry_1_room_1_actor1_position",
+        "entry_1_room_1_actor2_position",
+        "entry_1_circulation_pump",
+    }
+
+
+def test_actuator_position_sensor_is_on_when_open():
+    """Manual page 91: Aktor Stellung is 0=geschlossen, 1=offen."""
+    entity = ViegaActuatorPositionBinarySensor("entry_1", "room_1", 1, "name", 250)
+    entity.hass = SimpleNamespace(
+        data={DOMAIN: {"entry_1": {"client": _FakeClient(values=[1])}}}
+    )
+
+    asyncio.run(entity.async_update())
+
+    assert entity._attr_is_on is True
+
+
+def test_actuator_position_sensor_is_off_when_closed():
+    entity = ViegaActuatorPositionBinarySensor("entry_1", "room_1", 1, "name", 250)
+    entity.hass = SimpleNamespace(
+        data={DOMAIN: {"entry_1": {"client": _FakeClient(values=[0])}}}
+    )
+
+    asyncio.run(entity.async_update())
+
+    assert entity._attr_is_on is False
+
+
+def test_actuator_position_sensors_built_for_every_actor_in_the_room():
+    entry = SimpleNamespace(entry_id="entry_1")
+    rooms = {"room_1": {"name": "Wohnzimmer", "actor": [1, 2, 3]}}
+
+    sensors = _actor_position_sensors(entry, rooms)
+
+    assert {s._attr_unique_id for s in sensors} == {
+        "entry_1_room_1_actor1_position",
+        "entry_1_room_1_actor2_position",
+        "entry_1_room_1_actor3_position",
+    }
+
+
+# --- Circulation pump indicator (spec.md 5c) ---------------------------
+
+
+class _MultiActuatorClient:
+    """A fake Modbus client returning a distinct, mutable value per address,
+    so a test can change one actuator's reading between async_update() calls
+    without affecting the others."""
+
+    def __init__(self, values_by_address: dict[int, int]):
+        self.values_by_address = dict(values_by_address)
+
+    async def read_input_registers(self, address, count=1):
+        if address not in self.values_by_address:
+            raise RuntimeError(f"no fixture value for address {address}")
+        return [self.values_by_address[address]]
+
+
+def _pump_entity(actuator_addresses: dict[int, int], client) -> ViegaCirculationPumpBinarySensor:
+    entity = ViegaCirculationPumpBinarySensor("entry_1", actuator_addresses)
+    entity.hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"client": client}}})
+    return entity
+
+
+def _tick(entity) -> None:
+    """Force the polling gate open and run one update cycle."""
+    entity._polling_gate._next_due = 0.0
+    asyncio.run(entity.async_update())
+
+
+def test_pump_name_is_localized_via_translation_key():
+    entity = ViegaCirculationPumpBinarySensor("entry_1", {1: 250})
+
+    assert not hasattr(entity, "_attr_name")
+    assert entity._attr_translation_key == "circulation_pump"
+
+
+def test_pump_is_unknown_before_any_actuator_has_settled():
+    client = _MultiActuatorClient({250: 1})
+    entity = _pump_entity({1: 250}, client)
+
+    _tick(entity)
+    assert entity._attr_is_on is None
+    _tick(entity)
+    assert entity._attr_is_on is None  # only 2 consecutive reads so far
+
+
+def test_pump_turns_on_after_three_consecutive_open_reads():
+    client = _MultiActuatorClient({250: 1})
+    entity = _pump_entity({1: 250}, client)
+
+    _tick(entity)
+    _tick(entity)
+    _tick(entity)
+
+    assert entity._attr_is_on is True
+
+
+def test_a_differing_read_resets_the_debounce_counter():
+    client = _MultiActuatorClient({250: 1})
+    entity = _pump_entity({1: 250}, client)
+
+    _tick(entity)  # open (1)
+    _tick(entity)  # open (2)
+    client.values_by_address[250] = 0
+    _tick(entity)  # closed (reset, 1) - not yet settled, still None
+    assert entity._attr_is_on is None
+
+    client.values_by_address[250] = 1
+    _tick(entity)  # open (reset, 1)
+    _tick(entity)  # open (2)
+    assert entity._attr_is_on is None
+    _tick(entity)  # open (3) -> settles
+
+    assert entity._attr_is_on is True
+
+
+def test_pump_stays_on_while_one_actuator_is_still_unsettled():
+    """spec.md 5c: on as soon as ANY used actuator is confirmed open, even
+    if another actuator hasn't finished debouncing yet."""
+    client = _MultiActuatorClient({250: 1, 253: 0})
+    entity = _pump_entity({1: 250, 2: 253}, client)
+
+    for _ in range(3):
+        _tick(entity)  # settles actuator 1 as open
+
+    assert entity._attr_is_on is True
+
+
+def test_pump_turns_off_once_every_settled_actuator_is_closed():
+    client = _MultiActuatorClient({250: 1, 253: 1})
+    entity = _pump_entity({1: 250, 2: 253}, client)
+    for _ in range(3):
+        _tick(entity)
+    assert entity._attr_is_on is True
+
+    client.values_by_address = {250: 0, 253: 0}
+    for _ in range(3):
+        _tick(entity)
+
+    assert entity._attr_is_on is False
+
+
+def test_error_sentinel_reads_do_not_advance_or_reset_the_counter():
+    client = _MultiActuatorClient({250: 1})
+    entity = _pump_entity({1: 250}, client)
+
+    _tick(entity)  # open (1)
+    _tick(entity)  # open (2)
+    client.values_by_address[250] = ViegaModbusClient.ERROR_SENTINEL
+    _tick(entity)  # ignored, counter stays at 2
+    assert entity._attr_is_on is None
+
+    client.values_by_address[250] = 1
+    _tick(entity)  # open (3) -> settles, as if the sentinel read never happened
+
+    assert entity._attr_is_on is True
+
+
+def test_all_actuator_position_addresses_dedupes_and_resolves_registers():
+    rooms = {
+        "room_1": {"name": "Wohnzimmer", "actor": [1, 2]},
+        "room_2": {"name": "Bad", "actor": 3},
+        "room_3": "not a dict",
+    }
+
+    addresses = _all_actuator_position_addresses(rooms)
+
+    assert addresses == {1: 250, 2: 253, 3: 256}
+
+
+def test_setup_entry_creates_the_pump_entity_when_actuators_exist():
+    hass = SimpleNamespace(
+        data={
+            DOMAIN: {
+                "entry_1": {"rooms": {"room_1": {"name": "Wohnzimmer", "actor": 1}}}
+            }
+        }
+    )
+    entry = SimpleNamespace(entry_id="entry_1")
+    added: list = []
+
+    asyncio.run(async_setup_entry(hass, entry, added.extend))
+
+    pumps = [e for e in added if isinstance(e, ViegaCirculationPumpBinarySensor)]
+    assert len(pumps) == 1
+    assert pumps[0]._attr_unique_id == "entry_1_circulation_pump"
+
+
+def test_setup_entry_skips_the_pump_entity_without_any_actuators():
+    hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"rooms": {}}}})
+    entry = SimpleNamespace(entry_id="entry_1")
+    added: list = []
+
+    asyncio.run(async_setup_entry(hass, entry, added.extend))
+
+    assert not any(isinstance(e, ViegaCirculationPumpBinarySensor) for e in added)

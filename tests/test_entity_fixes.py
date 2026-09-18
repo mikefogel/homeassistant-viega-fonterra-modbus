@@ -8,26 +8,6 @@ from custom_components.viega_fonterra_modbus.binary_sensor import (
 )
 from custom_components.viega_fonterra_modbus.const import DOMAIN
 from custom_components.viega_fonterra_modbus.number import ViegaPowerLevelNumber
-from custom_components.viega_fonterra_modbus.switch import ViegaBasicSwitchEntity
-
-
-def test_switch_unique_id_is_based_on_room_id_not_display_name():
-    """spec.md 5a: renaming a room must not change its unique_id.
-
-    The switch previously built its unique_id from the (editable) display
-    name instead of the stable room_id, so a rename created a duplicate
-    entity instead of just changing the shown name.
-    """
-    entity = ViegaBasicSwitchEntity("entry_1", "room_1", "Wohnzimmer")
-
-    assert entity._attr_unique_id == "entry_1_room_1_switch"
-
-
-def test_switch_unique_id_is_stable_across_a_room_rename():
-    before = ViegaBasicSwitchEntity("entry_1", "room_1", "Wohnzimmer")
-    after = ViegaBasicSwitchEntity("entry_1", "room_1", "Living Room")
-
-    assert before._attr_unique_id == after._attr_unique_id
 
 
 def test_power_level_number_without_resolvable_register_has_no_address():

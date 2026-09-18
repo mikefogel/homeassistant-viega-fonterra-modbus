@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
@@ -27,29 +26,6 @@ from .modbus_handler import ViegaModbusClient
 _LOGGER = logging.getLogger(__name__)
 
 
-def parse_rooms_input(value: object) -> tuple[dict[str, object], str | None]:
-    """Parse the raw `rooms` form field into a room mapping dict.
-
-    Accepts either an already-parsed dict (as options-flow callers may pass)
-    or a JSON string (as the setup form submits it). Returns `(rooms, None)`
-    on success or `({}, "invalid_rooms")` when the value cannot be parsed as
-    a JSON object. Pulled out of `async_step_user` as a pure function so the
-    parsing/validation logic is unit-testable without a running Home
-    Assistant flow-manager context.
-    """
-    if isinstance(value, dict):
-        return value, None
-    if not isinstance(value, str):
-        return {}, "invalid_rooms"
-    try:
-        parsed = json.loads(value)
-    except json.JSONDecodeError:
-        return {}, "invalid_rooms"
-    if not isinstance(parsed, dict):
-        return {}, "invalid_rooms"
-    return parsed, None
-
-
 class ViegaFonterraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Viega Fonterra."""
 
@@ -70,16 +46,18 @@ class ViegaFonterraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._discovered_rooms: dict[str, dict[str, object]] = {}
 
     async def async_step_user(self, user_input: dict[str, object] | None = None):
-        """Handle device configuration entry step."""
+        """Handle device configuration entry step.
+
+        Room mapping is intentionally not collected here: the device is the
+        source of truth for room-to-actuator association (spec.md 4a) and is
+        (re)discovered automatically on every setup. A manually typed room
+        mapping is only ever a fallback for when the device can't be read,
+        and belongs in the options flow ("Editing an existing module",
+        spec.md 6a), not in initial setup.
+        """
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            rooms, rooms_error = parse_rooms_input(user_input.get("rooms", {}))
-            if rooms_error:
-                errors["rooms"] = rooms_error
-            if errors:
-                return self._show_user_form(user_input, errors)
-
             # Validate connection to the device
             timeout = float(user_input.get(CONF_MODBUS_TIMEOUT, DEFAULT_MODBUS_TIMEOUT))
             try:
@@ -94,12 +72,7 @@ class ViegaFonterraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.error("Failed to connect to device: %s", err)
                 errors["base"] = "cannot_connect"
             else:
-                self._device_config = {
-                    key: value
-                    for key, value in user_input.items()
-                    if key != "rooms"
-                }
-                self._discovered_rooms = rooms
+                self._device_config = dict(user_input)
                 return await self.async_step_finalize()
 
         return self._show_user_form(user_input, errors)
@@ -110,10 +83,6 @@ class ViegaFonterraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str],
     ) -> config_entries.FlowResult:
         """Show the single-step module setup form."""
-        example = {
-            "room_1": {"name": "Wohnzimmer", "actor": 1, "sensor": 10},
-            "room_2": {"name": "Schlafzimmer", "actor": 2, "sensor": 11},
-        }
         defaults = user_input or {}
         return self.async_show_form(
             step_id="user",
@@ -143,9 +112,6 @@ class ViegaFonterraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             CONF_MODBUS_TIMEOUT, DEFAULT_MODBUS_TIMEOUT
                         ),
                     ): vol.All(vol.Coerce(float), vol.Range(min=1, max=30)),
-                    vol.Optional(
-                        "rooms", default=defaults.get("rooms", json.dumps(example))
-                    ): str,
                 }
             ),
             errors=errors,

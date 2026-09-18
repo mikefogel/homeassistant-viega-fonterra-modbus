@@ -191,3 +191,56 @@ Neu:
    (siehe spec.md §14, "Version and tag drift").
 
 Nichts aus dieser Session wurde committet oder gepusht.
+
+## 9. Nachtrag 2026-09-18 — Nutzer-Feedback aus dem realen Betrieb
+
+Umfang: Auswertung von beobachtetem Verhalten der laufenden Integration
+gegen `spec.md`, interaktiv mit dem Nutzer abgestimmt (siehe `spec.md` §14,
+neue Einträge ab „A switch that never touched the device").
+
+Bestätigte Fehler und behoben:
+
+| # | Fund | Datei(en) | Entscheidung |
+| --- | --- | --- | --- |
+| 1 | `preset_mode`-Werte (`manual`/`profile`/`setback`) waren nicht lokalisiert; keine `entity`-Übersetzungstabelle vorhanden | `climate.py`, `translations/*.json` | Behoben: `translation_key` + Übersetzungen (de: Manuell/Profil/Absenkbetrieb) |
+| 2 | „setback" war nirgends erklärt | `spec.md` §5a.1 | Behoben: Handbuchbegriff „Absenkbetrieb" (Profilmodus-Wert 2, nur im Heizbetrieb) dokumentiert |
+| 3 | Vorlauf-/Rücklauftemperatur und Aktuatorwerte wurden nur als `extra_state_attributes` der Climate-Entity gelesen, nie als eigene Entity | `climate.py`, `sensor.py`, neu `binary_sensor.py`-Erweiterung | Behoben: eigene Sensor-/Binary-Sensor-Entities ergänzt (siehe unten) |
+| 4 | Aktuator-„Stellung" war in `spec.md` §5a als „percentage sensor" spezifiziert, das Handbuch (S. 91) definiert sie aber binär (`0`/`1`) | `spec.md`, `binary_sensor.py` | Behoben: als `binary_sensor` (device_class `opening`) korrigiert |
+| 5 | Jeder Raum hatte eine `switch`-Entity ohne jede Wirkung auf das Gerät (kein Modbus-Read/Write; das Handbuch kennt kein schreibbares Ein/Aus-Register pro Raum) | `switch.py`, `spec.md` §8 | Auf Nutzerentscheidung entfernt (siehe `spec.md` §14) |
+
+Neue/geänderte Produktivmodule:
+
+- **`sensor.py`** — neu: `ViegaBaseUnitTemperatureSensor` (Vorlauftemperatur,
+  einmal je Gerät, Register `30025`); `_extra_actor_sensors()` zu
+  `_actor_temperature_sensors()` verallgemeinert — Rücklauftemperatur wird
+  jetzt für **jeden** Aktor eines Raums erzeugt, nicht nur für zusätzliche
+  Aktoren ab dem zweiten.
+- **`binary_sensor.py`** — neu: `ViegaActuatorPositionBinarySensor`
+  (offen/geschlossen je Aktor, Register `+0` im Aktor-Block); `async_setup_entry`
+  erzeugt jetzt sowohl den Basiseinheit-Fehlerindikator als auch alle
+  Aktuator-Stellungs-Entities.
+- **`registers.py`** — neu: `room_actor_numbers()` (liest die volle
+  Aktorliste eines Raums, nicht nur den primären Aktor); von `climate.py`,
+  `sensor.py` und `binary_sensor.py` gemeinsam genutzt.
+- **`climate.py`** — nutzt `room_actor_numbers()` statt eigener
+  Listen-Normalisierung; `_attr_translation_key = "room"` für lokalisierte
+  Preset-Labels.
+- **`switch.py`** entfernt; `const.py::PLATFORMS` ohne `"switch"`.
+- **`translations/de.json`, `translations/en.json`** — `entity.climate.room.
+  state_attributes.preset_mode.state`-Block ergänzt.
+
+Entfernte Dateien: `switch.py`, `tests/test_switch.py`.
+
+Neuer Report: `RegisterMap.md` — vollständiger Adressplan (Input- und
+Holding-Register laut Handbuch S. 89–93) mit Zuordnung zu Entities sowie
+Auflistung aller nicht belegten/unbekannten Adressbereiche.
+
+`Report.md1` (byte-identische Kopie dieser Datei) wurde entfernt; es gab
+nichts zusammenzuführen.
+
+Testlauf: `pytest -q` → 142 bestanden (vorher 144; 8 Switch-Tests entfernt,
+14 neue Tests für die neuen Entities/Helfer ergänzt). Tatsächlich in dieser
+Umgebung ausgeführt (Python 3.12.10, `homeassistant` 2025.1.4, `pytest`
+9.1.1 lokal installiert) — im Gegensatz zum Vorbehalt in Abschnitt 1 oben.
+
+Nichts aus diesem Nachtrag wurde committet oder gepusht.
