@@ -22,8 +22,8 @@ This custom integration connects one or more Viega Fonterra Smart Control system
 - Localized (German/English) entity names and thermostat preset labels
 - Downloadable configuration diagnostics (JSON) for checking an installation against the device
 - Optional Modbus TX/RX frame-level debug logging
-- Transaction-ID validation
-- Preservation of the last valid value for invalid readings (`-99`) and communication failures
+- Transaction-ID, function-code, and response-length validation on every Modbus frame
+- Preservation of the last valid value for invalid readings (`-99`) and communication failures, even across repeated consecutive errors
 
 ## Requirements
 
@@ -194,7 +194,7 @@ Expected — see "Entities" above: operating mode and profile mode are one share
 
 ### A module won't delete, or the integration entry's "Delete" seems to hang
 
-Versions before 0.1.14 could hang indefinitely when removing a module whose device had gone offline (an unbounded socket close). Update to 0.1.14 or later. The device can also be removed from its own device page (Settings → Devices & services → Devices → the module), not only from the integration entry.
+Removing a module always succeeds, even when its device is offline or unreachable — the socket close is time-bounded to the module's configured Modbus timeout. The device can also be removed from its own device page (Settings → Devices & services → Devices → the module), not only from the integration entry.
 
 ### Preset labels ("Manuell"/"Profil"/"Absenkbetrieb") show in English
 
@@ -219,18 +219,18 @@ Bug reports that come with a diagnostics export and/or a debug log excerpt are m
 
 ## Icon / branding
 
-[`brands/custom_integrations/viega_fonterra_modbus/`](brands/custom_integrations/viega_fonterra_modbus/) contains `icon.png`/`icon@2x.png` (and dark-theme variants) — an original design (not the Viega logo), laid out exactly as the [home-assistant/brands](https://github.com/home-assistant/brands) repository expects for `custom_integrations/viega_fonterra_modbus/`. Home Assistant's own UI only shows a custom integration's icon once that repository has merged it; these files are ready to submit there as a pull request but have not been submitted yet.
+[`brands/custom_integrations/viega_fonterra_modbus/`](brands/custom_integrations/viega_fonterra_modbus/) contains `icon.png`/`icon@2x.png` (and dark-theme variants) — an original underfloor-heating design (warmth rising from a floor, not the Viega logo or any other vendor's), laid out exactly as the [home-assistant/brands](https://github.com/home-assistant/brands) repository expects for `custom_integrations/viega_fonterra_modbus/`. Home Assistant's own UI (Settings → Devices & services) only shows a custom integration's icon once that repository has merged it; these files are ready to submit there as a pull request but have not been submitted yet, so the icon won't appear there until that happens — it does already show up wherever this repository's own files are rendered directly (this README, HACS's repository listing).
 
 ## Documentation
 
 - [System specification](spec.md)
 - [Register address map](RegisterMap.md)
-- [Viega Fonterra Smart Control manual](https://www.viega.de/content/dam/viega-assets/viega-worldwide-assets/products/surface-tempering/fonterra-smart-control/technical-documents/instructions-for-use/Fonterra%20Smart%20Control-de-DE.pdf) (hosted by Viega; no longer bundled in this repository, see "Third-party documentation" below)
+- [Viega Fonterra Smart Control manual](https://www.viega.de/content/dam/viega-assets/viega-worldwide-assets/products/surface-tempering/fonterra-smart-control/technical-documents/instructions-for-use/Fonterra%20Smart%20Control-de-DE.pdf) (hosted by Viega, see "Third-party documentation" below)
 - [Home Assistant documentation](https://www.home-assistant.io/)
 
 ## Third-party documentation
 
-This repository's own MIT license (below) covers only the integration's code and documentation. The Viega Fonterra Smart Control manual is © Viega and is not distributed with this repository — it is linked, hosted on Viega's own site, under "Documentation" above. Earlier versions of this repository bundled a copy of that manual directly; it has been removed going forward, though it may still be retrievable from this repository's git history.
+This repository's own MIT license (below) covers only the integration's code and documentation. The Viega Fonterra Smart Control manual is © Viega and is not distributed with this repository — it is linked, hosted on Viega's own site, under "Documentation" above.
 
 ## License
 

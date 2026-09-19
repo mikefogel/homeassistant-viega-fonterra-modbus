@@ -73,6 +73,37 @@ class ViegaModbusClient:
                 f"transaction ID mismatch: expected {expected}, got {transaction_id}"
             )
 
+    @staticmethod
+    def validate_function_code(response: bytes, expected: int) -> None:
+        """Reject a response whose function code does not echo the request.
+
+        A real Modbus/TCP device signals a rejected request (bad address,
+        bad quantity, ...) by echoing the request's function code with its
+        high bit set (e.g. `0x03` -> `0x83`) followed by a one-byte
+        exception code, not by an empty or garbled payload. Without this
+        check, that exception response would fall through to
+        `decode_int16_response`, which has no way to tell it apart from a
+        short/garbled data payload and would raise a generic "too short" or
+        "invalid length" error that hides the device's actual exception
+        code. A function code that echoes neither the request nor its
+        exception variant indicates a misrouted or corrupted frame and must
+        be rejected the same way a transaction ID mismatch is (spec.md 11).
+        """
+        if len(response) < 8:
+            raise ValueError("response too short for function code validation")
+        function_code = response[7]
+        if function_code == expected | 0x80:
+            exception_code = response[8] if len(response) > 8 else None
+            raise ModbusClientError(
+                f"Modbus exception response for function 0x{expected:02x}: "
+                f"exception code {exception_code}"
+            )
+        if function_code != expected:
+            raise ValueError(
+                f"function code mismatch: expected 0x{expected:02x}, "
+                f"got 0x{function_code:02x}"
+            )
+
     @classmethod
     def build_read_request(cls, address: int, count: int = 1, unit_id: int = 1) -> bytes:
         """Build a Modbus TCP request for function code 0x03."""
@@ -149,6 +180,26 @@ class ViegaModbusClient:
             for index in range(0, len(data), 2)
         ]
 
+    @staticmethod
+    def _validate_register_count(values: list[int], expected_count: int) -> None:
+        """Reject a response that decoded to a different number of registers
+        than was requested.
+
+        `decode_int16_response` only checks that its own `byte_count` field
+        is internally consistent with the payload it carries (§10) - it has
+        no way to know how many registers the *request* actually asked for.
+        A device that echoes a different quantity (a truncated read after a
+        partial TCP write, or a firmware quirk that answers a 2-register
+        request with 1) would otherwise be decoded silently, handing the
+        caller a value list that is the wrong length for the registers it
+        asked for - e.g. shifting which list index holds which register.
+        """
+        if len(values) != expected_count:
+            raise ModbusClientError(
+                f"Modbus response returned {len(values)} register(s), "
+                f"expected {expected_count}"
+            )
+
     async def connect(self) -> None:
         """Open a TCP socket to the configured Modbus endpoint."""
         try:
@@ -204,7 +255,10 @@ class ViegaModbusClient:
                 raise ModbusClientError(f"Modbus read timeout after {self.timeout}s")
             self._log_frame("RX", response)
             self.validate_transaction_id(response, expected_transaction_id)
-            return self.decode_register_response(response)
+            self.validate_function_code(response, 0x03)
+            values = self.decode_register_response(response)
+            self._validate_register_count(values, count)
+            return values
 
     async def read_input_registers(self, address: int, count: int = 1) -> list[int]:
         """Read signed Int16 input registers using function code 0x04."""
@@ -226,7 +280,10 @@ class ViegaModbusClient:
                 raise ModbusClientError(f"Modbus input read timeout after {self.timeout}s")
             self._log_frame("RX", response)
             self.validate_transaction_id(response, expected_transaction_id)
-            return self.decode_int16_response(response)
+            self.validate_function_code(response, 0x04)
+            values = self.decode_int16_response(response)
+            self._validate_register_count(values, count)
+            return values
 
     async def write_register(self, address: int, value: int) -> None:
         """Write a single register via Modbus function code 0x10 (Write
@@ -249,4 +306,5 @@ class ViegaModbusClient:
                 raise ModbusClientError(f"Modbus write timeout after {self.timeout}s")
             self._log_frame("RX", response)
             self.validate_transaction_id(response, expected_transaction_id)
+            self.validate_function_code(response, 0x10)
 

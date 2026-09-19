@@ -34,6 +34,16 @@ class _RecordingReadClient:
         return [self._value]
 
 
+class _ErrorSentinelClient:
+    """Every register reads back the `-99` device error sentinel."""
+
+    async def read_holding_registers(self, address, count=1):
+        return [-99]
+
+    async def read_input_registers(self, address, count=1):
+        return [-99]
+
+
 class _PartiallyFailingClient:
     def __init__(self, fail_address: int):
         self.fail_address = fail_address
@@ -181,6 +191,51 @@ def test_async_update_skips_the_read_when_the_polling_gate_is_not_due():
     asyncio.run(entity.async_update())
 
     assert len(client.holding_reads) + len(client.input_reads) == reads_after_first_update
+
+
+def test_async_update_keeps_the_previous_temperature_across_repeated_error_sentinel_reads():
+    """spec.md 10: a `-99` read must never be divided by 10 into a
+    fabricated -9.9 - the previous valid value must survive any number of
+    consecutive `-99` reads, not just a single one."""
+    entity = _entity(room_config={"name": "Wohnzimmer", "actor": 1})
+    entity.hass = SimpleNamespace(
+        data={DOMAIN: {"entry_1": {"client": _ErrorSentinelClient()}}}
+    )
+    entity._attr_current_temperature = 21.5
+    entity._attr_target_temperature = 22.0
+
+    for _ in range(3):
+        asyncio.run(entity.async_update())
+        assert entity._attr_current_temperature == 21.5
+        assert entity._attr_target_temperature == 22.0
+
+
+def test_async_update_keeps_previous_attributes_across_repeated_error_sentinel_reads():
+    """The same guarantee applies to every other register-backed attribute:
+    a `-99`/failed read must retain the last known-good value instead of
+    being cleared to `None`, which previously made hvac_mode/preset_mode
+    and the extra_state_attributes flap on every transient device error."""
+    entity = _entity(room_config={"name": "Wohnzimmer", "actor": 1})
+    entity.hass = SimpleNamespace(
+        data={DOMAIN: {"entry_1": {"client": _ErrorSentinelClient()}}}
+    )
+    entity._power_level = 5
+    entity._flow_temperature = 35.2
+    entity._return_temperature = 28.1
+    entity._actuator_position = 1
+    entity._base_error_code = 0
+    entity._operating_mode = 1
+    entity._profile_mode = 0
+
+    for _ in range(3):
+        asyncio.run(entity.async_update())
+        assert entity._power_level == 5
+        assert entity._flow_temperature == 35.2
+        assert entity._return_temperature == 28.1
+        assert entity._actuator_position == 1
+        assert entity._base_error_code == 0
+        assert entity.hvac_mode == "heat"
+        assert entity.preset_mode == "manual"
 
 
 def test_multi_actor_room_uses_the_first_actor_for_linked_registers():

@@ -659,6 +659,20 @@ values used by this integration (temperatures, power levels, mode codes) stay
 well under `32768` and are unaffected by signed interpretation; writes remain
 unsigned 16-bit values on the wire as specified in §5b.
 
+This "keep the previous value" rule applies to every register-backed value an
+entity holds, not only the ones an entity's own read directly produces: the
+Climate entity's `-99`/failed-read handling must cover the raw value on the
+wire *before* scaling (e.g. a raw `-99` current/target temperature divided by
+10 into a fabricated `-9.9`, rather than being recognized as the error
+sentinel first, is the same bug this section forbids) and every one of its
+other register-backed attributes (power level, flow/return temperature,
+actuator position, base-unit error code, operating mode, profile mode) -
+none of them may be overwritten with `None`/`-99` on a failed or sentinel
+read, including across any number of consecutive failed reads (at least 3
+consecutive `-99` reads must be tolerated without the value being lost or
+the entity's reported mode/preset changing), matching the debounce guarantee
+§5c already gives the circulation-pump indicator.
+
 ## 11. Modbus transaction validation
 
 If a Modbus/TCP response contains a transaction ID, the client must validate it before accepting the payload as valid.
@@ -668,6 +682,19 @@ Required behavior:
 - compare the response transaction ID with the expected request transaction ID
 - reject mismatches with a `ValueError`
 - ignore any payload whose transaction ID does not match the outstanding request
+- validate that the response's function code echoes the function code that
+  was sent; a function code with the high bit set (e.g. `0x03` -> `0x83`)
+  is a Modbus exception response and must be rejected as such (surfacing
+  the device's exception code) rather than being handed to the register
+  decoder, which cannot tell an exception response apart from a
+  short/garbled payload
+- validate that a read response decodes to exactly as many registers as the
+  request asked for; a response with a different register count must be
+  rejected rather than silently handed to the caller at the wrong list index
+
+These checks (transaction ID, function code, register count) are all
+transport-level integrity checks on the same response and must all pass
+before a read's decoded values are treated as valid.
 
 ## 11a. Frame-level logging and diagnostics
 
@@ -1110,3 +1137,27 @@ device - only a worked example's *individual bytes*, checked one by one
 against what the code actually sends, is. `build_write_request` now builds a
 function-`0x10` frame (`>HHHBBHHBH`: transaction/protocol/length, unit,
 function, address, quantity, byte count, value); every write must use it.
+
+### A raw `-99` reached the UI as `-9.9`, and register errors could flip the reported mode
+
+The Climate entity's `async_update` divided the raw `current_temperature`/
+`target_temperature` register values by 10 unconditionally - it only
+skipped the assignment when the read itself failed (`None`), never when the
+device answered with the valid-looking but sentinel raw value `-99` (§10).
+`-99 / 10 = -9.9`, so a room with no paired thermostat, or a transient
+device-side fault, showed a temperature of `-9.9°C` in the UI instead of
+its last known-good reading - the exact same class of mistake §10 already
+forbids for the *unscaled* value, just missed for the two attributes that
+happen to need a division first. The same method also assigned
+`power_level`, `flow_temperature`, `return_temperature`, `actuator_position`,
+and `base_unit_error_code` unconditionally on every update, with no `None`/
+`-99` guard at all, clearing each one to `None` on a single failed or
+sentinel read rather than keeping the previous value - and `operating_mode`/
+`profile_mode` were guarded against `None` but not against `-99`, so a
+sentinel read on the shared mode register could make `hvac_mode`/
+`preset_mode` fall back to a mode the base unit was never actually in.
+Fixed by scaling only after checking for the sentinel (a `_scaled` helper
+already existed and was used for two of the seven affected attributes; it is
+now used for all temperature attributes) and by never assigning `None`/`-99`
+over a previous value for any of them (a new `_valid` helper), verified
+across at least 3 consecutive `-99` reads in a row, not just one - see §10.

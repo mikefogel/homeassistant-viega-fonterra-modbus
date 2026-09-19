@@ -184,19 +184,29 @@ class ViegaRoomClimateEntity(ClimateEntity):
                 "Room %s (%s): raw register values=%s registers(PDU)=%s",
                 self.room_id, self._attr_name, values, self._registers,
             )
-        if values.get("current_temperature") is not None:
-            self._attr_current_temperature = values["current_temperature"] / 10
-        if values.get("target_temperature") is not None:
-            self._attr_target_temperature = values["target_temperature"] / 10
-        self._power_level = values.get("power_level")
-        self._flow_temperature = self._scaled(values.get("flow_temperature"))
-        self._return_temperature = self._scaled(values.get("return_temperature"))
-        self._actuator_position = values.get("actuator_position")
-        self._base_error_code = values.get("error_code")
-        if values.get("operating_mode") is not None:
-            self._operating_mode = values["operating_mode"]
-        if values.get("profile_mode") is not None:
-            self._profile_mode = values["profile_mode"]
+        current_temperature = self._scaled(values.get("current_temperature"))
+        if current_temperature is not None:
+            self._attr_current_temperature = current_temperature
+        target_temperature = self._scaled(values.get("target_temperature"))
+        if target_temperature is not None:
+            self._attr_target_temperature = target_temperature
+        self._power_level = self._valid(values.get("power_level"), self._power_level)
+        flow_temperature = self._scaled(values.get("flow_temperature"))
+        if flow_temperature is not None:
+            self._flow_temperature = flow_temperature
+        return_temperature = self._scaled(values.get("return_temperature"))
+        if return_temperature is not None:
+            self._return_temperature = return_temperature
+        self._actuator_position = self._valid(
+            values.get("actuator_position"), self._actuator_position
+        )
+        self._base_error_code = self._valid(values.get("error_code"), self._base_error_code)
+        operating_mode = self._valid(values.get("operating_mode"), None)
+        if operating_mode is not None:
+            self._operating_mode = operating_mode
+        profile_mode = self._valid(values.get("profile_mode"), None)
+        if profile_mode is not None:
+            self._profile_mode = profile_mode
 
     async def _read_values(self, client) -> dict[str, int | None]:
         values: dict[str, int | None] = {}
@@ -222,7 +232,21 @@ class ViegaRoomClimateEntity(ClimateEntity):
 
     @staticmethod
     def _scaled(value: int | None) -> float | None:
+        """Convert a raw tenths-of-a-degree register value, or `None` if the
+        read failed or returned the `-99` error sentinel (spec.md 10) - the
+        caller must keep its previous value in that case rather than divide
+        `-99` by 10 into a fabricated `-9.9`.
+        """
         return value / 10 if value is not None and value != -99 else None
+
+    @staticmethod
+    def _valid(value: int | None, previous: int | None) -> int | None:
+        """Return `value` unless it is a failed read or the `-99` error
+        sentinel, in which case the previous value is kept (spec.md 10):
+        a failed/`-99` read must never overwrite a room's last known-good
+        power level, actuator position, or error code with `None`/`-99`.
+        """
+        return value if value is not None and value != -99 else previous
 
     async def async_set_temperature(self, **kwargs) -> None:
         """Write the requested target temperature to the room register."""

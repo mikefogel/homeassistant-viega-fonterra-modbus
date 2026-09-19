@@ -316,6 +316,106 @@ def test_validate_transaction_id_accepts_a_matching_response():
     ViegaModbusClient.validate_transaction_id(response, expected=5)
 
 
+def test_read_holding_registers_rejects_a_modbus_exception_response():
+    """A device that rejects the request answers with the request's function
+    code with its high bit set (0x03 -> 0x83) plus a one-byte exception code,
+    not a valid data payload - this must be surfaced distinctly from a
+    generic length error (spec.md 11)."""
+    log: list[bytes] = []
+
+    class FakeWriter:
+        def write(self, data: bytes) -> None:
+            log.append(bytes(data))
+
+        async def drain(self) -> None:
+            return None
+
+    class FakeReader:
+        async def read(self, n: int) -> bytes:
+            transaction_id = log[-1][0:2]
+            # MBAP header + function 0x83 (0x03 | 0x80) + exception code 02
+            # ("illegal data address").
+            return transaction_id + b"\x00\x00\x00\x03\x01\x83\x02"
+
+    client = ViegaModbusClient("192.168.1.50", 502)
+    client._reader = FakeReader()
+    client._writer = FakeWriter()
+    client._connected = True
+
+    try:
+        asyncio.run(client.read_holding_registers(0, 1))
+    except ModbusClientError as err:
+        assert "exception code 2" in str(err)
+    else:
+        raise AssertionError("expected a ModbusClientError for an exception response")
+
+
+def test_read_input_registers_rejects_a_mismatched_function_code():
+    """A response echoing a function code that is neither the request's own
+    nor its exception variant indicates a misrouted/corrupted frame and must
+    be rejected, not silently decoded (spec.md 11)."""
+    log: list[bytes] = []
+
+    class FakeWriter:
+        def write(self, data: bytes) -> None:
+            log.append(bytes(data))
+
+        async def drain(self) -> None:
+            return None
+
+    class FakeReader:
+        async def read(self, n: int) -> bytes:
+            transaction_id = log[-1][0:2]
+            # Echoes function 0x03 (holding registers) for a request that
+            # asked for function 0x04 (input registers).
+            return transaction_id + b"\x00\x00\x00\x06\x01\x03\x02\x00\x01"
+
+    client = ViegaModbusClient("192.168.1.50", 502)
+    client._reader = FakeReader()
+    client._writer = FakeWriter()
+    client._connected = True
+
+    try:
+        asyncio.run(client.read_input_registers(0, 1))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected a ValueError for a mismatched function code")
+
+
+def test_read_holding_registers_rejects_a_register_count_that_does_not_match_the_request():
+    """A device that echoes fewer/more registers than requested must not be
+    decoded silently - the caller would otherwise read the wrong value at a
+    given list index (spec.md 11)."""
+    log: list[bytes] = []
+
+    class FakeWriter:
+        def write(self, data: bytes) -> None:
+            log.append(bytes(data))
+
+        async def drain(self) -> None:
+            return None
+
+    class FakeReader:
+        async def read(self, n: int) -> bytes:
+            transaction_id = log[-1][0:2]
+            # Only one register's worth of data (byte_count=2) although two
+            # registers (count=2) were requested.
+            return transaction_id + b"\x00\x00\x00\x05\x01\x03\x02\x00\x01"
+
+    client = ViegaModbusClient("192.168.1.50", 502)
+    client._reader = FakeReader()
+    client._writer = FakeWriter()
+    client._connected = True
+
+    try:
+        asyncio.run(client.read_holding_registers(0, 2))
+    except ModbusClientError as err:
+        assert "1 register(s), expected 2" in str(err)
+    else:
+        raise AssertionError("expected a ModbusClientError for a register-count mismatch")
+
+
 def test_validate_transaction_id_rejects_a_response_too_short_to_contain_one():
     try:
         ViegaModbusClient.validate_transaction_id(b"\x00\x01", expected=1)
