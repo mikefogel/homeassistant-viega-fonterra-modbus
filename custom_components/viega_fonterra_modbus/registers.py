@@ -8,8 +8,6 @@ and entity registration.
 from __future__ import annotations
 
 import re
-
-
 def decode_text_registers(values: list[int] | tuple[int, ...]) -> str:
     """Decode Viega text registers using big-endian bytes per register.
 
@@ -19,7 +17,7 @@ def decode_text_registers(values: list[int] | tuple[int, ...]) -> str:
     and "Dachgeschoss" as "aDhcegcsohss". Do not reintroduce "little" here.
     """
     raw = b"".join((int(value) & 0xFFFF).to_bytes(2, "big") for value in values)
-    return raw.decode("ascii", errors="replace").rstrip("\x00 ")
+    return raw.decode("utf-8", errors="replace").rstrip("\x00 ")
 
 HOLDING_REGISTER_BASE = 40000
 INPUT_REGISTER_BASE = 30000
@@ -48,8 +46,6 @@ def pdu_address(manual_address: int) -> int:
     raise ValueError(
         f"manual_address {manual_address} is outside the supported 3xxxx/4xxxx ranges"
     )
-
-
 BASE_UNIT_REGISTERS = {
     "operating_mode": pdu_address(40001),
     "profile_mode": pdu_address(40002),
@@ -59,8 +55,6 @@ BASE_UNIT_REGISTERS = {
     "base_unit_serial_number": pdu_address(30006),
     "base_unit_name": pdu_address(30011),
 }
-
-
 def room_registers(room_number: int) -> dict[str, int]:
     """Return the manual register addresses for a room number (1 through 12)."""
     if not 1 <= room_number <= 12:
@@ -73,8 +67,6 @@ def room_registers(room_number: int) -> dict[str, int]:
         "power_level": pdu_address(holding_base),
         "target_temperature": pdu_address(holding_base + 1),
     }
-
-
 def actor_registers(actor_number: int) -> dict[str, int]:
     """Return the manual input-register addresses for an actuator (1 through 12).
 
@@ -93,8 +85,6 @@ def actor_registers(actor_number: int) -> dict[str, int]:
         "return_temperature": pdu_address(base + 1),
         "room_id": pdu_address(base + 2),
     }
-
-
 def room_name_register(room_number: int) -> tuple[int, int]:
     """Return `(address, length)` for a room's name text register.
 
@@ -106,11 +96,7 @@ def room_name_register(room_number: int) -> tuple[int, int]:
         raise ValueError("room_number must be between 1 and 12")
     base = 30074 + (room_number - 1) * 12
     return pdu_address(base), 12
-
-
 _TRAILING_DIGITS = re.compile(r"(\d+)$")
-
-
 def resolve_room_number(room_id: str, room_config: dict[str, object]) -> int:
     """Return the numeric room number used to resolve default registers.
 
@@ -125,8 +111,6 @@ def resolve_room_number(room_id: str, room_config: dict[str, object]) -> int:
         return int(room_number)
     match = _TRAILING_DIGITS.search(str(room_id))
     return int(match.group(1)) if match else 0
-
-
 def room_actor_numbers(room_config: dict[str, object]) -> list[int]:
     """Return every actuator number configured for a room, in order.
 
@@ -150,8 +134,6 @@ def room_actor_numbers(room_config: dict[str, object]) -> list[int]:
         except (TypeError, ValueError):
             continue
     return result
-
-
 # Base-unit and room error/warning codes from the device manual's
 # "Fehlercodes" table (`Fonterra Smart Control-de-DE.pdf`, page 94). Codes
 # 3-10 are reported on the base-unit error register (manual 30024); codes
@@ -170,15 +152,11 @@ BASE_UNIT_ERROR_CODES: dict[int, str] = {
     22: "Room warning: room thermostat battery is weak",
     24: "Room warning: connection to the room thermostat is weak",
 }
-
-
 def describe_error_code(code: int | None) -> str:
     """Return a human-readable description for a base-unit error code."""
     if code is None:
         return "Unknown"
     return BASE_UNIT_ERROR_CODES.get(code, f"Unknown error (code {code})")
-
-
 REGISTER_DEFINITIONS: dict[str, dict[str, int | str | None]] = {
     "temperature_flow": {"address": 1000, "name": "Flow temperature", "unit": "°C"},
     "temperature_return": {"address": 1001, "name": "Return temperature", "unit": "°C"},
