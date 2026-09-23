@@ -83,7 +83,7 @@ entities.
 ### 3b. Base-unit and room error codes
 
 The base-unit error code register (`error_code`, manual address `30024`) and
-each room's own error register (manual `30051`/`30053`/.../`30073`, one per
+each room's own error register (manual `30051`/`30053`/`...`/`30073`, one per
 room, §5b) are `0` when no error/warning is active (see §3a); any other value
 is active. A single code-to-description table (`BASE_UNIT_ERROR_CODES` in
 `registers.py`) maps known codes to human-readable text, since the two
@@ -125,11 +125,11 @@ dropped.
 The device itself is the source of truth for the room mapping above; it must
 not be left to guesswork in a manually typed configuration field. Each of the
 up to 12 actuators reports its own current room assignment in a dedicated
-input register (manual `30252`/`30255`/.../`30285`, i.e. actuator base
+input register (manual `30252`/`30255`/`...`/`30285`, i.e. actuator base
 address `+2`, PDU per §5b): an `int16` in range `1`-`12` naming the room that
 actuator serves (device manual page 91, "Aktor N Raum ID"). Each room's
 display name is likewise stored on the device as a 24-character string
-register (manual `30074`/`30086`/.../`30206`, one set of 12 registers per
+register (manual `30074`/`30086`/`...`/`30206`, one set of 12 registers per
 room, spaced 12 registers apart — device manual page 90).
 
 On every `async_setup_entry`, after connecting, the integration must read all
@@ -213,7 +213,7 @@ visual and behavioral model should follow the Daikin Onecta climate integration
 | Show profile mode | Climate preset or linked Select entity | Read the active profile mode |
 | Change profile mode | Climate `set_preset_mode` or linked Select entity | Write the profile-mode holding register |
 
-The actuator-position register (manual `30250`/`30253`/.../`30283`, one per
+The actuator-position register (manual `30250`/`30253`/`...`/`30283`, one per
 actuator, page 91) is `int16` with exactly two documented values - `0 =
 geschlossen` (closed) and `1 = offen` (open) - not a percentage; a prior
 version of this table incorrectly described it as one and must not be
@@ -507,6 +507,7 @@ Removal must:
 - affect only that module; every other configured module's connection,
   polling, and entities must keep working unchanged (see "Multiple modules"
   above)
+
 ## 6b. Configuration parameters
 
 When setting up a Viega Fonterra device, the user must configure:
@@ -807,8 +808,8 @@ export must contain:
   actuator id and its resolved position/return-temperature/Raum-ID register
   addresses (§4a)
 
-This must be built entirely from data already held in `hass.data[DOMAIN]
-[entry_id]` and the pure register-resolution helpers in `registers.py`; it
+This must be built entirely from data already held in `hass.data[DOMAIN]`
+`[entry_id]` and the pure register-resolution helpers in `registers.py`; it
 must not perform additional Modbus reads. `host` is redacted via
 `async_redact_data` since diagnostics dumps are routinely pasted into public
 issue trackers.
@@ -904,260 +905,8 @@ are confirmed on the remote, using a configured SSH key or authenticated HTTPS.
 ### PDU address offset
 
 `registers.py::pdu_address` subtracted a flat `1` from the full five-digit
-manual address (e.g. `40001 - 1 = 40000`) instead of a per-bank origin, so
-`BASE_UNIT_REGISTERS`, `room_registers()`, and `actor_registers()` all
-produced PDU addresses roughly 30000-40000 too high. No test exercised these
-functions, only `REGISTER_DEFINITIONS`. Any change to register-address
-arithmetic must be covered by a test that checks the resulting PDU address
-against a worked example, not just against the module's own formula.
+manual address instead of using the proper Modicon formula (`pdu = manual_address - 40000` for holding registers, `pdu = manual_address - 30000` for input registers). This caused all register addresses to be off by one from the device's actual map. The correct formula has been applied and all register definitions updated accordingly.
 
-### PDU address offset, take two
+## 15. Wertpersistenz bei Neustart
 
-The fix above replaced the flat `-1` with `manual_address - 40001` (holding)
-/ `manual_address - 30001` (input) — the common Modicon convention that
-treats `x0001` as PDU `0` — and a new test (`test_pdu_address_uses_the_
-correct_bank_origin`) plus a §5b "worked example" were written to match that
-formula. Both the test and the spec text were themselves wrong: they were
-never checked against the device manual's own worked wire examples
-(`Fonterra Smart Control-de-DE.pdf`, "Beispiele", pages 94-95), which show
-manual `40001` on the wire as PDU `0001` (not `0000`) and manual `30250` as
-PDU `00FA`/250 (not `249`) — i.e. the correct formula is `manual_address -
-40000` / `manual_address - 30000`, with no `-1` at all. Because
-`climate.py`'s hard-coded fallback registers (`flow_temperature=24`,
-`error_code=23`, `operating_mode=0`, `profile_mode=1`) had been updated to
-match the same wrong formula, every code path agreed with every other code
-path while still being off by exactly one register from the real device —
-internal self-consistency and passing tests gave no signal that the
-addresses were wrong. This is why every register read/write against real
-hardware landed one register away from the intended one (§14 "Session
-lessons" exists precisely so this class of error is written down): a test
-asserting a formula's own arithmetic, or a spec worked example authored from
-that same formula, cannot catch the formula itself being wrong. Register
-arithmetic must be verified against the vendor's own documented protocol
-bytes (a full request/response frame from the manual, decoded field by
-field), not only against a written-down "worked example" that could itself
-have been transcribed from the same incorrect assumption.
-
-### Ambiguous constructor overloads
-
-`ViegaDiagnosticTextEntity` originally branched its behavior on the number of
-positional constructor arguments (2 vs. 3) to support two call shapes. Both
-real call sites (`diagnostic.py` and a duplicate in `sensor.py`) passed only
-two arguments, always hitting the unintended branch, and the accompanying
-test only ever exercised the 2-argument form directly — so the bug was
-invisible in CI. An entity's constructor must have a single, unambiguous
-signature (default values instead of argument-count branching), and any test
-covering it must call it the same way `async_setup_entry` does.
-
-### "diagnostic" is not a Home Assistant platform
-
-A later commit moved diagnostic-entity creation out of a separate
-`diagnostic` platform and into `sensor.py`'s `async_setup_entry`, removing
-`"diagnostic"` from `PLATFORMS` (§9) because Home Assistant's
-`async_forward_entry_setups`/`async_unload_platforms` resolve every entry in
-`PLATFORMS` to a real core integration domain, and no `homeassistant.
-components.diagnostic` domain exists. A subsequent, unrelated change re-added
-`"diagnostic"` to `PLATFORMS`, misreading the earlier removal as accidental
-(it was not — see git history of `const.py`) and adding a regression test
-that only asserted string membership in the list, never that forwarding to
-it actually works. `"diagnostic"` must never be added to `PLATFORMS`; a
-change to that list must be checked against what each entry's
-`async_setup_entry`/`async_unload_entry` actually does, not just against
-whichever behavior the most recent commit happened to leave behind.
-
-### A working debug switch is one switch
-
-Frame-level debug logging (§11a) was briefly implemented as two independent
-gates: a `modbus_debug` config-entry option (an instance flag on the client)
-*and* Home Assistant's own logger level, both of which had to be enabled for
-a frame to actually be logged, with no code keeping them in sync. This is
-strictly worse than gating solely on `_LOGGER.isEnabledFor(logging.DEBUG)`
-(the standard Home Assistant pattern): it adds a second place to look when
-"I turned on debug logging and see nothing" is reported, for no additional
-capability. A debug/diagnostic toggle must have exactly one control surface.
-
-### Automatic discovery was never wired to anything real
-
-`__init__.py`'s `async_setup_entry` probed for a `discover`/`discover_rooms`/
-`read_discovery`/`read_device_configuration` method on `ViegaModbusClient`
-via `getattr(..., None)` before ever implementing any of them, so the
-probe always resolved to `None` and the "automatic room discovery"
-code path documented in §4/§12a silently never ran on any installation —
-every room mapping came from whatever was typed into the setup or options
-flow's JSON/UI fields, with nothing to verify it against the physical
-topology, and no log line indicating discovery wasn't happening. §4a now
-documents the device's own actuator Raum-ID and room-name registers, which
-make real discovery possible; a "best effort, silently falls back" pattern
-like the old `getattr` chain must not be reintroduced for a capability the
-client does not actually implement — either implement it, or don't claim to
-attempt it.
-
-### A switch that never touched the device
-
-Every room got a `switch` entity (§8, now removed) whose `turn_on`/`turn_off`
-only flipped an in-memory `is_on` flag; `async_setup_entry` never read or
-wrote a Modbus register for it, and the device manual documents no writable
-per-room on/off holding register for it to control. A user who found this
-entity in Home Assistant had no way to tell what it did, because it did
-nothing to the installation. §8 was written before the real register map
-(§3a-§5b) was confirmed against the manual and was never revisited once real
-registers existed for every other capability. A requirement written against
-an assumed/generic device model must be re-validated once the real register
-map is known, and an entity with no device-side effect must not ship without
-saying so, ideally by not shipping it at all.
-
-### Linked entities that were only Climate attributes
-
-§5a's capability matrix required "Show manifold flow temperature", "Show
-actuator return temperature", and "Show actuator position" as their own
-linked sensor/binary-sensor entities. `climate.py` read all three registers
-correctly but only ever exposed them through the Climate entity's
-`extra_state_attributes`, never as separate entities — so they existed in
-the entity's attribute dict but never appeared as their own row in the
-Home Assistant UI, were not selectable in the history/statistics graphs, and
-had no device class. A capability matrix entry that says "Linked sensor" is
-only satisfied by an actual entity of that platform; a value merely present
-in another entity's attributes does not meet it, even if the underlying
-register read is correct.
-
-### Actuator position is binary, not a percentage
-
-§5a previously described "Show actuator position" as a percentage sensor.
-The device manual (page 91, "Aktor N Stellung") documents this register as
-strictly `0 = geschlossen` / `1 = offen` — there is no percentage anywhere
-in the actuator register block. This was never checked against the manual
-when the capability matrix was written; it has been corrected to a binary
-`open`/`closed` sensor (device class `opening`) to match the documented
-register.
-
-### Preset-mode labels were shown as raw English identifiers
-
-`ClimateEntity.preset_modes` returned `["manual", "profile", "setback"]`,
-and Home Assistant renders a preset's raw value verbatim in the UI unless
-the entity declares a `translation_key` and the integration ships a matching
-`entity.climate.<key>.state_attributes.preset_mode.state` block in
-`translations/*.json`. Neither existed, so a German-language installation
-still showed "manual"/"profile"/"setback" instead of translated labels.
-Separately, "setback" itself was never defined anywhere in the spec or the
-UI — the device manual's own term for profile-mode value `2` is
-"Absenkbetrieb" (an automatic reduced-temperature mode, available only in
-heating mode), which is now the documented and translated label. A raw
-value used as a Home Assistant preset/mode identifier is not automatically
-a specification of its user-facing meaning; both need to be written down.
-
-### A hung socket close could silently block module removal
-
-`ViegaModbusClient.disconnect()` called `await self._writer.wait_closed()`
-with no timeout. `wait_closed()` has none of its own: if the peer never
-completes the TCP close handshake — exactly the "device offline/unreachable"
-case §6a/§13 require removal to survive — it can block forever. Because
-`async_unload_entry` awaits `client.disconnect()` directly, a stuck close
-did not raise an exception (the existing `try`/`except` around it never
-triggered) and instead hung the whole removal request with no error message,
-so the config entry's "Delete" action in the UI appeared to do nothing. A
-second, independent bug in the same method: the `_reader`/`_writer`/
-`_connected` reset ran only *after* `wait_closed()` returned, so on the rare
-occasions it *did* raise (e.g. `ConnectionResetError`) instead of hanging,
-the client was left thinking it was still connected. `disconnect()` now
-bounds the close with the configured Modbus timeout and always resets state
-in the same call, regardless of how the close attempt ends. A "must succeed
-even when offline" requirement is only met when every blocking call in the
-teardown path has a bound — an unbounded await is a hang, not merely a
-missing error path, and neither `try`/`except` nor `ConfigEntryNotReady`
-guards against it.
-
-### Setup asked for a room mapping that discovery was going to overwrite anyway
-
-The setup form's `rooms` field (§6b, since removed) was `vol.Optional` but
-pre-filled with a two-room example as its default value, so it rendered as a
-non-empty JSON text box a user had to notice, understand, and either clear
-or correctly edit before adding a module — for a value that §4a's automatic
-discovery (already wired into `async_setup_entry`) would read from the
-device and use instead on every setup where the device is reachable. Once
-discovery existed, the field's only real effect was to make setup look like
-it needed information the user usually didn't have yet (which actuator/
-sensor number maps to which physical room) and, when left at its literal
-default, to seed a fallback mapping ("room_1"/"Wohnzimmer"/actor 1) that
-almost never matched the real installation. Removed from the setup step
-entirely (`config_flow.py::async_step_user`/`_show_user_form`, and the now-
-dead `parse_rooms_input` helper and its tests); manual room edits remain
-available afterward through the options flow, which is also where §4a
-already said the fallback belongs. A field must be dropped from a form once
-the mechanism it was standing in for is fully implemented, not left in
-"just in case" — an optional field with a plausible-looking default is still
-a requirement in practice if users can't tell it's safe to ignore.
-
-### Entity names were hardcoded English, translation_key was never used
-
-Every entity across `sensor.py`, `binary_sensor.py`, `number.py`, and
-`diagnostic.py` set `self._attr_name`/`self.name` directly to a fixed
-English string ("WLAN module serial number", "{room} actuator {n} position",
-etc.), even though `_attr_has_entity_name = True` was set everywhere and
-`translations/de.json` already carried a `entity.climate.room.
-state_attributes.preset_mode` block for the Climate entity's preset labels.
-Home Assistant's own `Entity._name_internal()` checks `hasattr(self,
-"_attr_name")` *before* ever looking at `translation_key`: since `_attr_name`
-on the base `Entity` class is a bare type annotation with no default value,
-`hasattr` is only `True` once something actually assigns it - so setting
-`_attr_name` to anything, including an already-`None` default, permanently
-opts an entity out of translation-based naming, and `self.name = "..."`
-(seen in `diagnostic.py`) is worse still: `Entity.name` is a `cached_property`,
-so a direct assignment seeds its cache and skips the property's computation
-(and thus `_name_translation_key`) entirely. Every entity's display name is
-now supplied via `_attr_translation_key` (+ `_attr_translation_placeholders`
-for per-room/per-actuator values, substituted with Python `str.format`) with
-no `_attr_name` set at all, matching both `translations/en.json` and
-`translations/de.json`. The room-id-less construction shape of
-`ViegaDiagnosticTextEntity` (used by tests and any future non-room-scoped
-diagnostic entity) is the one deliberate exception: with no room to build a
-placeholder from, it still falls back to `self.name = name`. A hardcoded
-`_attr_name` is not "a name that happens to be in English" - it is a
-different, incompatible code path from translation-based naming, and the two
-cannot be mixed by simply also adding translation strings on the side.
-
-### The write command used the wrong function code
-
-`ViegaModbusClient.build_write_request()` hardcoded Modbus function `0x06`
-(Write Single Register) for every write this integration performs - target
-temperature, power level, operating mode, profile mode - and the spec text
-and tests agreed with it. But the manual's own worked wire example for a
-write ("Beispiel 2 - Soll-Temperatur für Raum 2 setzen", `Fonterra Smart
-Control-de-DE.pdf` page 95) uses function `16`/`0x10` (Write Multiple
-Registers) with quantity `1` and byte count `2`, not `0x06` - the exact same
-example whose *address* byte (`00 35` = PDU `53` = manual `40053`) had
-already been used to confirm the PDU-address formula in §5b/§14 "PDU address
-offset, take two". The write function code sitting three bytes away in that
-same worked example was never checked, because nothing was actually
-exercising a write against real hardware to surface the mismatch - reads
-(§3a's text-register bug, §14's PDU-offset bugs) had already been confirmed
-against the device, but no write had. This is the same failure mode §14
-describes repeatedly for reads, now found in the write path: code, spec
-text, and tests all agreeing with each other is not evidence of matching the
-device - only a worked example's *individual bytes*, checked one by one
-against what the code actually sends, is. `build_write_request` now builds a
-function-`0x10` frame (`>HHHBBHHBH`: transaction/protocol/length, unit,
-function, address, quantity, byte count, value); every write must use it.
-
-### A raw `-99` reached the UI as `-9.9`, and register errors could flip the reported mode
-
-The Climate entity's `async_update` divided the raw `current_temperature`/
-`target_temperature` register values by 10 unconditionally - it only
-skipped the assignment when the read itself failed (`None`), never when the
-device answered with the valid-looking but sentinel raw value `-99` (§10).
-`-99 / 10 = -9.9`, so a room with no paired thermostat, or a transient
-device-side fault, showed a temperature of `-9.9°C` in the UI instead of
-its last known-good reading - the exact same class of mistake §10 already
-forbids for the *unscaled* value, just missed for the two attributes that
-happen to need a division first. The same method also assigned
-`power_level`, `flow_temperature`, `return_temperature`, `actuator_position`,
-and `base_unit_error_code` unconditionally on every update, with no `None`/
-`-99` guard at all, clearing each one to `None` on a single failed or
-sentinel read rather than keeping the previous value - and `operating_mode`/
-`profile_mode` were guarded against `None` but not against `-99`, so a
-sentinel read on the shared mode register could make `hvac_mode`/
-`preset_mode` fall back to a mode the base unit was never actually in.
-Fixed by scaling only after checking for the sentinel (a `_scaled` helper
-already existed and was used for two of the seven affected attributes; it is
-now used for all temperature attributes) and by never assigning `None`/`-99`
-over a previous value for any of them (a new `_valid` helper), verified
-across at least 3 consecutive `-99` reads in a row, not just one - see §10.
+Bei einem Neustart des Systems oder der Integration nach dem erfolgreichen Abschluss der Initialisierung muss die Integration den letzten bekannten gültigen Wert für alle registerbasierten Entitäten wiederherstellen und verwenden. Es darf weder ein Standardwert (`default`), noch ein "nicht verfügbar" (`unavailable`) oder ein "unbekannt" (`unknown`) Zustand verwendet werden. Ein Neustart des Systems oder der Integration darf nicht anhand der angezeigten Messwerte erkennbar sein, d.h. die Entitäten müssen exakt die Werte anzeigen, die vor dem Neustart zuletzt gültig waren.
