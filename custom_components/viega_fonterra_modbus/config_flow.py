@@ -59,21 +59,55 @@ class ViegaFonterraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             # Validate connection to the device
-            timeout = float(user_input.get(CONF_MODBUS_TIMEOUT, DEFAULT_MODBUS_TIMEOUT))
-            try:
-                client = ViegaModbusClient(
-                    str(user_input[CONF_HOST]),
-                    int(user_input[CONF_PORT]),
-                    timeout=timeout,
-                )
-                await client.connect()
-                await client.disconnect()
-            except Exception as err:
-                _LOGGER.error("Failed to connect to device: %s", err)
-                errors["base"] = "cannot_connect"
+            host = user_input.get(CONF_HOST)
+            port = user_input.get(CONF_PORT)
+            timeout = user_input.get(CONF_MODBUS_TIMEOUT)
+
+            # Validate host
+            if not host or not isinstance(host, str):
+                errors[CONF_HOST] = "invalid_host"
             else:
-                self._device_config = dict(user_input)
-                return await self.async_step_finalize()
+                host = str(host)
+
+            # Validate port
+            if port is None:
+                errors[CONF_PORT] = "required"
+            else:
+                try:
+                    port = int(port)
+                    if port < 1 or port > 65535:
+                        errors[CONF_PORT] = "invalid_port"
+                except (ValueError, TypeError):
+                    errors[CONF_PORT] = "invalid_port"
+
+            # Validate timeout
+            if timeout is None:
+                errors[CONF_MODBUS_TIMEOUT] = "required"
+            else:
+                try:
+                    timeout = float(timeout)
+                    if timeout < 1 or timeout > 30:
+                        errors[CONF_MODBUS_TIMEOUT] = "invalid_timeout"
+                except (ValueError, TypeError):
+                    errors[CONF_MODBUS_TIMEOUT] = "invalid_timeout"
+
+            if not errors:
+                try:
+                    client = ViegaModbusClient(host, port, timeout=timeout)
+                    await client.connect()
+                    await client.disconnect()
+                except Exception as err:
+                    _LOGGER.error("Failed to connect to device: %s", err)
+                    errors["base"] = "cannot_connect"
+                else:
+                    self._device_config = {
+                        CONF_HOST: host,
+                        CONF_PORT: port,
+                        CONF_DEVICE_NAME: str(user_input.get(CONF_DEVICE_NAME, "Fonterra")),
+                        CONF_POLLING_INTERVAL: int(user_input.get(CONF_POLLING_INTERVAL, DEFAULT_POLLING_INTERVAL)),
+                        CONF_MODBUS_TIMEOUT: timeout,
+                    }
+                    return await self.async_step_finalize()
 
         return self._show_user_form(user_input, errors)
 
@@ -93,9 +127,7 @@ class ViegaFonterraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     ): str,
                     vol.Required(
                         CONF_PORT, default=defaults.get(CONF_PORT, DEFAULT_PORT)
-                    ): vol.All(
-                        vol.Coerce(int), vol.Range(min=1, max=65535)
-                    ),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=65535)),
                     vol.Required(
                         CONF_DEVICE_NAME,
                         default=defaults.get(CONF_DEVICE_NAME, "Fonterra"),
@@ -125,9 +157,9 @@ class ViegaFonterraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._device_registry.add_device(
             device_id,
             {
-                "host": self._device_config.get(CONF_HOST),
-                "port": self._device_config.get(CONF_PORT),
-                "device_name": self._device_config.get(CONF_DEVICE_NAME),
+                "host": self._device_config.get(CONF_HOST, DEFAULT_HOST),
+                "port": self._device_config.get(CONF_PORT, DEFAULT_PORT),
+                "device_name": self._device_config.get(CONF_DEVICE_NAME, "Fonterra"),
                 "polling_interval": self._device_config.get(
                     CONF_POLLING_INTERVAL, DEFAULT_POLLING_INTERVAL
                 ),
@@ -167,37 +199,85 @@ class ViegaFonterraOptionsFlow(config_entries.OptionsFlow):
             current_rooms = {}
 
         if user_input is not None:
-            timeout = float(user_input[CONF_MODBUS_TIMEOUT])
-            try:
-                client = ViegaModbusClient(
-                    str(user_input[CONF_HOST]),
-                    int(user_input[CONF_PORT]),
-                    timeout=timeout,
-                )
-                await client.connect()
-                await client.disconnect()
-            except Exception as err:
-                _LOGGER.error("Failed to connect to updated device: %s", err)
-                errors["base"] = "cannot_connect"
+            # Validate all inputs
+            host = user_input.get(CONF_HOST)
+            port = user_input.get(CONF_PORT)
+            device_name = user_input.get(CONF_DEVICE_NAME)
+            polling_interval = user_input.get(CONF_POLLING_INTERVAL)
+            modbus_timeout = user_input.get(CONF_MODBUS_TIMEOUT)
+
+            # Validate host
+            if not host or not isinstance(host, str):
+                errors[CONF_HOST] = "invalid_host"
             else:
-                rooms = self._rooms_from_input(user_input, current_rooms)
-                data = {
-                    **current_data,
-                    CONF_HOST: str(user_input[CONF_HOST]),
-                    CONF_PORT: int(user_input[CONF_PORT]),
-                    CONF_DEVICE_NAME: str(user_input[CONF_DEVICE_NAME]),
-                    CONF_POLLING_INTERVAL: int(user_input[CONF_POLLING_INTERVAL]),
-                    CONF_MODBUS_TIMEOUT: timeout,
-                }
-                self.hass.config_entries.async_update_entry(
-                    self.config_entry,
-                    data=data,
-                    title=str(user_input[CONF_DEVICE_NAME]),
-                )
-                return self.async_create_entry(
-                    title="",
-                    data={**current_options, "rooms": rooms},
-                )
+                host = str(host)
+
+            # Validate port
+            if port is None:
+                errors[CONF_PORT] = "required"
+            else:
+                try:
+                    port = int(port)
+                    if port < 1 or port > 65535:
+                        errors[CONF_PORT] = "invalid_port"
+                except (ValueError, TypeError):
+                    errors[CONF_PORT] = "invalid_port"
+
+            # Validate device name
+            if not device_name or not isinstance(device_name, str):
+                errors[CONF_DEVICE_NAME] = "required"
+            else:
+                device_name = str(device_name)
+
+            # Validate polling interval
+            if polling_interval is None:
+                errors[CONF_POLLING_INTERVAL] = "required"
+            else:
+                try:
+                    polling_interval = int(polling_interval)
+                    if polling_interval < 5 or polling_interval > 300:
+                        errors[CONF_POLLING_INTERVAL] = "invalid_polling_interval"
+                except (ValueError, TypeError):
+                    errors[CONF_POLLING_INTERVAL] = "invalid_polling_interval"
+
+            # Validate timeout
+            if modbus_timeout is None:
+                errors[CONF_MODBUS_TIMEOUT] = "required"
+            else:
+                try:
+                    modbus_timeout = float(modbus_timeout)
+                    if modbus_timeout < 1 or modbus_timeout > 30:
+                        errors[CONF_MODBUS_TIMEOUT] = "invalid_timeout"
+                except (ValueError, TypeError):
+                    errors[CONF_MODBUS_TIMEOUT] = "invalid_timeout"
+
+            if not errors:
+                try:
+                    client = ViegaModbusClient(host, port, timeout=modbus_timeout)
+                    await client.connect()
+                    await client.disconnect()
+                except Exception as err:
+                    _LOGGER.error("Failed to connect to updated device: %s", err)
+                    errors["base"] = "cannot_connect"
+                else:
+                    rooms = self._rooms_from_input(user_input, current_rooms)
+                    data = {
+                        **current_data,
+                        CONF_HOST: host,
+                        CONF_PORT: port,
+                        CONF_DEVICE_NAME: device_name,
+                        CONF_POLLING_INTERVAL: polling_interval,
+                        CONF_MODBUS_TIMEOUT: modbus_timeout,
+                    }
+                    self.hass.config_entries.async_update_entry(
+                        self.config_entry,
+                        data=data,
+                        title=device_name,
+                    )
+                    return self.async_create_entry(
+                        title="",
+                        data={**current_options, "rooms": rooms},
+                    )
 
         schema: dict[vol.Marker, Any] = {
             vol.Required(
@@ -269,4 +349,3 @@ class ViegaFonterraOptionsFlow(config_entries.OptionsFlow):
                     ),
                 }
         return rooms
-

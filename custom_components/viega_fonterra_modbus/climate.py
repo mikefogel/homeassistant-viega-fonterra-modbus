@@ -1,14 +1,15 @@
 """Climate platform for room thermostats."""
 
+
 from __future__ import annotations
 
 import logging
 from datetime import timedelta
 
-from homeassistant.components.climate import ClimateEntity, ClimateEntityFeature
+from homeassistant.components.climate import ClimateEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTemperature
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, State
 
 from .const import DOMAIN, MIN_SCAN_INTERVAL
 from .device import build_device_info
@@ -47,6 +48,7 @@ async def async_setup_entry(
         for room_id, room_config in rooms.items()
     ]
     async_add_entities(entities)
+
 
 
 class ViegaRoomClimateEntity(ClimateEntity):
@@ -129,6 +131,29 @@ class ViegaRoomClimateEntity(ClimateEntity):
         if self._registers["profile_mode"] is not None:
             supported_features |= ClimateEntityFeature.PRESET_MODE
         self._attr_supported_features = supported_features
+
+    async def async_added_to_hass(self, hass: HomeAssistant) -> None:
+        """Restore last known state on startup (spec.md 15).
+        
+        On system/integration restart we must NOT use a default, unavailable,
+        or unknown state. The previous valid value must be retained exactly,
+        so a restart is not visible through the displayed values.
+        """
+        # Restore the last persisted state from Home Assistant's state machine.
+        # This ensures the entity is not re-created with defaults after a restart.
+        last_state = await hass.helpers.state.async_get_last_state(
+            self.entity_id
+        )
+        if last_state is not None and last_state.state not in (
+            "unknown",
+            "unavailable",
+        ):
+            # Restore current_temperature
+            if last_state.state_attr("current_temperature") is not None:
+                self._attr_current_temperature = float(last_state.state_attr("current_temperature"))
+            # Restore target_temperature
+            if last_state.state_attr("target_temperature") is not None:
+                self._attr_target_temperature = float(last_state.state_attr("target_temperature"))
 
     @property
     def hvac_mode(self) -> str:
@@ -220,11 +245,15 @@ class ViegaRoomClimateEntity(ClimateEntity):
                     else client.read_input_registers
                 )
                 shared = self.hass.data[DOMAIN][self._entry_id].get("polling")
-                result = await (shared.read(
-                    self.hass, self._entry_id,
-                    "holding" if name in {"target_temperature", "power_level", "operating_mode", "profile_mode"} else "input",
-                    int(address), 1
-                ) if shared else reader(int(address), 1))
+                result = await (
+                    shared.read(
+                        self.hass, self._entry_id,
+                        "holding" if name in {
+                            "target_temperature", "power_level", "operating_mode", "profile_mode"}
+                        else "input",
+                        int(address), 1
+                    ) if shared else reader(int(address), 1)
+                ) if shared else reader(int(address), 1)
                 values[name] = result[0] if result else None
             except Exception:
                 values[name] = None
