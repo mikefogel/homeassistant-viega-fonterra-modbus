@@ -13,6 +13,7 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory, UnitOfTemperature
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import DOMAIN, MIN_SCAN_INTERVAL
 from .device import build_device_info
@@ -241,7 +242,7 @@ class ViegaRegisterSensor(SensorEntity):
         return build_device_info(self.hass, self._entry_id)
 
 
-class ViegaBaseUnitIdentitySensor(SensorEntity):
+class ViegaBaseUnitIdentitySensor(SensorEntity, RestoreEntity):
     """Expose base-unit identity and error registers as diagnostic sensors."""
 
     _attr_has_entity_name = True
@@ -274,6 +275,27 @@ class ViegaBaseUnitIdentitySensor(SensorEntity):
         self.last_error_message = ""
 
         self._polling_gate = PollingGate()
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the last known value across restarts (spec.md 15)."""
+        await super().async_added_to_hass()
+        if self._attr_native_value is not None:
+            return
+        last_state = await self.async_get_last_state()
+        if last_state is None or last_state.state in ("unknown", "unavailable"):
+            return
+        if self._text:
+            self._attr_native_value = last_state.state
+        else:
+            try:
+                value = int(last_state.state)
+            except (TypeError, ValueError):
+                return
+            self._attr_native_value = value
+            if self._sensor_key == "base_unit_error_code":
+                self._attr_extra_state_attributes = {
+                    "description": describe_error_code(value)
+                }
 
     async def async_update(self) -> None:
         """Read and decode the identity or base-unit error register."""
@@ -312,7 +334,7 @@ class ViegaBaseUnitIdentitySensor(SensorEntity):
         return build_device_info(self.hass, self._entry_id)
 
 
-class ViegaActorLinkedSensor(SensorEntity):
+class ViegaActorLinkedSensor(SensorEntity, RestoreEntity):
     """Expose a register linked to one of a room's actuators."""
 
     _attr_has_entity_name = True
@@ -347,6 +369,17 @@ class ViegaActorLinkedSensor(SensorEntity):
             self._attr_state_class = SensorStateClass.MEASUREMENT
         self._polling_gate = PollingGate()
 
+    async def async_added_to_hass(self) -> None:
+        """Restore the last known value across restarts (spec.md 15)."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is None or last_state.state in ("unknown", "unavailable"):
+            return
+        try:
+            self._attr_native_value = float(last_state.state)
+        except (TypeError, ValueError):
+            return
+
     async def async_update(self) -> None:
         if not self._polling_gate.is_due(self.hass, self._entry_id):
             return
@@ -371,7 +404,7 @@ class ViegaActorLinkedSensor(SensorEntity):
         return build_device_info(self.hass, self._entry_id)
 
 
-class ViegaBaseUnitTemperatureSensor(SensorEntity):
+class ViegaBaseUnitTemperatureSensor(SensorEntity, RestoreEntity):
     """Expose a base-unit-level temperature register (e.g. manifold flow).
 
     Unlike room/actuator registers, this value is measured once for the
@@ -395,6 +428,17 @@ class ViegaBaseUnitTemperatureSensor(SensorEntity):
         self._attr_translation_key = sensor_key
         self._attr_native_value = None
         self._polling_gate = PollingGate()
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the last known value across restarts (spec.md 15)."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is None or last_state.state in ("unknown", "unavailable"):
+            return
+        try:
+            self._attr_native_value = float(last_state.state)
+        except (TypeError, ValueError):
+            return
 
     async def async_update(self) -> None:
         if not self._polling_gate.is_due(self.hass, self._entry_id):

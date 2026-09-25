@@ -4,7 +4,7 @@ from __future__ import annotations
 
 DOMAIN = "viega_fonterra_modbus"
 DEFAULT_NAME = "Viega Fonterra Smart Control"
-DEFAULT_HOST = "192.168.0.188"
+DEFAULT_HOST = "192.168.0.188"  # spec.md "Adding a module": documented default
 DEFAULT_PORT = 502
 DEFAULT_POLLING_INTERVAL = 30  # seconds
 DEFAULT_MODBUS_TIMEOUT = 5  # seconds

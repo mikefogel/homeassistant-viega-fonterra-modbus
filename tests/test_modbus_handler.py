@@ -236,7 +236,7 @@ def test_concurrent_reads_are_serialized_on_shared_connection():
             direction, last_tx = log[-1]
             assert direction == "TX", "a second request was sent before the first response was read"
             transaction_id = last_tx[0:2]
-            response = transaction_id + b"\x00\x00\x00\x06\x01\x03\x02\x00\x01"
+            response = transaction_id + b"\x00\x00\x00\x05\x01\x03\x02\x00\x01"
             log.append(("RX", response))
             return response
 
@@ -261,9 +261,8 @@ def test_frame_debug_logging_is_disabled_by_default(caplog):
 
     Frame logging (spec.md 11a) is gated purely on Home Assistant's standard
     `logger.logs` mechanism (`_LOGGER.isEnabledFor(logging.DEBUG)`) - there
-    is no separate per-client flag to keep in sync (see spec.md 14, "A
-    working debug switch is one switch"). Without raising the logger's level,
-    `isEnabledFor(DEBUG)` is false and nothing is logged.
+    is no separate per-client flag to keep in sync. Without raising the
+    logger's level, `isEnabledFor(DEBUG)` is false and nothing is logged.
     """
     client = ViegaModbusClient("192.168.8.20", 502)
 
@@ -368,7 +367,7 @@ def test_read_input_registers_rejects_a_mismatched_function_code():
             transaction_id = log[-1][0:2]
             # Echoes function 0x03 (holding registers) for a request that
             # asked for function 0x04 (input registers).
-            return transaction_id + b"\x00\x00\x00\x06\x01\x03\x02\x00\x01"
+            return transaction_id + b"\x00\x00\x00\x05\x01\x03\x02\x00\x01"
 
     client = ViegaModbusClient("192.168.1.50", 502)
     client._reader = FakeReader()
@@ -478,6 +477,46 @@ def test_write_register_raises_when_not_connected():
         raise AssertionError("expected a ModbusClientError when not connected")
 
 
+def test_read_holding_registers_reassembles_a_response_split_across_reads():
+    """TCP is a byte stream, not message-framed: `StreamReader.read(n)` can
+    legitimately return fewer bytes than a full frame even without EOF, if
+    the response arrives split across more than one TCP segment. A response
+    delivered one byte at a time must still decode correctly instead of
+    being rejected as "too short" or silently truncated."""
+    log: list[bytes] = []
+
+    class FakeWriter:
+        def write(self, data: bytes) -> None:
+            log.append(bytes(data))
+
+        async def drain(self) -> None:
+            return None
+
+    class OneByteAtATimeReader:
+        def __init__(self, response: bytes) -> None:
+            self._remaining = response
+
+        async def read(self, n: int) -> bytes:
+            if not self._remaining:
+                return b""
+            byte, self._remaining = self._remaining[:1], self._remaining[1:]
+            return byte
+
+    expected_transaction_id = _next_transaction_id()
+    response = expected_transaction_id.to_bytes(2, "big") + (
+        b"\x00\x00\x00\x05\x01\x03\x02\x00\x2a"
+    )
+
+    client = ViegaModbusClient("192.168.1.50", 502)
+    client._reader = OneByteAtATimeReader(response)
+    client._writer = FakeWriter()
+    client._connected = True
+
+    values = asyncio.run(client.read_holding_registers(0, 1))
+
+    assert values == [42]
+
+
 def test_read_input_registers_uses_function_code_0x04():
     """read_input_registers must send function code 0x04 on the wire, not
     the 0x03 used for holding registers."""
@@ -493,7 +532,7 @@ def test_read_input_registers_uses_function_code_0x04():
     class FakeReader:
         async def read(self, n: int) -> bytes:
             transaction_id = log[-1][0:2]
-            return transaction_id + b"\x00\x00\x00\x06\x01\x04\x02\x00\x2a"
+            return transaction_id + b"\x00\x00\x00\x05\x01\x04\x02\x00\x2a"
 
     client = ViegaModbusClient("192.168.1.50", 502)
     client._reader = FakeReader()

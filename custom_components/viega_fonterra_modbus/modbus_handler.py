@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import struct
-from typing import Any
 
 
 _LOGGER = logging.getLogger("custom_components.viega_fonterra_modbus.modbus")
@@ -33,6 +32,7 @@ class ViegaModbusClient:
         self._writer: asyncio.StreamWriter | None = None
         self._connected = False
         self._lock = asyncio.Lock()
+        self._recv_buffer = b""
 
     def _log_frame(self, direction: str, frame: bytes) -> None:
         """Log a Modbus frame with decoded header fields at DEBUG level.
@@ -131,11 +131,10 @@ class ViegaModbusClient:
         für Raum 2 setzen", `Fonterra Smart Control-de-DE.pdf`, page 95)
         writes this way - function 16, quantity 1, byte count 2 - not
         function 0x06 (Write Single Register), which this method used
-        previously and which was never checked against that example. See
-        spec.md 14 "The write command used the wrong function code": the
-        same class of mistake as the earlier PDU-address-offset bugs -
-        internally self-consistent code and tests that were never checked
-        against the vendor's own documented frame bytes.
+        previously and which was never checked against that example (spec.md
+        5b): the same class of mistake as the earlier PDU-address-offset
+        bugs - internally self-consistent code and tests that were never
+        checked against the vendor's own documented frame bytes.
         """
         cls._transaction_counter += 1
         transaction_id = cls._transaction_counter & 0xFFFF
@@ -209,6 +208,46 @@ class ViegaModbusClient:
         except asyncio.TimeoutError:
             raise ModbusClientError(f"Connection timeout after {self.timeout}s")
         self._connected = True
+        self._recv_buffer = b""
+
+    async def _read_exact(self, size: int) -> bytes:
+        """Accumulate exactly `size` bytes from the stream.
+
+        Loops across multiple `StreamReader.read()` calls if needed - see
+        `_read_frame` for why a single call cannot be trusted to return a
+        whole frame. Any bytes read beyond what the current frame needs are
+        kept in `self._recv_buffer` for the next call instead of discarded.
+        """
+        while len(self._recv_buffer) < size:
+            chunk = await self._reader.read(size - len(self._recv_buffer))
+            if not chunk:
+                raise ModbusClientError(
+                    "Modbus connection closed while reading a response"
+                )
+            self._recv_buffer += chunk
+        data, self._recv_buffer = self._recv_buffer[:size], self._recv_buffer[size:]
+        return data
+
+    async def _read_frame(self) -> bytes:
+        """Read one complete Modbus TCP response frame.
+
+        TCP is a byte stream, not message-framed: `StreamReader.read(n)` can
+        legitimately return fewer than `n` bytes even without EOF, if a
+        response arrives split across more than one TCP segment. A single
+        unconditional `read(256)` (the previous implementation) then handed
+        a truncated frame straight to the decoders, which could only fail
+        with a generic/misleading "too short" error instead of actually
+        waiting for the rest. The MBAP header's length field (bytes 4-5)
+        states exactly how many bytes follow the header, so read the header
+        first and then keep reading until that many more bytes have
+        arrived.
+        """
+        header = await self._read_exact(6)
+        length = int.from_bytes(header[4:6], byteorder="big")
+        if length <= 0:
+            raise ModbusClientError("Modbus response length field is invalid")
+        remainder = await self._read_exact(length)
+        return header + remainder
 
     async def disconnect(self) -> None:
         """Close the current TCP connection.
@@ -236,6 +275,7 @@ class ViegaModbusClient:
         self._reader = None
         self._writer = None
         self._connected = False
+        self._recv_buffer = b""
 
     async def read_holding_registers(self, address: int, count: int = 1) -> list[int]:
         """Read one or more holding registers from the Modbus device."""
@@ -250,7 +290,7 @@ class ViegaModbusClient:
             await self._writer.drain()
 
             try:
-                response = await asyncio.wait_for(self._reader.read(256), timeout=self.timeout)
+                response = await asyncio.wait_for(self._read_frame(), timeout=self.timeout)
             except asyncio.TimeoutError:
                 raise ModbusClientError(f"Modbus read timeout after {self.timeout}s")
             self._log_frame("RX", response)
@@ -273,9 +313,7 @@ class ViegaModbusClient:
             self._writer.write(request)
             await self._writer.drain()
             try:
-                response = await asyncio.wait_for(
-                    self._reader.read(256), timeout=self.timeout
-                )
+                response = await asyncio.wait_for(self._read_frame(), timeout=self.timeout)
             except asyncio.TimeoutError:
                 raise ModbusClientError(f"Modbus input read timeout after {self.timeout}s")
             self._log_frame("RX", response)
@@ -299,9 +337,7 @@ class ViegaModbusClient:
             await self._writer.drain()
 
             try:
-                response = await asyncio.wait_for(
-                    self._reader.read(256), timeout=self.timeout
-                )
+                response = await asyncio.wait_for(self._read_frame(), timeout=self.timeout)
             except asyncio.TimeoutError:
                 raise ModbusClientError(f"Modbus write timeout after {self.timeout}s")
             self._log_frame("RX", response)

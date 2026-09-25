@@ -97,3 +97,37 @@ def test_setup_entry_creates_one_diagnostic_entity_per_room_with_a_default_statu
     assert rooms_shown == {"Wohnzimmer", "room_2"}
     assert all(entity._attr_translation_key == "room_diagnostic" for entity in added)
     assert all(entity.status == "error: sensor invalid" for entity in added)
+
+
+# --- State restoration across restarts (spec.md 15) ---------------------
+
+
+def test_restores_last_status_text_on_add():
+    entity = ViegaDiagnosticTextEntity(
+        "entry_1", "Wohnzimmer diagnostic", room_id="room_1", room_name="Wohnzimmer"
+    )
+
+    async def _fake_last_state():
+        return SimpleNamespace(state="No error", attributes={})
+
+    entity.async_get_last_state = _fake_last_state
+
+    asyncio.run(entity.async_added_to_hass())
+
+    assert entity.status == "No error"
+    assert entity.state == "No error"
+
+
+def test_ignores_unknown_restored_status():
+    entity = ViegaDiagnosticTextEntity(
+        "entry_1", "Wohnzimmer diagnostic", room_id="room_1", room_name="Wohnzimmer"
+    )
+
+    async def _fake_last_state():
+        return SimpleNamespace(state="unknown", attributes={})
+
+    entity.async_get_last_state = _fake_last_state
+
+    asyncio.run(entity.async_added_to_hass())
+
+    assert entity.status == "error: sensor invalid"

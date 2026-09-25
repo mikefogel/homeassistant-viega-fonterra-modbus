@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 from custom_components.viega_fonterra_modbus.const import DOMAIN
 from custom_components.viega_fonterra_modbus.modbus_handler import ViegaModbusClient
+from custom_components.viega_fonterra_modbus.registers import describe_error_code
 from custom_components.viega_fonterra_modbus.sensor import (
     ViegaActorLinkedSensor,
     ViegaBaseUnitIdentitySensor,
@@ -265,3 +266,80 @@ def test_setup_entry_creates_return_temperature_sensors_for_room_actuators():
 
     unique_ids = {getattr(entity, "_attr_unique_id", None) for entity in added}
     assert "entry_1_room_1_actor1_return_temperature" in unique_ids
+
+
+# --- State restoration across restarts (spec.md 15) ---------------------
+
+
+def _with_restored_state(entity, state):
+    """Stub RestoreEntity.async_get_last_state() without a real hass/store."""
+
+    async def _fake_last_state():
+        return None if state is None else SimpleNamespace(state=state, attributes={})
+
+    entity.async_get_last_state = _fake_last_state
+    return entity
+
+
+def test_identity_sensor_restores_last_text_value():
+    sensor = _identity_sensor("base_unit_name", 10, 12, True, _FakeInputClient([]))
+    _with_restored_state(sensor, "Fonterra")
+
+    asyncio.run(sensor.async_added_to_hass())
+
+    assert sensor._attr_native_value == "Fonterra"
+
+
+def test_identity_sensor_restores_error_code_and_its_description():
+    sensor = _identity_sensor(
+        "base_unit_error_code", 23, 1, False, _FakeInputClient([])
+    )
+    _with_restored_state(sensor, "7")
+
+    asyncio.run(sensor.async_added_to_hass())
+
+    assert sensor._attr_native_value == 7
+    assert sensor._attr_extra_state_attributes == {
+        "description": describe_error_code(7)
+    }
+
+
+def test_identity_sensor_ignores_unknown_and_unavailable_restored_state():
+    sensor = _identity_sensor("base_unit_name", 10, 12, True, _FakeInputClient([]))
+    _with_restored_state(sensor, "unavailable")
+
+    asyncio.run(sensor.async_added_to_hass())
+
+    assert sensor._attr_native_value is None
+
+
+def test_identity_sensor_does_not_restore_over_an_already_known_value():
+    """A pre-populated value (from the config-entry options cache written by
+    __init__.py) must win over a stale restored state, not be clobbered."""
+    sensor = _identity_sensor("base_unit_name", 10, 12, True, _FakeInputClient([]))
+    sensor._attr_native_value = "CURRENT"
+    _with_restored_state(sensor, "STALE")
+
+    asyncio.run(sensor.async_added_to_hass())
+
+    assert sensor._attr_native_value == "CURRENT"
+
+
+def test_actor_linked_sensor_restores_last_numeric_value():
+    sensor = ViegaActorLinkedSensor(
+        "entry_1", "room_1", 2, "return_temperature", "name", 250, unit="°C", scale=10
+    )
+    _with_restored_state(sensor, "21.5")
+
+    asyncio.run(sensor.async_added_to_hass())
+
+    assert sensor._attr_native_value == 21.5
+
+
+def test_base_unit_temperature_sensor_restores_last_numeric_value():
+    sensor = ViegaBaseUnitTemperatureSensor("entry_1", "flow_temperature", 25)
+    _with_restored_state(sensor, "42.3")
+
+    asyncio.run(sensor.async_added_to_hass())
+
+    assert sensor._attr_native_value == 42.3

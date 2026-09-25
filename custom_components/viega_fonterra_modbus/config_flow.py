@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.const import CONF_HOST, CONF_PORT
-from homeassistant.core import HomeAssistant
 
 from .const import (
     CONF_DEVICE_NAME,
@@ -20,7 +20,6 @@ from .const import (
     DEFAULT_PORT,
     DOMAIN,
 )
-from .device_registry import DeviceRegistry
 from .modbus_handler import ViegaModbusClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -35,14 +34,17 @@ class ViegaFonterraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def async_get_options_flow(
         config_entry: config_entries.ConfigEntry,
     ) -> config_entries.OptionsFlow:
-        """Return the options flow for an existing module."""
-        return ViegaFonterraOptionsFlow(config_entry)
+        """Return the options flow for an existing module.
+
+        `config_entry` is unused: the base `OptionsFlow` class resolves it
+        itself from the flow's `handler` (see `ViegaFonterraOptionsFlow`).
+        """
+        return ViegaFonterraOptionsFlow()
 
     def __init__(self) -> None:
         """Initialize the config flow."""
         super().__init__()
         self._device_config: dict[str, object] = {}
-        self._device_registry = DeviceRegistry()
         self._discovered_rooms: dict[str, dict[str, object]] = {}
 
     async def async_step_user(self, user_input: dict[str, object] | None = None):
@@ -92,6 +94,9 @@ class ViegaFonterraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     errors[CONF_MODBUS_TIMEOUT] = "invalid_timeout"
 
             if not errors:
+                await self.async_set_unique_id(f"{host}:{port}")
+                self._abort_if_unique_id_configured()
+
                 try:
                     client = ViegaModbusClient(host, port, timeout=timeout)
                     await client.connect()
@@ -154,21 +159,6 @@ class ViegaFonterraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> config_entries.FlowResult:
         """Finalize and create the config entry."""
         device_id = f"fonterra_{self._device_config.get(CONF_HOST, 'unknown')}"
-        self._device_registry.add_device(
-            device_id,
-            {
-                "host": self._device_config.get(CONF_HOST, DEFAULT_HOST),
-                "port": self._device_config.get(CONF_PORT, DEFAULT_PORT),
-                "device_name": self._device_config.get(CONF_DEVICE_NAME, "Fonterra"),
-                "polling_interval": self._device_config.get(
-                    CONF_POLLING_INTERVAL, DEFAULT_POLLING_INTERVAL
-                ),
-                "modbus_timeout": self._device_config.get(
-                    CONF_MODBUS_TIMEOUT, DEFAULT_MODBUS_TIMEOUT
-                ),
-                "rooms": self._discovered_rooms,
-            },
-        )
 
         return self.async_create_entry(
             title=str(self._device_config.get(CONF_DEVICE_NAME, "Fonterra")),
@@ -181,11 +171,13 @@ class ViegaFonterraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class ViegaFonterraOptionsFlow(config_entries.OptionsFlow):
-    """Handle editable settings for an existing Viega module."""
+    """Handle editable settings for an existing Viega module.
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        """Initialize the options flow."""
-        self.config_entry = config_entry
+    Deliberately has no `__init__`/`self.config_entry = config_entry`: since
+    Home Assistant 2024.12, `OptionsFlow.config_entry` is provided by the
+    base class itself (resolved from the flow's `handler`), and assigning it
+    explicitly is deprecated and slated for removal in 2025.12.
+    """
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -309,8 +301,9 @@ class ViegaFonterraOptionsFlow(config_entries.OptionsFlow):
                     f"room_name_{room_id}", default=room.get("name", room_id)
                 )] = str
                 schema[vol.Required(
-                    f"room_actor_{room_id}", default=room.get("actor", 0)
-                )] = vol.Coerce(int)
+                    f"room_actor_{room_id}",
+                    default=_format_actor_field(room.get("actor", 0)),
+                )] = str
                 schema[vol.Required(
                     f"room_sensor_{room_id}", default=room.get("sensor", 0)
                 )] = vol.Coerce(int)
@@ -333,13 +326,17 @@ class ViegaFonterraOptionsFlow(config_entries.OptionsFlow):
         rooms: dict[str, dict[str, Any]] = {}
         for room_id, room in current_rooms.items():
             if isinstance(room, dict):
+                raw_actor = user_input.get(f"room_actor_{room_id}")
+                actor = (
+                    _parse_actor_field(raw_actor)
+                    if raw_actor is not None
+                    else room.get("actor", 0)
+                )
                 rooms[room_id] = {
                     "name": user_input.get(
                         f"room_name_{room_id}", room.get("name", room_id)
                     ),
-                    "actor": user_input.get(
-                        f"room_actor_{room_id}", room.get("actor", 0)
-                    ),
+                    "actor": actor,
                     "sensor": user_input.get(
                         f"room_sensor_{room_id}", room.get("sensor", 0)
                     ),
@@ -349,3 +346,37 @@ class ViegaFonterraOptionsFlow(config_entries.OptionsFlow):
                     ),
                 }
         return rooms
+
+
+_ACTOR_FIELD_SPLIT = re.compile(r"[,\s]+")
+
+
+def _format_actor_field(actor: object) -> str:
+    """Render a room's `actor` value (spec.md 4: int or list of ints) as the
+    comma-separated string shown/edited in the options flow's text field."""
+    if isinstance(actor, list):
+        return ", ".join(str(number) for number in actor)
+    return str(actor)
+
+
+def _parse_actor_field(raw: object) -> int | list[int]:
+    """Parse the options flow's actor text field back into an `actor` value.
+
+    A single number is kept as a plain `int` (matching the shape used
+    throughout `registers.py`/`climate.py` for a single-actuator room);
+    two or more comma/space-separated numbers become a `list[int]` so a
+    multi-actuator room (spec.md 4) survives an options-flow edit instead
+    of silently collapsing to only its first actuator - the previous
+    `vol.Coerce(int)` field could only ever hold one number at all.
+    """
+    if isinstance(raw, list):
+        numbers = [int(value) for value in raw]
+    elif isinstance(raw, (int, float)):
+        numbers = [int(raw)]
+    else:
+        numbers = [
+            int(part) for part in _ACTOR_FIELD_SPLIT.split(str(raw).strip()) if part
+        ]
+    if not numbers:
+        return 0
+    return numbers[0] if len(numbers) == 1 else numbers

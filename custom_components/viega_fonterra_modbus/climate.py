@@ -8,7 +8,7 @@ from datetime import timedelta
 from homeassistant.components.climate import ClimateEntity, ClimateEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTemperature
-from homeassistant.core import HomeAssistant, State
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import DOMAIN, MIN_SCAN_INTERVAL
@@ -127,18 +127,38 @@ class ViegaRoomClimateEntity(ClimateEntity, RestoreEntity):
 
         On system/integration restart we must NOT use a default, unavailable,
         or unknown state. The previous valid value must be retained exactly,
-        so a restart is not visible through the displayed values.
+        so a restart is not visible through the displayed values - which for
+        a Climate entity means not just current/target temperature but also
+        the HVAC mode and preset mode (the entity's `state` and
+        `preset_mode` attribute, both otherwise silently reset to this
+        class's `__init__` defaults of "heat"/"manual" on every restart) and
+        every value surfaced via `extra_state_attributes`.
         """
         await super().async_added_to_hass()
         last_state = await self.async_get_last_state()
-        if last_state is not None and last_state.state not in (
-            "unknown",
-            "unavailable",
-        ):
-            if last_state.attributes.get("current_temperature") is not None:
-                self._attr_current_temperature = float(last_state.attributes["current_temperature"])
-            if last_state.attributes.get("temperature") is not None:
-                self._attr_target_temperature = float(last_state.attributes["temperature"])
+        if last_state is None or last_state.state in ("unknown", "unavailable"):
+            return
+
+        if last_state.state in {"off", "heat", "cool"}:
+            self._operating_mode = {"off": 0, "heat": 1, "cool": 2}[last_state.state]
+
+        attributes = last_state.attributes
+        if attributes.get("current_temperature") is not None:
+            self._attr_current_temperature = float(attributes["current_temperature"])
+        if attributes.get("temperature") is not None:
+            self._attr_target_temperature = float(attributes["temperature"])
+        if attributes.get("preset_mode") in self.preset_modes:
+            self._profile_mode = self.preset_modes.index(attributes["preset_mode"])
+        if attributes.get("power_level") is not None:
+            self._power_level = attributes["power_level"]
+        if attributes.get("flow_temperature") is not None:
+            self._flow_temperature = float(attributes["flow_temperature"])
+        if attributes.get("return_temperature") is not None:
+            self._return_temperature = float(attributes["return_temperature"])
+        if attributes.get("actuator_position") is not None:
+            self._actuator_position = attributes["actuator_position"]
+        if attributes.get("base_unit_error_code") is not None:
+            self._base_error_code = attributes["base_unit_error_code"]
 
     @property
     def hvac_mode(self) -> str:

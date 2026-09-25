@@ -14,6 +14,10 @@
           "modbus_debug": "Enable Modbus frame debug logging"
         },
         "errors": {
+          "invalid_host": "Enter a valid host or IP address.",
+          "required": "This field is required.",
+          "invalid_port": "Enter a port between 1 and 65535.",
+          "invalid_timeout": "Enter a timeout between 1 and 30 seconds.",
           "cannot_connect": "Unable to connect to the Viega module."
         }
       },
@@ -30,9 +34,17 @@
           "room_target_register": "Target-temperature holding register"
         },
         "errors": {
+          "invalid_host": "Enter a valid host or IP address.",
+          "required": "This field is required.",
+          "invalid_port": "Enter a port between 1 and 65535.",
+          "invalid_timeout": "Enter a timeout between 1 and 30 seconds.",
+          "invalid_polling_interval": "Enter a polling interval between 5 and 300 seconds.",
           "cannot_connect": "Unable to connect to the Viega module."
         }
       }
+    },
+    "abort": {
+      "already_configured": "This host and port are already configured."
     }
   },
   "entity": {

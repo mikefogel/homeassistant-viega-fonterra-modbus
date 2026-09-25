@@ -16,6 +16,7 @@ from homeassistant.components.binary_sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import DOMAIN, MIN_SCAN_INTERVAL
 from .device import build_device_info
@@ -102,7 +103,7 @@ def _actor_position_sensors(
     return sensors
 
 
-class ViegaBaseUnitErrorBinarySensor(BinarySensorEntity):
+class ViegaBaseUnitErrorBinarySensor(BinarySensorEntity, RestoreEntity):
     """Report whether the base unit currently reports a non-zero error code."""
 
     _attr_has_entity_name = True
@@ -116,6 +117,14 @@ class ViegaBaseUnitErrorBinarySensor(BinarySensorEntity):
         self._attr_translation_key = "base_unit_error"
         self._attr_is_on = False
         self._polling_gate = PollingGate()
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the last known value across restarts (spec.md 15)."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is None or last_state.state in ("unknown", "unavailable"):
+            return
+        self._attr_is_on = last_state.state == "on"
 
     async def async_update(self) -> None:
         entry_data = self.hass.data[DOMAIN][self._entry_id]
@@ -137,7 +146,7 @@ class ViegaBaseUnitErrorBinarySensor(BinarySensorEntity):
         return build_device_info(self.hass, self._entry_id)
 
 
-class ViegaActuatorPositionBinarySensor(BinarySensorEntity):
+class ViegaActuatorPositionBinarySensor(BinarySensorEntity, RestoreEntity):
     """Report an actuator's open/closed state (manual: 0=closed, 1=open)."""
 
     _attr_has_entity_name = True
@@ -162,6 +171,14 @@ class ViegaActuatorPositionBinarySensor(BinarySensorEntity):
         self._attr_is_on = None
         self._polling_gate = PollingGate()
 
+    async def async_added_to_hass(self) -> None:
+        """Restore the last known value across restarts (spec.md 15)."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is None or last_state.state in ("unknown", "unavailable"):
+            return
+        self._attr_is_on = last_state.state == "on"
+
     async def async_update(self) -> None:
         if not self._polling_gate.is_due(self.hass, self._entry_id):
             return
@@ -181,7 +198,7 @@ class ViegaActuatorPositionBinarySensor(BinarySensorEntity):
         return build_device_info(self.hass, self._entry_id)
 
 
-class ViegaCirculationPumpBinarySensor(BinarySensorEntity):
+class ViegaCirculationPumpBinarySensor(BinarySensorEntity, RestoreEntity):
     """Derived on/off indicator for an externally controlled circulation pump.
 
     The Viega register map has no dedicated pump register - this is a
@@ -217,6 +234,14 @@ class ViegaCirculationPumpBinarySensor(BinarySensorEntity):
         self._candidate_count: dict[int, int] = dict.fromkeys(actuator_addresses, 0)
         self._accepted: dict[int, int | None] = dict.fromkeys(actuator_addresses)
         self._polling_gate = PollingGate()
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the last known value across restarts (spec.md 15)."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is None or last_state.state in ("unknown", "unavailable"):
+            return
+        self._attr_is_on = last_state.state == "on"
 
     async def async_update(self) -> None:
         if not self._polling_gate.is_due(self.hass, self._entry_id):

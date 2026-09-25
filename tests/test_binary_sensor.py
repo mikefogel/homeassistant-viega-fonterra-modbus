@@ -314,3 +314,53 @@ def test_setup_entry_skips_the_pump_entity_without_any_actuators():
     asyncio.run(async_setup_entry(hass, entry, added.extend))
 
     assert not any(isinstance(e, ViegaCirculationPumpBinarySensor) for e in added)
+
+
+# --- State restoration across restarts (spec.md 15) ---------------------
+
+
+def _with_restored_state(entity, state):
+    """Stub RestoreEntity.async_get_last_state() without a real hass/store."""
+
+    async def _fake_last_state():
+        return None if state is None else SimpleNamespace(state=state, attributes={})
+
+    entity.async_get_last_state = _fake_last_state
+    return entity
+
+
+def test_base_unit_error_indicator_restores_on_state():
+    entity = ViegaBaseUnitErrorBinarySensor("entry_1")
+    _with_restored_state(entity, "on")
+
+    asyncio.run(entity.async_added_to_hass())
+
+    assert entity._attr_is_on is True
+
+
+def test_base_unit_error_indicator_ignores_unknown_restored_state():
+    entity = ViegaBaseUnitErrorBinarySensor("entry_1")
+    entity._attr_is_on = False
+    _with_restored_state(entity, "unknown")
+
+    asyncio.run(entity.async_added_to_hass())
+
+    assert entity._attr_is_on is False
+
+
+def test_actuator_position_sensor_restores_off_state():
+    entity = ViegaActuatorPositionBinarySensor("entry_1", "room_1", 1, "name", 250)
+    _with_restored_state(entity, "off")
+
+    asyncio.run(entity.async_added_to_hass())
+
+    assert entity._attr_is_on is False
+
+
+def test_circulation_pump_restores_last_aggregate_state():
+    entity = ViegaCirculationPumpBinarySensor("entry_1", {1: 250})
+    _with_restored_state(entity, "on")
+
+    asyncio.run(entity.async_added_to_hass())
+
+    assert entity._attr_is_on is True

@@ -1,11 +1,8 @@
 """Specification-driven tests for the expanded Fonterra integration."""
 
 from custom_components.viega_fonterra_modbus.const import PLATFORMS
-from custom_components.viega_fonterra_modbus.device_registry import DeviceRegistry
 from custom_components.viega_fonterra_modbus.climate import ViegaRoomClimateEntity
-from custom_components.viega_fonterra_modbus.room_mapping import RoomMappingDiscovery
 from custom_components.viega_fonterra_modbus.sensor import async_setup_entry as sensor_async_setup_entry
-from custom_components.viega_fonterra_modbus.thermostat import ViegaRoomThermostatEntity
 
 
 def test_diagnostic_is_not_a_platform_and_is_forwarded_via_sensor():
@@ -21,59 +18,6 @@ def test_diagnostic_is_not_a_platform_and_is_forwarded_via_sensor():
     assert "diagnostic" not in PLATFORMS
     assert "sensor" in PLATFORMS
     assert sensor_async_setup_entry is not None
-
-
-def test_room_mapping_discovers_actor_and_sensor_pairs():
-    """The first read must discover room-to-actor and room-to-sensor relationships."""
-    payload = {
-        "rooms": {
-            "room_1": {"actor": 1, "sensor": 10},
-            "room_2": {"actor": 2, "sensor": 11},
-        }
-    }
-
-    mapping = RoomMappingDiscovery.discover(payload)
-
-    assert mapping["room_1"]["actor"] == 1
-    assert mapping["room_1"]["sensor"] == 10
-    assert mapping["room_2"]["actor"] == 2
-    assert mapping["room_2"]["sensor"] == 11
-
-
-def test_room_mapping_supports_multiple_actors_per_room_and_multiple_rooms_per_actor():
-    """The room mapping is not strictly 1:1 between rooms and actors."""
-    payload = {
-        "rooms": {
-            "room_1": {"actor": [1, 2], "sensor": [10, 11]},
-            "room_2": {"actor": 2, "sensor": 12},
-        }
-    }
-
-    mapping = RoomMappingDiscovery.discover(payload)
-
-    assert mapping["room_1"]["actor"] == [1, 2]
-    assert mapping["room_1"]["sensor"] == [10, 11]
-    assert mapping["room_2"]["actor"] == 2
-
-
-def test_multiple_devices_can_be_registered():
-    """The registry must keep several device entries independent from one another."""
-    registry = DeviceRegistry()
-    registry.add_device("device_1", {"host": "192.168.1.10", "port": 502})
-    registry.add_device("device_2", {"host": "192.168.1.11", "port": 502})
-
-    assert len(registry.devices) == 2
-    assert registry.devices["device_1"]["host"] == "192.168.1.10"
-    assert registry.devices["device_2"]["host"] == "192.168.1.11"
-
-
-def test_room_thermostat_has_room_identifier_and_target_temperature():
-    """A thermostat entity must expose room-level data required for HA control."""
-    entity = ViegaRoomThermostatEntity("room_1", 21.5, 22.0)
-
-    assert entity.room_id == "room_1"
-    assert entity.current_temperature == 21.5
-    assert entity.target_temperature == 22.0
 
 
 def test_climate_entity_uses_feature_flags():

@@ -1,6 +1,10 @@
 .idea/
 __pycache__
 
+# One-off release helper scripts (see e.g. release-0.1.15.sh): reviewed and
+# run locally by the maintainer, never meant to be committed themselves.
+release-*.sh
+
 # Third-party Viega manual - no longer bundled (see README "Third-party
 # documentation"); linked from Viega's own site instead. Removed from git
 # tracking; ignored here so an existing local copy isn't re-added by

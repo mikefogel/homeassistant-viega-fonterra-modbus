@@ -98,3 +98,32 @@ def test_setup_entry_only_adds_entities_with_a_resolvable_register():
 
     assert len(added) == 1
     assert added[0]._room_id == "room_1"
+
+
+# --- State restoration across restarts (spec.md 15) ---------------------
+
+
+def test_restores_last_numeric_value_on_add():
+    entity = ViegaPowerLevelNumber("entry_1", "room_1", {"name": "Wohnzimmer"})
+
+    async def _fake_last_state():
+        return SimpleNamespace(state="5", attributes={})
+
+    entity.async_get_last_state = _fake_last_state
+
+    asyncio.run(entity.async_added_to_hass())
+
+    assert entity._attr_native_value == 5.0
+
+
+def test_ignores_unavailable_restored_state():
+    entity = ViegaPowerLevelNumber("entry_1", "room_1", {"name": "Wohnzimmer"})
+
+    async def _fake_last_state():
+        return SimpleNamespace(state="unavailable", attributes={})
+
+    entity.async_get_last_state = _fake_last_state
+
+    asyncio.run(entity.async_added_to_hass())
+
+    assert entity._attr_native_value is None

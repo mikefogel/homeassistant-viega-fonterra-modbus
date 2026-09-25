@@ -12,6 +12,13 @@
           "polling_interval": "Polling-Intervall (Sekunden)",
           "modbus_timeout": "Modbus-Timeout (Sekunden)",
           "modbus_debug": "Modbus-Frame-Debug-Logging aktivieren"
+        },
+        "errors": {
+          "invalid_host": "Bitte einen gültigen Host oder eine IP-Adresse eingeben.",
+          "required": "Dieses Feld ist erforderlich.",
+          "invalid_port": "Bitte einen Port zwischen 1 und 65535 eingeben.",
+          "invalid_timeout": "Bitte einen Timeout zwischen 1 und 30 Sekunden eingeben.",
+          "cannot_connect": "Verbindung zum Viega-Modul nicht möglich."
         }
       },
       "init": {
@@ -25,8 +32,19 @@
           "modbus_timeout": "Modbus-Timeout (Sekunden)",
           "modbus_debug": "Modbus-Frame-Debug-Logging aktivieren",
           "room_target_register": "Solltemperatur-Holding-Register"
+        },
+        "errors": {
+          "invalid_host": "Bitte einen gültigen Host oder eine IP-Adresse eingeben.",
+          "required": "Dieses Feld ist erforderlich.",
+          "invalid_port": "Bitte einen Port zwischen 1 und 65535 eingeben.",
+          "invalid_timeout": "Bitte einen Timeout zwischen 1 und 30 Sekunden eingeben.",
+          "invalid_polling_interval": "Bitte ein Polling-Intervall zwischen 5 und 300 Sekunden eingeben.",
+          "cannot_connect": "Verbindung zum Viega-Modul nicht möglich."
         }
       }
+    },
+    "abort": {
+      "already_configured": "Dieser Host und Port sind bereits konfiguriert."
     }
   },
   "entity": {

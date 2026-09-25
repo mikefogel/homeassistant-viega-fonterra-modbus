@@ -7,6 +7,7 @@ import logging
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import DOMAIN
 from .device import build_device_info
@@ -63,7 +64,7 @@ def _room_error_address(room_id: str, room_config: object) -> int:
     return BASE_UNIT_REGISTERS["error_code"]
 
 
-class ViegaDiagnosticTextEntity(SensorEntity):
+class ViegaDiagnosticTextEntity(SensorEntity, RestoreEntity):
     """Represent a textual diagnosis entity for a failed sensor or unit."""
 
     _attr_has_entity_name = True
@@ -101,6 +102,15 @@ class ViegaDiagnosticTextEntity(SensorEntity):
     @property
     def state(self) -> str:
         return self.status
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the last known value across restarts (spec.md 15)."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is None or last_state.state in ("unknown", "unavailable"):
+            return
+        self.status = last_state.state
+        self._attr_native_value = self.status
 
     async def async_update(self) -> None:
         """Refresh the diagnostic status from the shared error-code poll."""

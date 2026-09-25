@@ -274,3 +274,93 @@ def test_device_info_uses_the_configured_device_name():
     )
 
     assert entity.device_info["name"] == "Heizung Wohnzimmer"
+
+
+# --- State restoration across restarts (spec.md 15) ---------------------
+
+
+def test_restores_current_and_target_temperature_on_add():
+    """A restart must not be visible in the displayed values: the last known
+    current/target temperature must come back exactly as it was."""
+    entity = _entity()
+
+    async def _fake_last_state():
+        return SimpleNamespace(
+            state="heat",
+            attributes={"current_temperature": 21.5, "temperature": 23.0},
+        )
+
+    entity.async_get_last_state = _fake_last_state
+
+    asyncio.run(entity.async_added_to_hass())
+
+    assert entity._attr_current_temperature == 21.5
+    assert entity._attr_target_temperature == 23.0
+
+
+def test_restores_hvac_mode_preset_mode_and_extra_attributes_on_add():
+    """The entity's `state` *is* the HVAC mode (ClimateEntity.state returns
+    hvac_mode) - a restart must not silently fall back to this class's
+    __init__ defaults ("heat"/"manual") for a room that was actually off
+    and on the profile preset."""
+    entity = _entity()
+
+    async def _fake_last_state():
+        return SimpleNamespace(
+            state="off",
+            attributes={
+                "current_temperature": 21.5,
+                "temperature": 23.0,
+                "preset_mode": "profile",
+                "power_level": 4,
+                "flow_temperature": 35.2,
+                "return_temperature": 28.1,
+                "actuator_position": 1,
+                "base_unit_error_code": 0,
+            },
+        )
+
+    entity.async_get_last_state = _fake_last_state
+
+    asyncio.run(entity.async_added_to_hass())
+
+    assert entity.hvac_mode == "off"
+    assert entity.preset_mode == "profile"
+    assert entity.extra_state_attributes == {
+        "room_id": entity.room_number,
+        "power_level": 4,
+        "flow_temperature": 35.2,
+        "return_temperature": 28.1,
+        "actuator_position": 1,
+        "base_unit_error_code": 0,
+    }
+
+
+def test_ignores_unknown_or_unavailable_restored_state():
+    entity = _entity()
+    entity._attr_current_temperature = 19.0
+    entity._attr_target_temperature = 20.0
+
+    async def _fake_last_state():
+        return SimpleNamespace(state="unavailable", attributes={})
+
+    entity.async_get_last_state = _fake_last_state
+
+    asyncio.run(entity.async_added_to_hass())
+
+    assert entity._attr_current_temperature == 19.0
+    assert entity._attr_target_temperature == 20.0
+
+
+def test_restore_is_a_noop_without_a_previous_state():
+    entity = _entity()
+
+    async def _fake_last_state():
+        return None
+
+    entity.async_get_last_state = _fake_last_state
+
+    asyncio.run(entity.async_added_to_hass())
+
+    assert entity._attr_current_temperature == 21.5
+    assert entity._attr_target_temperature == 22.0

@@ -7,6 +7,7 @@ from datetime import timedelta
 from homeassistant.components.number import NumberEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import DOMAIN, MIN_SCAN_INTERVAL
 from .device import build_device_info
@@ -32,7 +33,7 @@ async def async_setup_entry(
     async_add_entities(entity for entity in entities if entity.address is not None)
 
 
-class ViegaPowerLevelNumber(NumberEntity):
+class ViegaPowerLevelNumber(NumberEntity, RestoreEntity):
     """Read and write the documented room power-level register."""
 
     _attr_has_entity_name = True
@@ -62,6 +63,17 @@ class ViegaPowerLevelNumber(NumberEntity):
         }
         self._attr_native_value = None
         self._polling_gate = PollingGate()
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the last known value across restarts (spec.md 15)."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is None or last_state.state in ("unknown", "unavailable"):
+            return
+        try:
+            self._attr_native_value = float(last_state.state)
+        except (TypeError, ValueError):
+            return
 
     async def async_update(self) -> None:
         """Read the current actuator power level."""
