@@ -238,3 +238,193 @@ gezielte Nachprüfung derselben Quelle konnte das nicht reproduzieren (dort
 fand sich stattdessen nur ein Nutzer-Beispiel mit eigener statischer IP,
 Port 502) — dieser Wert wird daher als nicht verifiziert **nicht** in
 `spec.md`/`const.py` übernommen.
+
+## 6. Weitere externe Quelle: `matrover/viega-fonterra` (geprüft 2026-09-25)
+
+Auftrag: das Repository [github.com/matrover/viega-fonterra](https://github.com/matrover/viega-fonterra)
+(eine unabhängige, andere Home-Assistant-Integration für dasselbe Gerät) nach
+weiteren Registerzuordnungen durchsuchen, die diesem Dokument noch fehlen.
+
+### Bestätigung bestehender Register
+
+`custom_components/viega_fonterra/const.py` dieses Repos definiert
+`REGISTER_CURRENT_TEMP_BASE = 50` (Input) und `REGISTER_SETPOINT_BASE = 51`
+(Holding), je Raum mit Stride `2` - deckt sich exakt mit den hier in
+Abschnitt 1/2 dokumentierten Adressen `30050`/`40051` (Raum 1),
+`30052`/`40053` (Raum 2) usw. Eine weitere unabhängige Bestätigung der
+bereits erfassten Adressen, keine neue Information.
+
+### Zwei zusätzliche Register - nicht übernommen, unbestätigt
+
+Dieselbe `const.py` definiert außerdem:
+
+- `REGISTER_OUTDOOR_TEMP = 100` (Input, x0,1 °C) - "Außentemperatur"
+- `REGISTER_PUMP_STATUS_BASE = 200` (Input, Stride `1` je Zone) - "Pumpenstatus"
+
+Als Input-Register wären das `30100` und `30200`+(Zonennummer-1) in
+Manual-Schreibweise - beide liegen in den nach Abschnitt 3 bislang als nicht
+dokumentiert markierten Lücken (`30026-30049` reicht nicht bis `30100`,
+d.h. `30100` läge sogar noch hinter dem hier dokumentierten Bereich `30001-30285`;
+`30200`+x liegt in der Lücke `30218-30249` nur teilweise - für höhere
+Zonennummern bereits darüber hinaus). Sie widersprechen den bislang
+dokumentierten Adressen also nicht direkt, sind aber durch nichts belegt,
+das diesem Projekt vorliegt:
+
+- Das lokale Handbuch (`Fonterra Smart Control-de-DE.pdf`, S. 89-96, siehe
+  Kopf dieses Dokuments) wurde erneut vollständig geprüft (S. 89-98,
+  einschließlich der Wire-Beispiele und der Fehlercode-Tabelle): keine
+  Außentemperatur- oder Pumpenstatus-Register enthalten. Das
+  Modbus-Kapitel endet nach dem letzten Holding-Register `40073`.
+- Der in `matrover/viega-fonterra`s README verlinkte, angeblich neuere
+  Handbuch-Stand ("Seite 105ff.") war beim Abruf nicht erreichbar (HTTP 404).
+- Das bereits in Abschnitt 5 geprüfte Home-Assistant-Forum
+  ("Viega Floorheating Fonterra Smart Control") wurde erneut gezielt nach
+  "Außentemperatur"/"pump" durchsucht: keine Registeradresse für eines von
+  beidem wird dort von irgendjemandem genannt oder bestätigt.
+- Im Quellcode von `matrover/viega-fonterra` selbst gibt es - anders als bei
+  jedem bestätigten Register in `registers.py` dieses Projekts - keine
+  Handbuch-Seitenangabe oder sonstige Quellenangabe zu diesen beiden
+  Adressen.
+- Das Repository selbst weist in seiner README ausdrücklich darauf hin:
+  "This integration has **not yet been tested on live hardware**."
+
+Bewertung: `REGISTER_OUTDOOR_TEMP`/`REGISTER_PUMP_STATUS_BASE` sind
+plausible, aber unbestätigte Vermutungen des anderen Repos - nicht Ergebnisse
+einer bestätigten Handbuch- oder Hardware-Prüfung. Nach dem in Abschnitt 3
+festgelegten Grundsatz dieses Projekts ("nicht raten") werden sie nicht in
+`registers.py`/`spec.md` als reale Register übernommen. Sollte künftig echte
+Hardware verfügbar sein, wären `30100` (Außentemperatur, Input, Funktion
+`0x04`) und `30200`+(Zonennummer-1) (Pumpenstatus je Zone, Input) die ersten
+Kandidaten für einen gezielten Testlese-Versuch.
+
+## 7. Weitere Web-Recherche: Übertragungsmodus und Datentypen (2026-09-25)
+
+Die Suche nach unabhängigen Quellen zu den Registern selbst ergab weiterhin
+keine bestätigten Adressen außerhalb der Tabellen in Abschnitt 1 und 2. Die
+folgende Zusatzinformation stammt aus der veröffentlichten Anleitung und aus
+mehreren praktischen Beiträgen im Home-Assistant-Forum. Sie ändert den
+Registerplan nicht, ist aber für einen direkten Modbus-Test und die
+Fehlerdiagnose nützlich.
+
+### Verbindungsparameter laut Anleitung
+
+- Die Schnittstelle ist **Modbus TCP** über Ethernet oder WLAN. Eine
+  asynchrone serielle Übertragung (**Modbus RTU**) wird laut Anleitung nicht
+  unterstützt.
+- Der TCP-Port ist `502`.
+- Im Punkt-zu-Punkt-Modus nennt die Anleitung `192.168.1.1` als IP-Adresse;
+  in allen anderen Betriebsarten wird eine dynamische IP-Adresse per DHCP
+  verwendet. Für Home Assistant ist deshalb eine im Router reservierte bzw.
+  statische IP-Adresse des WLAN-Moduls sinnvoll.
+- Die Basiseinheit akzeptiert laut Anleitung eine beliebige Modbus-Geräte-ID
+  im Nachrichtenkopf. Die Forum-Beispiele verwenden `slave: 1`; das ist ein
+  erprobtes Beispiel, aber keine zusätzliche Registerdefinition.
+- Die Anleitung nennt als unterstützte Ausnahme-Codes `01` (Illegal
+  Function), `02` (Illegal Data Address), `03` (Illegal Data Value) und `04`
+  (Slave Device Failure). Ein Fehler beim Lesen darf daher nicht automatisch
+  als unbekannte oder reservierte Registeradresse interpretiert werden.
+
+### Datentypen und Genauigkeit
+
+- Zahlen werden als Modbus-Register mit 16 Bit übertragen; der dokumentierte
+  numerische Datentyp ist `int16` (signed, Wertebereich `-32768` bis `32767`).
+- Für die Namen der Basiseinheit und Räume gibt es zusätzlich den erweiterten
+  Datentyp `String`. Die in den Tabellen angegebenen Längen bleiben dabei
+  maßgeblich: Seriennummern `string10`, Namen `string24`.
+- Die Anleitung beschreibt Raumtemperaturen als auf `0,5 °C` genau. Vorlauf-
+  und Rücklauftemperatur sind davon ausgenommen und werden mit `0,1 °C`
+  Genauigkeit angegeben. Das ist eine Aussage über die Gerätegenauigkeit,
+  nicht über eine neue Skalierung oder einen neuen Registerbereich; die
+  dokumentierte Übertragung der Temperaturwerte mit Faktor `0,1` bleibt in
+  den Tabellen dieses Dokuments erhalten.
+
+### Praktische Bestätigungen aus dem Forum
+
+- Ein 2021 veröffentlichter Beitrag zeigt eine funktionierende Home-
+  Assistant-Modbus-TCP-Konfiguration mit Port `502`, `slave: 1`, Input-
+  Register `50` für die aktuelle Raumtemperatur und Holding-Register `51`
+  für die Solltemperatur. Weitere Beiträge bestätigen das Muster `52/53`,
+  `54/55` usw. und die notwendige Trennung von Input- und Holding-Register.
+- Die Modbus-Funktion muss in der Viega-Weboberfläche oder in der iPad-App
+  aktiviert werden; laut Forum funktioniert diese Einstellung nicht in der
+  iPhone-App. Das ist eine Gerätevoraussetzung, kein zusätzliches Register.
+- Der Forenverlauf dokumentiert einen Firmwarefehler in `4.1-5.02`: Raum-
+  namen, Fehlerstatus, aktuelle Raumtemperaturen und Solltemperaturen waren
+  leer bzw. lieferten `-99`, während Seriennummer, Vorlauftemperatur und
+  Rücklauftemperaturen weiterhin gelesen werden konnten. Mit `4.1-5.03`
+  wurde das Problem laut Rückmeldung behoben. Bei selektiv fehlenden Werten
+  sollte daher zuerst der Firmwarestand geprüft werden.
+
+### Quellen dieser Ergänzung
+
+| Quelle | Neue bzw. bestätigte Information |
+| --- | --- |
+| [ManualsLib, S. 104 - Übertragungsmodus](https://www.manualslib.de/manual/722311/Viega-Fonterra-Smart-Control.html?page=104) | Modbus TCP, Port 502, Punkt-zu-Punkt-IP `192.168.1.1`, DHCP in anderen Modi, kein Modbus RTU, beliebige Unit-ID |
+| [ManualsLib, S. 105 - Registeradressen und Datentypen](https://www.manualslib.de/manual/722311/Viega-Fonterra-Smart-Control.html?page=105) | Input ab `30001`, Holding ab `40001`, `int16`, `String`, Modbus-Fehlercodes 01-04 |
+| [ManualsLib, S. 106 - Hinweise zur Registerdefinition](https://www.manualslib.de/manual/722311/Viega-Fonterra-Smart-Control.html?page=106) | Raumtemperaturen mit 0,5 °C Genauigkeit; Vorlauf/Rücklauf mit 0,1 °C |
+| [Home Assistant Community, Beiträge 4-7](https://community.home-assistant.io/t/viega-floorheating-fonterra-smart-control/284753) | Aktivierung, statische IP, Port 502 sowie die getrennte Verwendung von Input `50` und Holding `51` |
+| [Home Assistant Community, Beiträge 8-13](https://community.home-assistant.io/t/viega-floorheating-fonterra-smart-control/284753) | Firmwarefehler `4.1-5.02` und Rückmeldung zur Korrektur in `4.1-5.03` |
+| [matrover/viega-fonterra, README](https://github.com/matrover/viega-fonterra/blob/main/README.md) | Unabhängige aktuelle Bestätigung von Port 502, statischer IP, Unit-ID 1 und der bekannten Raumregister; das Repository weist selbst auf fehlende Live-Hardwaretests hin |
+
+Die in `matrover/viega-fonterra` zusätzlich genannten Register für
+Außentemperatur (`100`) und Pumpenstatus (`200+x`) bleiben deshalb weiterhin
+unbestätigte Kandidaten aus Abschnitt 6 und werden nicht als reale
+Registerdefinitionen übernommen.
+
+## 8. Firmware-/Software-Recherche (2026-09-25)
+
+### Offizielle Update-Information von Viega
+
+Die aktuelle Viega-Service-Seite [Fonterra Smart Control - Umstellung auf neue
+Bediensoftware](https://www.viega.de/de/service/Kundendienst/smartcontrol.html)
+ist eine neue, relevante Quelle für die Gerätekompatibilität:
+
+- Viega stellt auf eine neue Bediensoftware bzw. einen neuen Server um.
+- Vor dem Umzug muss die bisherige Software schrittweise aktualisiert werden,
+  mindestens bis `xx-5.08`, laut Viega besser bis `xx-6.10`.
+- Die Updates sollen spätestens bis **31.10.2026** durchgeführt werden.
+- Ohne dieses Update bleibt laut Viega nur der Punkt-zu-Punkt-Betrieb über das
+  WLAN-Modul mit der bisherigen Bediensoftware möglich; der Serverumzug ist
+  dann nicht möglich.
+- Viega verlinkt dort eine offizielle [Update-Anleitung (PDF)](https://www.viega.de/content/dam/viega-assets/viega-worldwide-assets/products/surface-tempering/fonterra-smart-control/technical-documents/instructions-for-use/Fonterra%20Smart%20Control%20v1.0.pdf)
+  und eine [Anleitung zur Umstellung der Bediensoftware (PDF)](https://www.viega.de/content/dam/viega-assets/viega-worldwide-assets/products/surface-tempering/fonterra-smart-control/technical-documents/instructions-for-use/Smart%20Control%20-%20Umstellung%20Bediensoftware_DE.pdf).
+
+Das ist ein offizieller Hinweis auf mehrere Software-/Firmware-Stände, aber
+kein öffentliches Firmware-Abbild. Die Angaben belegen auch keine zusätzlichen
+Modbus-Register und ändern daher den Registerplan nicht.
+
+### Gefundene App, aber kein Firmware-Leak
+
+Bei [APKPure: Fonterra Smart Control](https://apkpure.com/de/fonterra-smart-control/de.viega.fonterra_smart_control)
+ist eine alte Android-Bediensoftware öffentlich gelistet:
+
+- Paketname: `de.viega.fonterra_smart_control`
+- Version: `1.0`, Versioncode `2`
+- Aktualisierung: `29.11.2018`
+- Größe: ca. `16,7 MB`
+- Architektur: `armeabi-v7a`
+- Anbieterangabe: Viega Holding GmbH & Co. KG
+
+Diese APK ist eine mobile Bedienoberfläche und nicht die Firmware des
+WLAN-Moduls oder der Basiseinheit. Sie enthält nach der öffentlich sichtbaren
+Beschreibung keine Registermap, kein Firmware-Updatepaket und keinen
+verifizierten Firmware-Dump. Eine Installation aus einer Drittquelle sollte
+zudem nur mit vorheriger Signatur-/Hash-Prüfung erfolgen.
+
+### Ergebnis der Leak-/Reverse-Engineering-Suche
+
+Bis zum Recherchedatum wurde kein öffentlich zugängliches `.bin`-, `.hex`-,
+OTA- oder sonstiges Firmware-Abbild für das WLAN-Modul Modell `1250.16` oder
+die Fonterra-Smart-Control-Basiseinheit gefunden. Auch die öffentlichen
+GitHub-Suchen ergaben kein Firmware-Repository und keinen veröffentlichten
+Firmware-Dump. Die bisher stärksten technischen Quellen bleiben daher:
+
+1. Viega-Handbücher und die offizielle Service-Seite,
+2. reproduzierbare Modbus-Konfigurationen und Fehlerberichte im
+   Home-Assistant-Forum,
+3. die unabhängige Integration `matrover/viega-fonterra`.
+
+Firmware-Reverse-Engineering wäre nur mit einem eigenen Updatepaket, einem
+Geräteabbild oder Mitschnitten des Updatevorgangs sinnvoll möglich. Die
+öffentlich sichtbaren Versionsnummern allein erlauben keine seriöse Ableitung
+weiterer Register.

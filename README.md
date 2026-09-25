@@ -153,6 +153,203 @@ automation:
           entity_id: switch.heizkreispumpe
 ```
 
+## Example dashboard
+
+A minimal Lovelace overview built entirely from Home Assistant's built-in
+cards (`thermostat`, `entities`, `glance`, `history-graph`, `markdown`) — no
+HACS frontend cards required. It fits one module with a handful of rooms on
+a single view: module-wide status and diagnostics at the top, one block per
+room below, and a combined temperature history at the end.
+
+![Example dashboard mock-up](docs/dashboard-example.png)
+
+This is a mock-up built to illustrate the layout, not a live screenshot —
+render the YAML below against your own entities to see your actual values.
+
+Every entity ID below follows the pattern already used in
+["Entities"](#entities) above: `<domain>.<device_name>_<room_name>[...]`. The
+example uses the default device name `fonterra` and three generic room
+names (`bedroom`, `kitchen`, `living_room`, the last one with two actuators
+to show the multi-actuator case) — replace both with your own device and
+room names. You can look up your exact entity IDs under **Developer tools →
+States**, filtered by your device name.
+
+```yaml
+title: Heating
+views:
+  - title: Overview
+    path: heating-overview
+    icon: mdi:radiator
+    cards:
+      # Header
+      - type: markdown
+        content: "## Viega Fonterra – <device_name>"
+
+      # Module-wide status (one of these per module)
+      - type: entities
+        title: Module status
+        entities:
+          - entity: sensor.<device_name>_flow_temperature
+            name: Flow temperature
+          - entity: binary_sensor.<device_name>_circulation_pump
+            name: Circulation pump
+          - entity: sensor.<device_name>_base_unit_error_code
+            name: Error code
+          - entity: binary_sensor.<device_name>_base_unit_error
+            name: Error active
+
+      - type: entities
+        title: Diagnostics (module)
+        entities:
+          - entity: sensor.<device_name>_base_unit_name
+          - entity: sensor.<device_name>_base_unit_serial_number
+          - entity: sensor.<device_name>_wlan_serial_number
+
+      # One block per room — copy this vertical-stack for each room
+      - type: vertical-stack
+        cards:
+          - type: thermostat
+            entity: climate.<device_name>_<room_name>
+
+          - type: entities
+            title: <Room name> details
+            entities:
+              - entity: number.<device_name>_<room_name>_power_level
+                name: Power level
+              - entity: sensor.<device_name>_<room_name>_diagnostic
+                name: Diagnostic
+
+          - type: glance
+            title: <Room name> actuator(s)
+            entities:
+              - entity: binary_sensor.<device_name>_<room_name>_actuator_<N>_position
+                name: Actuator <N>
+              - entity: sensor.<device_name>_<room_name>_actuator_<N>_return_temperature
+                name: Return <N>
+              # a room with more than one actuator (spec.md 4) repeats this
+              # pair of lines once per actuator number
+
+      # Repeat the vertical-stack block above for every other room ...
+
+      # Compare every room's temperature over time
+      - type: history-graph
+        title: Temperature history
+        hours_to_show: 24
+        entities:
+          - entity: climate.<device_name>_<room_name>
+          # add the remaining rooms here
+```
+
+Filled in for three rooms — a single-actuator `bedroom` and `kitchen`, and a
+`living_room` with two actuators (actuator numbers are illustrative; use the
+ones your own installation actually discovered):
+
+```yaml
+title: Heating
+views:
+  - title: Overview
+    path: heating-overview
+    icon: mdi:radiator
+    cards:
+      - type: markdown
+        content: "## Viega Fonterra – Fonterra"
+
+      - type: entities
+        title: Module status
+        entities:
+          - entity: sensor.fonterra_flow_temperature
+            name: Flow temperature
+          - entity: binary_sensor.fonterra_circulation_pump
+            name: Circulation pump
+          - entity: sensor.fonterra_base_unit_error_code
+            name: Error code
+          - entity: binary_sensor.fonterra_base_unit_error
+            name: Error active
+
+      - type: entities
+        title: Diagnostics (module)
+        entities:
+          - entity: sensor.fonterra_base_unit_name
+          - entity: sensor.fonterra_base_unit_serial_number
+          - entity: sensor.fonterra_wlan_serial_number
+
+      # --- Bedroom (1 actuator) ------------------------------------------
+      - type: vertical-stack
+        cards:
+          - type: thermostat
+            entity: climate.fonterra_bedroom
+          - type: entities
+            title: Bedroom details
+            entities:
+              - entity: number.fonterra_bedroom_power_level
+                name: Power level
+              - entity: sensor.fonterra_bedroom_diagnostic
+                name: Diagnostic
+          - type: glance
+            title: Bedroom actuator
+            entities:
+              - entity: binary_sensor.fonterra_bedroom_actuator_4_position
+                name: Actuator 4
+              - entity: sensor.fonterra_bedroom_actuator_4_return_temperature
+                name: Return 4
+
+      # --- Kitchen (1 actuator) -------------------------------------------
+      - type: vertical-stack
+        cards:
+          - type: thermostat
+            entity: climate.fonterra_kitchen
+          - type: entities
+            title: Kitchen details
+            entities:
+              - entity: number.fonterra_kitchen_power_level
+                name: Power level
+              - entity: sensor.fonterra_kitchen_diagnostic
+                name: Diagnostic
+          - type: glance
+            title: Kitchen actuator
+            entities:
+              - entity: binary_sensor.fonterra_kitchen_actuator_3_position
+                name: Actuator 3
+              - entity: sensor.fonterra_kitchen_actuator_3_return_temperature
+                name: Return 3
+
+      # --- Living room (2 actuators) ---------------------------------------
+      - type: vertical-stack
+        cards:
+          - type: thermostat
+            entity: climate.fonterra_living_room
+          - type: entities
+            title: Living room details
+            entities:
+              - entity: number.fonterra_living_room_power_level
+                name: Power level
+              - entity: sensor.fonterra_living_room_diagnostic
+                name: Diagnostic
+          - type: glance
+            title: Living room actuators
+            entities:
+              - entity: binary_sensor.fonterra_living_room_actuator_1_position
+                name: Actuator 1
+              - entity: sensor.fonterra_living_room_actuator_1_return_temperature
+                name: Return 1
+              - entity: binary_sensor.fonterra_living_room_actuator_2_position
+                name: Actuator 2
+              - entity: sensor.fonterra_living_room_actuator_2_return_temperature
+                name: Return 2
+
+      - type: history-graph
+        title: Temperature history
+        hours_to_show: 24
+        entities:
+          - entity: climate.fonterra_bedroom
+          - entity: climate.fonterra_kitchen
+          - entity: climate.fonterra_living_room
+```
+
+Remember that `hvac_mode` and `preset_mode` are shared across every room of
+the same module (see "Entities" above): the thermostat card's mode buttons
+change them for the whole module, whichever room's card you use.
+
 ## Verifying your configuration
 
 Two built-in ways to check that the integration resolved your installation correctly, without editing any files:

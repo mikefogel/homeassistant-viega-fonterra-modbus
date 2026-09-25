@@ -932,3 +932,93 @@ entity that only restores two of its eight displayed values still violates
 this section for the other six. A commit or release note claiming this
 requirement is met is not a substitute for checking it against every entity
 class it names.
+
+## 16. Future operational improvements
+
+The following improvements are approved as future integration capabilities.
+They must not introduce undocumented register addresses or change the
+documented register map. The manual room/actor mapping fallback described by
+older versions of this specification is explicitly **not** part of this
+section and must not be reintroduced.
+
+### 16a. Explicit rediscovery
+
+The integration should provide a user-triggered `Rediscover device` action
+for an already configured entry. It must re-read documented actuator room-ID
+and room-name registers, compare the topology with the cached topology, update
+entities without recreating the config entry, preserve stable unique IDs, and
+report added, removed, renamed, or reassigned rooms and actuators. It must
+never replace successful live discovery with user-entered mapping data. The
+action must reuse the existing connection and polling lock.
+
+### 16b. Connection health metrics
+
+Each configured module should expose diagnostic metrics derived from existing
+Modbus activity without an additional polling request:
+
+- last successful response timestamp;
+- last failed request timestamp;
+- consecutive communication-failure count;
+- invalid-value count, including the `-99` sentinel;
+- last Modbus exception code, when available;
+- duration of the most recent successful request.
+
+These metrics are diagnostic only. Communication failures must not overwrite
+last valid device values, and network-identifying data must not be exposed as
+state or attributes.
+
+### 16c. Read-after-write verification
+
+Acknowledged writes to documented holding registers should be verified on the
+next suitable read cycle. The device value remains authoritative: if it differs
+from the requested value, the entity must reconcile to the device value and
+report a diagnostic warning. Failed writes or failed verification must not be
+treated as successful state changes. Verification must use the existing polling
+cycle and must not create a second independent poll.
+
+### 16d. Contiguous register-block reads
+
+The polling layer should combine compatible adjacent reads when this reduces
+Modbus traffic. Input and holding registers must never be combined. Values may
+only be assigned to their declared addresses; response length and
+transaction/function-code validation remain mandatory; partial or invalid
+blocks must not corrupt unrelated cached values; and undocumented gaps must
+not be interpreted as real registers. This optimization must not alter polling
+intervals, availability semantics, scaling, or the public register map.
+
+### 16e. Extended downloadable diagnostics
+
+The diagnostics download should optionally include a bounded, privacy-safe
+snapshot containing resolved documented addresses, last valid raw and converted
+values, read/write counters, recent Modbus exception codes, and discovery
+changes. Firmware or software versions may be included only when reported by a
+documented device source. Hostnames, IP addresses, credentials, and other
+network-identifying data must be redacted. The snapshot must have a fixed
+maximum size and must not contain unbounded frames or arbitrary memory data.
+
+### 16f. Derived actuator statistics
+
+Optional diagnostic statistics may be derived from already read, debounced
+actuator-position registers: confirmed open time, confirmed open-transition
+count, time since the last confirmed transition, and the number of currently
+open actuators. These are derived values, not device registers. They must be
+unavailable until a valid debounced reading exists, use state restoration where
+practical, and must not be presented as pump-status registers.
+
+### 16g. Multi-module overview
+
+For multiple configured modules, an optional aggregate diagnostic view may show
+reachable modules, modules with base-unit errors, stale/failed communication,
+and room/actuator counts per module. Rooms with equal display names from
+different modules must not be merged. Every value must retain its source
+config entry and device identity, and one module's failure must not make
+another module unavailable.
+
+### 16h. Explicitly excluded capabilities
+
+The following remain excluded until Viega documents or independent hardware
+tests reproduce them: manual room mapping as a replacement for automatic
+discovery; undocumented outdoor-temperature or pump-status registers; time
+schedules, holiday programs, humidity, dew point, or firmware-version
+registers without a confirmed source; and automatic probing or writing of
+unknown or reserved addresses.
