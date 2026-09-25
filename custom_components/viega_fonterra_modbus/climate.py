@@ -1,15 +1,15 @@
 """Climate platform for room thermostats."""
 
-
 from __future__ import annotations
 
 import logging
 from datetime import timedelta
 
-from homeassistant.components.climate import ClimateEntity
+from homeassistant.components.climate import ClimateEntity, ClimateEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTemperature
 from homeassistant.core import HomeAssistant, State
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import DOMAIN, MIN_SCAN_INTERVAL
 from .device import build_device_info
@@ -25,7 +25,6 @@ from .registers import (
 SCAN_INTERVAL = timedelta(seconds=MIN_SCAN_INTERVAL)
 
 _LOGGER = logging.getLogger(__name__)
-
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -50,19 +49,14 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-
-class ViegaRoomClimateEntity(ClimateEntity):
+class ViegaRoomClimateEntity(ClimateEntity, RestoreEntity):
     """Minimal Home Assistant climate implementation for a room thermostat."""
 
     _attr_has_entity_name = True
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_hvac_modes = ["off", "heat", "cool"]
-    # Localizes preset_mode's raw values ("manual"/"profile"/"setback") via
-    # translations/*.json's entity.climate.room.state_attributes.preset_mode
-    # block - without a translation_key, Home Assistant has no key to look
-    # the state translations up under and falls back to the raw English
-    # value (spec.md 5a.1).
     _attr_translation_key = "room"
+
     def __init__(
         self,
         entry_id: str,
@@ -77,10 +71,6 @@ class ViegaRoomClimateEntity(ClimateEntity):
         room_config = room_config or {}
         room_number = resolve_room_number(room_id, room_config)
         defaults = room_registers(room_number) if room_number else {}
-        # Only the primary (first) actuator drives the Climate entity; any
-        # additional actuators in a multi-actor room (spec.md 4) get their
-        # own linked sensors from sensor.py/binary_sensor.py instead of
-        # being dropped silently.
         actor_numbers = room_actor_numbers(room_config)
         actor = actor_registers(actor_numbers[0]) if actor_numbers else {}
         self._entry_id = entry_id
@@ -132,28 +122,23 @@ class ViegaRoomClimateEntity(ClimateEntity):
             supported_features |= ClimateEntityFeature.PRESET_MODE
         self._attr_supported_features = supported_features
 
-    async def async_added_to_hass(self, hass: HomeAssistant) -> None:
+    async def async_added_to_hass(self) -> None:
         """Restore last known state on startup (spec.md 15).
-        
+
         On system/integration restart we must NOT use a default, unavailable,
         or unknown state. The previous valid value must be retained exactly,
         so a restart is not visible through the displayed values.
         """
-        # Restore the last persisted state from Home Assistant's state machine.
-        # This ensures the entity is not re-created with defaults after a restart.
-        last_state = await hass.helpers.state.async_get_last_state(
-            self.entity_id
-        )
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
         if last_state is not None and last_state.state not in (
             "unknown",
             "unavailable",
         ):
-            # Restore current_temperature
-            if last_state.state_attr("current_temperature") is not None:
-                self._attr_current_temperature = float(last_state.state_attr("current_temperature"))
-            # Restore target_temperature
-            if last_state.state_attr("target_temperature") is not None:
-                self._attr_target_temperature = float(last_state.state_attr("target_temperature"))
+            if last_state.attributes.get("current_temperature") is not None:
+                self._attr_current_temperature = float(last_state.attributes["current_temperature"])
+            if last_state.attributes.get("temperature") is not None:
+                self._attr_target_temperature = float(last_state.attributes["temperature"])
 
     @property
     def hvac_mode(self) -> str:
@@ -176,10 +161,6 @@ class ViegaRoomClimateEntity(ClimateEntity):
 
     @property
     def preset_modes(self) -> list[str]:
-        # Raw values written/read on the wire (holding register 40002,
-        # spec.md 5a.1); the localized labels shown in the UI ("Manuell" /
-        # "Profil" / "Absenkbetrieb") come from _attr_translation_key's
-        # entity translation, not from these identifiers.
         return ["manual", "profile", "setback"]
 
     @property
@@ -207,7 +188,10 @@ class ViegaRoomClimateEntity(ClimateEntity):
         if _LOGGER.isEnabledFor(logging.DEBUG):
             _LOGGER.debug(
                 "Room %s (%s): raw register values=%s registers(PDU)=%s",
-                self.room_id, self._attr_name, values, self._registers,
+                self.room_id,
+                self._attr_name,
+                values,
+                self._registers,
             )
         current_temperature = self._scaled(values.get("current_temperature"))
         if current_temperature is not None:
@@ -247,13 +231,21 @@ class ViegaRoomClimateEntity(ClimateEntity):
                 shared = self.hass.data[DOMAIN][self._entry_id].get("polling")
                 result = await (
                     shared.read(
-                        self.hass, self._entry_id,
+                        self.hass,
+                        self._entry_id,
                         "holding" if name in {
-                            "target_temperature", "power_level", "operating_mode", "profile_mode"}
+                            "target_temperature",
+                            "power_level",
+                            "operating_mode",
+                            "profile_mode",
+                        }
                         else "input",
-                        int(address), 1
-                    ) if shared else reader(int(address), 1)
-                ) if shared else reader(int(address), 1)
+                        int(address),
+                        1,
+                    )
+                    if shared
+                    else reader(int(address), 1)
+                )
                 values[name] = result[0] if result else None
             except Exception:
                 values[name] = None

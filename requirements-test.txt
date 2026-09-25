@@ -1,7 +1,0 @@
-# Test-only dependencies. Install with: pip install -r requirements-test.txt
-# The test suite instantiates entity classes directly (with a hand-built
-# fake `hass`) rather than booting a real Home Assistant core, so a plain
-# `homeassistant` install is enough - no test-harness plugin is required.
-pytest>=7.4
-homeassistant>=2024.6.0
-voluptuous>=0.13.1
