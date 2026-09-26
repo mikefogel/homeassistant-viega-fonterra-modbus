@@ -5,3 +5,5 @@ rediscover:
       selector:
         device:
           integration: viega_fonterra_modbus
+
+overview: {}

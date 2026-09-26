@@ -141,6 +141,10 @@
           "description": "Das Viega-Fonterra-Modul, das neu erkannt werden soll."
         }
       }
+    },
+    "overview": {
+      "name": "Übersicht über alle Module",
+      "description": "Liefert eine Zusammenfassung je konfiguriertem Viega-Fonterra-Modul: Erreichbarkeit, Basiseinheit-Fehler, veraltete/fehlgeschlagene Kommunikation sowie Raum-/Aktoranzahl."
     }
   }
 }

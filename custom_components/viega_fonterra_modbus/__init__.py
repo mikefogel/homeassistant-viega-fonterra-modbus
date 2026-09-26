@@ -6,13 +6,14 @@ import logging
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import config_validation as cv, device_registry as dr
 from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN, PLATFORMS
 from .modbus_handler import ModbusClientError, ViegaModbusClient
+from .overview import async_multi_module_overview
 from .polling import SharedPolling
 from .rediscovery import async_rediscover_entry
 from .room_mapping import RoomMappingDiscovery
@@ -27,15 +28,18 @@ from .registers import (
 _LOGGER = logging.getLogger(__name__)
 
 SERVICE_REDISCOVER = "rediscover"
+SERVICE_OVERVIEW = "overview"
 _REDISCOVER_SCHEMA = vol.Schema({vol.Required("device_id"): cv.string})
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Register the domain-wide `rediscover` service (spec.md 16a).
+    """Register the domain-wide `rediscover` and `overview` services
+    (spec.md 16a/16g).
 
     Registered once here in `async_setup`, not per config entry in
-    `async_setup_entry`, since it targets a device (and thus a specific
-    entry) chosen at call time, not the entry currently being set up.
+    `async_setup_entry`: `rediscover` targets a device (and thus a specific
+    entry) chosen at call time, and `overview` deliberately spans every
+    loaded entry, so neither belongs to the entry currently being set up.
     """
 
     async def _async_handle_rediscover(call: ServiceCall) -> None:
@@ -59,8 +63,17 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         if entry is not None:
             await async_rediscover_entry(hass, entry)
 
+    async def _async_handle_overview(call: ServiceCall) -> ServiceResponse:
+        return async_multi_module_overview(hass)
+
     hass.services.async_register(
         DOMAIN, SERVICE_REDISCOVER, _async_handle_rediscover, schema=_REDISCOVER_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_OVERVIEW,
+        _async_handle_overview,
+        supports_response=SupportsResponse.ONLY,
     )
     return True
 

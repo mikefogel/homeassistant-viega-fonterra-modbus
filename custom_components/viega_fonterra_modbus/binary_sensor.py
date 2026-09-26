@@ -167,6 +167,10 @@ class ViegaBaseUnitErrorBinarySensor(BinarySensorEntity, RestoreEntity):
         if not values or values[0] == ViegaModbusClient.ERROR_SENTINEL:
             return
         self._attr_is_on = values[0] != 0
+        # Mirrored onto entry_data so the multi-module overview (spec.md
+        # 16g, overview.py) can report "modules with base-unit errors"
+        # without an extra Modbus read of its own.
+        entry_data["base_unit_error_code"] = values[0]
 
     @property
     def device_info(self):

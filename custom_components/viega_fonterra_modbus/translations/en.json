@@ -141,6 +141,10 @@
           "description": "The Viega Fonterra module to rediscover."
         }
       }
+    },
+    "overview": {
+      "name": "Multi-module overview",
+      "description": "Returns a per-module summary across every configured Viega Fonterra module: reachability, base-unit errors, stale/failed communication, and room/actuator counts."
     }
   }
 }

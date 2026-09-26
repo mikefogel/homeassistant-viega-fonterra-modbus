@@ -77,6 +77,16 @@ def test_turns_on_for_a_nonzero_error_code():
     assert entity._attr_is_on is True
 
 
+def test_mirrors_the_raw_error_code_onto_entry_data_for_the_multi_module_overview():
+    """spec.md 16g: the overview reports "modules with base-unit errors"
+    without an extra Modbus read - it reads this mirrored value instead."""
+    entity = _entity_with_client(_FakeClient(values=[7]))
+
+    asyncio.run(entity.async_update())
+
+    assert entity.hass.data[DOMAIN]["entry_1"]["base_unit_error_code"] == 7
+
+
 def test_turns_off_for_error_code_zero():
     entity = _entity_with_client(_FakeClient(values=[7]))
     asyncio.run(entity.async_update())

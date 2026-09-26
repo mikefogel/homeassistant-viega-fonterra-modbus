@@ -4,6 +4,7 @@ import asyncio
 from types import SimpleNamespace
 
 from custom_components.viega_fonterra_modbus import (
+    SERVICE_OVERVIEW,
     SERVICE_REDISCOVER,
     async_remove_config_entry_device,
     async_setup,
@@ -133,7 +134,7 @@ class _FakeServices:
     def __init__(self):
         self.registered = {}
 
-    def async_register(self, domain, service, handler, schema=None):
+    def async_register(self, domain, service, handler, schema=None, supports_response=None):
         self.registered[(domain, service)] = handler
 
 
@@ -157,6 +158,28 @@ def test_async_setup_registers_the_rediscover_service():
 
     assert result is True
     assert (DOMAIN, SERVICE_REDISCOVER) in hass.services.registered
+
+
+def test_async_setup_registers_the_overview_service():
+    hass = SimpleNamespace(services=_FakeServices(), data={})
+
+    asyncio.run(async_setup(hass, {}))
+
+    assert (DOMAIN, SERVICE_OVERVIEW) in hass.services.registered
+
+
+def test_overview_service_returns_the_multi_module_summary():
+    hass = SimpleNamespace(
+        services=_FakeServices(),
+        data={DOMAIN: {"entry_1": {"client": None, "rooms": {}}}},
+    )
+
+    asyncio.run(async_setup(hass, {}))
+    handler = hass.services.registered[(DOMAIN, SERVICE_OVERVIEW)]
+
+    response = asyncio.run(handler(SimpleNamespace(data={})))
+
+    assert response["modules"][0]["entry_id"] == "entry_1"
 
 
 def test_rediscover_service_resolves_the_device_to_its_config_entry(monkeypatch):

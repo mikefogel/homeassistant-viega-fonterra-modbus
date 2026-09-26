@@ -195,6 +195,10 @@ Four more diagnostic sensors are derived from the circulation-pump indicator's o
 
 These are computed values, not device registers, and are not a substitute for the circulation-pump binary sensor itself. The open-actuator count stays unavailable until at least one actuator has completed its debounce cycle and is never restored to a stale value after a restart; the transition count, cumulative open time, and last-transition timestamp do restore.
 
+### Multi-module overview
+
+If you have more than one Viega Fonterra module configured, the `viega_fonterra_modbus.overview` service (Developer Tools → Actions, "response data" enabled) returns a per-module summary in one call: reachability, whether a base-unit error is active, whether communication looks stale or failed, and the room/actuator count — all without any extra Modbus read. Two modules' same-named rooms (e.g. both called "Wohnzimmer") are never merged: every room and every module in the response always carries its own config entry ID. One module's failure while building the summary never affects another module's entry in the response.
+
 ## Example dashboard
 
 A minimal Lovelace overview built entirely from Home Assistant's built-in
