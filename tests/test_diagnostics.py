@@ -8,12 +8,14 @@ without reading debug logs.
 """
 
 import asyncio
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from custom_components.viega_fonterra_modbus.const import DOMAIN
 from custom_components.viega_fonterra_modbus.diagnostics import (
     async_get_config_entry_diagnostics,
 )
+from custom_components.viega_fonterra_modbus.registers import BASE_UNIT_REGISTERS
 
 
 def _hass(entry_data: dict) -> SimpleNamespace:
@@ -140,3 +142,94 @@ def test_diagnostics_handles_a_module_with_no_data_yet():
 
     assert result["rooms"] == []
     assert result["unit"]["device_name"] is None
+    assert result["extended"]["connection_health"]["last_success_time"] is None
+
+
+# --- Extended diagnostics snapshot (spec.md 16e) --------------------------
+
+
+class _FakeHealthClient:
+    def __init__(self, **metrics):
+        self.last_success_time = metrics.get("last_success_time")
+        self.last_failure_time = metrics.get("last_failure_time")
+        self.consecutive_failures = metrics.get("consecutive_failures", 0)
+        self.invalid_value_count = metrics.get("invalid_value_count", 0)
+        self.last_exception_code = metrics.get("last_exception_code")
+        self.recent_exception_codes = metrics.get("recent_exception_codes", [])
+        self.last_success_duration = metrics.get("last_success_duration")
+
+
+def test_extended_diagnostics_includes_connection_health_as_iso_timestamps():
+    hass = _hass(
+        {
+            "client": _FakeHealthClient(
+                last_success_time=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                consecutive_failures=2,
+                invalid_value_count=5,
+                last_exception_code=2,
+                recent_exception_codes=[2, 3],
+                last_success_duration=0.05,
+            ),
+            "rooms": {},
+        }
+    )
+    entry = SimpleNamespace(entry_id="entry_1")
+
+    result = asyncio.run(async_get_config_entry_diagnostics(hass, entry))
+
+    health = result["extended"]["connection_health"]
+    assert health["last_success_time"] == "2026-01-01T00:00:00+00:00"
+    assert health["last_failure_time"] is None
+    assert health["consecutive_failures"] == 2
+    assert health["invalid_value_count"] == 5
+    assert health["last_exception_code"] == 2
+    assert health["recent_exception_codes"] == [2, 3]
+    assert health["last_success_duration"] == 0.05
+
+
+def test_extended_diagnostics_lists_resolved_addresses_for_the_topology():
+    hass = _hass(
+        {
+            "rooms": {"room_1": {"name": "Wohnzimmer", "room_number": 1, "actor": 1}},
+        }
+    )
+    entry = SimpleNamespace(entry_id="entry_1")
+
+    result = asyncio.run(async_get_config_entry_diagnostics(hass, entry))
+
+    addresses = result["extended"]["resolved_addresses"]
+    assert BASE_UNIT_REGISTERS["operating_mode"] in addresses["holding"]
+    assert 50 in addresses["holding"]  # room 1 power_level
+    assert 51 in addresses["input"]  # room 1 error_code (input bank)
+    assert 250 in addresses["input"]  # actuator 1 position
+
+
+def test_extended_diagnostics_includes_the_last_rediscovery_report():
+    hass = _hass(
+        {
+            "rooms": {},
+            "last_rediscovery": {
+                "added": ["room_2"],
+                "removed": [],
+                "renamed": {},
+                "reassigned": {},
+                "failed": False,
+                "error": None,
+            },
+        }
+    )
+    entry = SimpleNamespace(entry_id="entry_1")
+
+    result = asyncio.run(async_get_config_entry_diagnostics(hass, entry))
+
+    assert result["extended"]["last_rediscovery"]["added"] == ["room_2"]
+
+
+def test_extended_diagnostics_never_contains_network_identifying_data():
+    hass = _hass({"host": "192.168.0.188", "rooms": {}})
+    entry = SimpleNamespace(entry_id="entry_1")
+
+    result = asyncio.run(async_get_config_entry_diagnostics(hass, entry))
+
+    extended_text = str(result["extended"])
+    assert "192.168.0.188" not in extended_text

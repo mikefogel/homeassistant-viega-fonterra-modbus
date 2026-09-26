@@ -100,6 +100,18 @@
       },
       "health_last_success_duration": {
         "name": "Dauer der letzten Modbus-Anfrage"
+      },
+      "actuator_stats_open_actuator_count": {
+        "name": "Aktuell geöffnete Aktoren"
+      },
+      "actuator_stats_open_transition_count": {
+        "name": "Anzahl bestätigter Öffnungswechsel"
+      },
+      "actuator_stats_last_transition_time": {
+        "name": "Letzter bestätigter Aktorwechsel"
+      },
+      "actuator_stats_confirmed_open_seconds": {
+        "name": "Bestätigte Öffnungsdauer"
       }
     },
     "binary_sensor": {

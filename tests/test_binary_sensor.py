@@ -2,9 +2,12 @@
 base-unit error code activates the base-unit error indicator)."""
 
 import asyncio
+import itertools
 from types import SimpleNamespace
 
+from custom_components.viega_fonterra_modbus import binary_sensor as binary_sensor_module
 from custom_components.viega_fonterra_modbus.binary_sensor import (
+    ActuatorStatistics,
     ViegaActuatorPositionBinarySensor,
     ViegaBaseUnitErrorBinarySensor,
     ViegaCirculationPumpBinarySensor,
@@ -314,6 +317,84 @@ def test_setup_entry_skips_the_pump_entity_without_any_actuators():
     asyncio.run(async_setup_entry(hass, entry, added.extend))
 
     assert not any(isinstance(e, ViegaCirculationPumpBinarySensor) for e in added)
+
+
+# --- Derived actuator statistics (spec.md 16f) ---------------------------
+
+
+def test_statistics_stay_unavailable_until_any_actuator_settles():
+    stats = ActuatorStatistics()
+
+    stats.update({1: None, 2: None})
+
+    assert stats.open_actuator_count is None
+    assert stats.open_transition_count == 0
+    assert stats.last_transition_time is None
+
+
+def test_statistics_count_currently_open_actuators_once_settled():
+    stats = ActuatorStatistics()
+
+    stats.update({1: 1, 2: 0, 3: 1})
+
+    assert stats.open_actuator_count == 2
+
+
+def test_statistics_count_the_first_settle_as_a_transition_when_aggregate_is_open():
+    stats = ActuatorStatistics()
+
+    stats.update({1: 1})
+
+    assert stats.open_transition_count == 1
+    assert stats.last_transition_time is not None
+
+
+def test_statistics_do_not_count_a_first_settle_into_closed_as_an_open_transition():
+    stats = ActuatorStatistics()
+
+    stats.update({1: 0})
+
+    assert stats.open_transition_count == 0
+    assert stats.last_transition_time is not None  # still a confirmed transition, just not "open"
+
+
+def test_statistics_count_only_off_to_on_flips_as_open_transitions():
+    stats = ActuatorStatistics()
+
+    stats.update({1: 0})  # settle closed - not an open-transition
+    stats.update({1: 0})  # unchanged - no transition at all
+    stats.update({1: 1})  # closed -> open: one open-transition
+    stats.update({1: 0})  # open -> closed: not an open-transition
+    stats.update({1: 1})  # closed -> open again: a second open-transition
+
+    assert stats.open_transition_count == 2
+
+
+def test_statistics_accumulate_confirmed_open_seconds_only_while_open(monkeypatch):
+    stats = ActuatorStatistics()
+    times = [0.0, 1.0, 3.0, 3.0, 10.0]
+    sequence = itertools.chain(times, itertools.repeat(times[-1]))
+    monkeypatch.setattr(binary_sensor_module.time, "monotonic", lambda: next(sequence))
+
+    stats.update({1: 1})  # t=0: settles open (first settle: no elapsed time yet to add)
+    stats.update({1: 1})  # t=1: 1s elapsed while open -> +1s
+    stats.update({1: 1})  # t=3: 2s elapsed while open -> +2s
+    stats.update({1: 0})  # t=3: aggregate flips to closed (0s elapsed this call)
+    stats.update({1: 0})  # t=10: elapsed while *closed* -> no addition
+
+    assert stats.confirmed_open_seconds == 3.0
+
+
+def test_pump_entity_update_feeds_the_shared_actuator_statistics():
+    client = _MultiActuatorClient({250: 1})
+    entity = _pump_entity({1: 250}, client)
+
+    for _ in range(3):
+        _tick(entity)
+
+    stats = entity.hass.data[DOMAIN]["entry_1"]["actuator_statistics"]
+    assert isinstance(stats, ActuatorStatistics)
+    assert stats.open_actuator_count == 1
 
 
 # --- State restoration across restarts (spec.md 15) ---------------------

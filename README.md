@@ -118,6 +118,7 @@ Depending on the discovered rooms/actuators and available registers, the integra
 | Sensor | `sensor.fonterra_wohnzimmer_diagnostic` | Textual communication status for that room |
 | Binary sensor | `binary_sensor.fonterra_circulation_pump` | Derived circulation-pump indicator (see below) |
 | Sensor | `sensor.fonterra_last_successful_modbus_response` and five more `..._health_*` sensors | Connection health metrics (see below) |
+| Sensor | `sensor.fonterra_currently_open_actuators` and three more `..._actuator_stats_*` sensors | Derived actuator statistics (see below) |
 
 Operating mode and profile mode are set on the base unit itself, not per
 room — changing them from any one room's thermostat card changes them for
@@ -174,6 +175,25 @@ Beyond the automatic discovery that runs on every setup (see "Initial discovery"
 ### Write verification
 
 After writing a target temperature, operating mode, profile mode, or power level, the integration checks the device's own next valid read of that register against what was written. If the device reports something else (a rejected or overridden write), the displayed value is reconciled to what the device actually reports and a warning is logged — the device's value is always authoritative.
+
+### Fewer Modbus requests per poll
+
+When several rooms' registers happen to be adjacent on the device (e.g. two rooms' power-level/target-temperature registers, or two actuators' position/return-temperature registers), the integration combines them into a single Modbus request instead of one request per register. Input and holding registers are never combined with each other, and only registers actually read every cycle are ever grouped this way — an undocumented gap between two registers is never bridged. This is purely a transport-level optimization: polling intervals, availability, and scaling are unaffected, and a failed combined request is retried the same way a failed single-register request always was.
+
+### Extended diagnostics snapshot
+
+The "Download diagnostics" export (see "Verifying your configuration" below) also includes a small, bounded `extended` section: the connection-health counters above plus a short history of recent Modbus exception codes, the exact documented register addresses a normal polling cycle reads for your topology, and the most recent rediscovery's added/removed/renamed/reassigned diff, if any. It contains no host/IP/credential data and no firmware/version guesses — the device doesn't document a version register, so none is fabricated.
+
+### Derived actuator statistics
+
+Four more diagnostic sensors are derived from the circulation-pump indicator's own debounced actuator readings, without any extra Modbus traffic:
+
+- number of actuators currently confirmed open
+- confirmed open-transition count (how many times the pump indicator has turned on)
+- timestamp of the last confirmed transition (on↔off)
+- cumulative confirmed-open time
+
+These are computed values, not device registers, and are not a substitute for the circulation-pump binary sensor itself. The open-actuator count stays unavailable until at least one actuator has completed its debounce cycle and is never restored to a stale value after a restart; the transition count, cumulative open time, and last-transition timestamp do restore.
 
 ## Example dashboard
 

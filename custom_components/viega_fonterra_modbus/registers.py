@@ -134,6 +134,55 @@ def room_actor_numbers(room_config: dict[str, object]) -> list[int]:
         except (TypeError, ValueError):
             continue
     return result
+def known_addresses_for_topology(rooms: dict[str, object]) -> tuple[set[int], set[int]]:
+    """Return `(holding_addresses, input_addresses)`: every documented
+    register address a normal polling cycle reads for the given room/
+    actuator topology, one set per Modbus function/bank.
+
+    Used to group adjacent single-register reads into fewer Modbus
+    requests (spec.md 16d "contiguous register-block reads"). Deliberately
+    built only from the same per-cycle registers `climate.py`/`sensor.py`/
+    `number.py`/`binary_sensor.py` already read every cycle - e.g. an
+    actuator's Raum-ID register (`actor_registers()["room_id"]`) is a real,
+    documented register but is not part of this set, since it is normally
+    read only during discovery/rediscovery (`room_mapping.py`), not every
+    poll. Including it here would silently couple an unrelated register's
+    failure into every actuator-position/return-temperature read's
+    availability - the opposite of what this optimization must guarantee
+    ("must not alter ... availability semantics").
+    """
+    holding = {BASE_UNIT_REGISTERS["operating_mode"], BASE_UNIT_REGISTERS["profile_mode"]}
+    input_ = {BASE_UNIT_REGISTERS["error_code"], BASE_UNIT_REGISTERS["flow_temperature"]}
+
+    for room_id, room_config in rooms.items():
+        if not isinstance(room_config, dict):
+            continue
+
+        room_number = resolve_room_number(room_id, room_config)
+        if room_number:
+            defaults = room_registers(room_number)
+            for key, bank in (
+                ("target_temperature_register", "holding"),
+                ("power_level_register", "holding"),
+            ):
+                default_key = key.removesuffix("_register")
+                address = room_config.get(key, defaults.get(default_key))
+                if address is not None:
+                    holding.add(int(address))
+            input_.add(defaults["current_temperature"])
+            input_.add(defaults["error_code"])
+
+        for actor_number in room_actor_numbers(room_config):
+            try:
+                actor_regs = actor_registers(actor_number)
+            except ValueError:
+                continue
+            input_.add(actor_regs["position"])
+            input_.add(actor_regs["return_temperature"])
+
+    return holding, input_
+
+
 # Base-unit and room error/warning codes from the device manual's
 # "Fehlercodes" table (`Fonterra Smart Control-de-DE.pdf`, page 94). Codes
 # 3-10 are reported on the base-unit error register (manual 30024); codes

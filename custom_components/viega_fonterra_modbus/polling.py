@@ -17,6 +17,11 @@ import asyncio
 from homeassistant.core import HomeAssistant
 
 from .const import DEFAULT_POLLING_INTERVAL, DOMAIN
+from .registers import known_addresses_for_topology
+
+#: Modbus function 0x03/0x04 quantity field is one byte; a request can
+#: never ask for more than this many registers in one go.
+MAX_BLOCK_REGISTERS = 125
 
 
 class PollingGate:
@@ -51,8 +56,23 @@ class SharedPolling:
         self.generation = 0
 
     async def read(self, hass: HomeAssistant, entry_id: str, bank: str, address: int, count: int = 1):
-        """Read a register range, reusing the current polling cycle result."""
-        key = (bank, int(address), int(count))
+        """Read a register range, reusing the current polling cycle result.
+
+        A single-register request (`count == 1`, the common case for every
+        room/actuator scalar register) is grouped with any adjacent,
+        individually-documented registers into one Modbus request when
+        possible (spec.md 16d), so several entities' reads within the same
+        polling window can be served by one request instead of one each.
+        Every sub-register of that block is cached under its own
+        single-register key, so a later caller asking for a different
+        address inside the same block gets a cache hit instead of issuing
+        its own request. A request for more than one register (e.g. a text
+        field spanning several registers) is never combined with anything
+        else and behaves exactly as before.
+        """
+        address = int(address)
+        count = int(count)
+        key = (bank, address, count)
         async with self._lock:
             if self._gate.is_due(hass, entry_id):
                 self._values.clear()
@@ -62,9 +82,41 @@ class SharedPolling:
             client = hass.data[DOMAIN][entry_id]["client"]
             reader = (client.read_holding_registers if bank == "holding"
                       else client.read_input_registers)
-            values = await reader(int(address), int(count))
-            self._values[key] = values
-            return values
+
+            if count != 1:
+                values = await reader(address, count)
+                self._values[key] = values
+                return values
+
+            start, length = self._contiguous_block(hass, entry_id, bank, address)
+            values = await reader(start, length)
+            for offset, value in enumerate(values):
+                self._values[(bank, start + offset, 1)] = [value]
+            return self._values[key]
+
+    def _contiguous_block(
+        self, hass: HomeAssistant, entry_id: str, bank: str, address: int
+    ) -> tuple[int, int]:
+        """Return `(start, length)` for the block a single-register read of
+        `address` should actually fetch: `address` extended with any
+        adjacent addresses that are themselves documented registers this
+        entry's topology reads every cycle (`registers.py`'s
+        `known_addresses_for_topology`) - never an undocumented gap, and
+        never mixing holding and input registers.
+        """
+        rooms = hass.data.get(DOMAIN, {}).get(entry_id, {}).get("rooms", {})
+        holding, input_ = known_addresses_for_topology(rooms)
+        known = holding if bank == "holding" else input_
+
+        if address not in known:
+            return address, 1
+
+        start = end = address
+        while (start - 1) in known and (address - (start - 1) + 1) <= MAX_BLOCK_REGISTERS:
+            start -= 1
+        while (end + 1) in known and ((end + 1) - start + 1) <= MAX_BLOCK_REGISTERS:
+            end += 1
+        return start, end - start + 1
 
     async def run_exclusive(self, action):
         """Run `action` (a zero-arg async callable) while holding this

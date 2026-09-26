@@ -23,6 +23,7 @@ from homeassistant.core import HomeAssistant
 from .const import DOMAIN
 from .registers import (
     actor_registers,
+    known_addresses_for_topology,
     resolve_room_number,
     room_actor_numbers,
     room_registers,
@@ -59,9 +60,51 @@ async def async_get_config_entry_diagnostics(
                 for room_id, room_config in rooms.items()
                 if isinstance(room_config, dict)
             ],
+            "extended": _extended_diagnostics(entry_data),
         },
         TO_REDACT,
     )
+
+
+def _extended_diagnostics(entry_data: dict[str, Any]) -> dict[str, Any]:
+    """Optional, bounded extended snapshot (spec.md 16e): connection-health
+    counters, a bounded history of recent Modbus exception codes, the
+    documented register addresses a normal polling cycle actually reads for
+    the resolved topology, and the most recent rediscovery's topology diff.
+
+    Built entirely from data already held in `hass.data[DOMAIN][entry_id]`,
+    like the rest of this module - no extra Modbus read. Every field is a
+    small scalar or a fixed-size collection (`recent_exception_codes` is
+    itself bounded on the client, see `modbus_handler.py`), so the overall
+    size is fixed regardless of how long the module has been running; no
+    raw TX/RX frame or other unbounded data ever goes into it. There is no
+    documented register reporting a firmware/software version, so none is
+    fabricated here - spec.md 16e only allows one "when reported by a
+    documented device source".
+    """
+    client = entry_data.get("client")
+    holding, input_ = known_addresses_for_topology(entry_data.get("rooms", {}))
+
+    return {
+        "connection_health": {
+            "last_success_time": _isoformat(getattr(client, "last_success_time", None)),
+            "last_failure_time": _isoformat(getattr(client, "last_failure_time", None)),
+            "consecutive_failures": getattr(client, "consecutive_failures", None),
+            "invalid_value_count": getattr(client, "invalid_value_count", None),
+            "last_exception_code": getattr(client, "last_exception_code", None),
+            "recent_exception_codes": list(getattr(client, "recent_exception_codes", None) or []),
+            "last_success_duration": getattr(client, "last_success_duration", None),
+        },
+        "resolved_addresses": {
+            "holding": sorted(holding),
+            "input": sorted(input_),
+        },
+        "last_rediscovery": entry_data.get("last_rediscovery"),
+    }
+
+
+def _isoformat(value: Any) -> str | None:
+    return value.isoformat() if value is not None else None
 
 
 def _room_diagnostics(room_id: str, room_config: dict[str, object]) -> dict[str, Any]:

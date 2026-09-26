@@ -866,6 +866,43 @@ def test_a_modbus_exception_response_records_its_exception_code():
     assert client.consecutive_failures == 1
 
 
+def test_recent_exception_codes_history_is_bounded(monkeypatch):
+    """spec.md 16e: "the snapshot must have a fixed maximum size" - the
+    history must never grow unbounded no matter how many exceptions occur
+    over the client's lifetime."""
+    from custom_components.viega_fonterra_modbus.modbus_handler import (
+        RECENT_EXCEPTION_CODES_MAXLEN,
+    )
+
+    log: list[bytes] = []
+
+    class FakeWriter:
+        def write(self, data: bytes) -> None:
+            log.append(bytes(data))
+
+        async def drain(self) -> None:
+            return None
+
+    class FakeReader:
+        async def read(self, n: int) -> bytes:
+            transaction_id = log[-1][0:2]
+            return transaction_id + b"\x00\x00\x00\x03\x01\x83\x02"
+
+    client = ViegaModbusClient("192.168.1.50", 502)
+    client._reader = FakeReader()
+    client._writer = FakeWriter()
+    client._connected = True
+
+    for _ in range(RECENT_EXCEPTION_CODES_MAXLEN + 5):
+        try:
+            asyncio.run(client.read_holding_registers(0, 1))
+        except ModbusClientError:
+            pass
+
+    assert len(client.recent_exception_codes) == RECENT_EXCEPTION_CODES_MAXLEN
+    assert list(client.recent_exception_codes) == [2] * RECENT_EXCEPTION_CODES_MAXLEN
+
+
 def test_write_register_also_records_success_metrics():
     log: list[bytes] = []
 

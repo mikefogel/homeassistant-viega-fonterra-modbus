@@ -7,7 +7,8 @@ sensor exposed by sensor.py.
 
 from __future__ import annotations
 
-from datetime import timedelta
+import time
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from homeassistant.components.binary_sensor import (
@@ -224,6 +225,56 @@ class ViegaActuatorPositionBinarySensor(BinarySensorEntity, RestoreEntity):
         return build_device_info(self.hass, self._entry_id)
 
 
+class ActuatorStatistics:
+    """Derived diagnostic statistics computed from the circulation pump's
+    own debounced actuator readings (spec.md 16f).
+
+    These are derived values, not device registers, and this is never a
+    second/independent Modbus poll of its own:
+    `ViegaCirculationPumpBinarySensor.async_update` feeds this the exact
+    same per-actuator debounced/"accepted" values it already computed for
+    the pump indicator itself, once per polling cycle. Stored on
+    `entry_data` (not on the pump entity) so it survives the pump entity
+    being rebuilt by rediscovery (spec.md 16a).
+    """
+
+    def __init__(self) -> None:
+        self.open_actuator_count: int | None = None
+        self.open_transition_count: int = 0
+        self.last_transition_time: datetime | None = None
+        self.confirmed_open_seconds: float = 0.0
+        self._last_aggregate: bool | None = None
+        self._last_update_monotonic: float | None = None
+
+    def update(self, accepted: dict[int, int | None]) -> None:
+        """Feed one polling cycle's debounced actuator values.
+
+        `accepted` is `ViegaCirculationPumpBinarySensor._accepted`: each
+        actuator's last raw value that reached the debounce threshold, or
+        `None` if it has not settled yet.
+        """
+        settled = [value for value in accepted.values() if value is not None]
+
+        now = time.monotonic()
+        if self._last_aggregate is True and self._last_update_monotonic is not None:
+            self.confirmed_open_seconds += now - self._last_update_monotonic
+        self._last_update_monotonic = now
+
+        if not settled:
+            # spec.md 16f: unavailable until a valid debounced reading
+            # exists - never report a stale/zero count in the meantime.
+            self.open_actuator_count = None
+            return
+
+        self.open_actuator_count = sum(1 for value in settled if value == 1)
+        aggregate = self.open_actuator_count > 0
+        if aggregate != self._last_aggregate:
+            self.last_transition_time = datetime.now(timezone.utc)
+            if aggregate:
+                self.open_transition_count += 1
+        self._last_aggregate = aggregate
+
+
 class ViegaCirculationPumpBinarySensor(BinarySensorEntity, RestoreEntity):
     """Derived on/off indicator for an externally controlled circulation pump.
 
@@ -300,6 +351,10 @@ class ViegaCirculationPumpBinarySensor(BinarySensorEntity, RestoreEntity):
             self._attr_is_on = None
         else:
             self._attr_is_on = any(value == 1 for value in settled)
+
+        entry_data = self.hass.data[DOMAIN][self._entry_id]
+        statistics = entry_data.setdefault("actuator_statistics", ActuatorStatistics())
+        statistics.update(self._accepted)
 
     @property
     def device_info(self):

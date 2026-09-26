@@ -6,7 +6,12 @@ import asyncio
 import logging
 import struct
 import time
+from collections import deque
 from datetime import datetime, timezone
+
+#: Fixed maximum size for the "recent Modbus exception codes" diagnostic
+#: history (spec.md 16e: "the snapshot must have a fixed maximum size").
+RECENT_EXCEPTION_CODES_MAXLEN = 10
 
 
 _LOGGER = logging.getLogger("custom_components.viega_fonterra_modbus.modbus")
@@ -55,6 +60,9 @@ class ViegaModbusClient:
         self.invalid_value_count: int = 0
         self.last_exception_code: int | None = None
         self.last_success_duration: float | None = None
+        #: Bounded history of recent Modbus exception codes (spec.md 16e),
+        #: oldest first - a fixed-size deque, never an unbounded log.
+        self.recent_exception_codes: deque[int] = deque(maxlen=RECENT_EXCEPTION_CODES_MAXLEN)
 
     def _record_success(self, duration: float, invalid_values: int = 0) -> None:
         self.last_success_time = datetime.now(timezone.utc)
@@ -68,6 +76,7 @@ class ViegaModbusClient:
         exception_code = getattr(error, "exception_code", None)
         if exception_code is not None:
             self.last_exception_code = exception_code
+            self.recent_exception_codes.append(exception_code)
 
     def _log_frame(self, direction: str, frame: bytes) -> None:
         """Log a Modbus frame with decoded header fields at DEBUG level.

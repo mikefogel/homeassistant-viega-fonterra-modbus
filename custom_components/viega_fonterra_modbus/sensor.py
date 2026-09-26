@@ -15,6 +15,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory, UnitOfTemperature, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, MIN_SCAN_INTERVAL
 from .device import build_device_info
@@ -98,6 +99,11 @@ async def async_setup_entry(
     entities.extend(
         ViegaConnectionHealthSensor(entry.entry_id, metric_key)
         for metric_key in ViegaConnectionHealthSensor.METRIC_KEYS
+    )
+
+    entities.extend(
+        ViegaActuatorStatisticsSensor(entry.entry_id, metric_key)
+        for metric_key in ViegaActuatorStatisticsSensor.METRIC_KEYS
     )
 
     registry = register_platform(hass, entry.entry_id, "sensor", async_add_entities)
@@ -542,6 +548,83 @@ class ViegaConnectionHealthSensor(SensorEntity):
         """
         client = self.hass.data[DOMAIN][self._entry_id]["client"]
         self._attr_native_value = getattr(client, self._metric_key, None)
+
+    @property
+    def device_info(self):
+        return build_device_info(self.hass, self._entry_id)
+
+
+class ViegaActuatorStatisticsSensor(SensorEntity, RestoreEntity):
+    """One derived actuator statistic (spec.md 16f), read straight off the
+    shared `ActuatorStatistics` object (`binary_sensor.py`) that the
+    circulation-pump entity already updates as part of its own debounced
+    read each cycle - never a second, independent poll, and never presented
+    as if it were a device register.
+    """
+
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    METRIC_KEYS = (
+        "open_actuator_count",
+        "open_transition_count",
+        "last_transition_time",
+        "confirmed_open_seconds",
+    )
+    _DEVICE_CLASS = {"last_transition_time": SensorDeviceClass.TIMESTAMP}
+    _UNIT = {"confirmed_open_seconds": UnitOfTime.SECONDS}
+    _STATE_CLASS = {
+        "open_actuator_count": SensorStateClass.MEASUREMENT,
+        "open_transition_count": SensorStateClass.TOTAL_INCREASING,
+        "confirmed_open_seconds": SensorStateClass.TOTAL_INCREASING,
+    }
+    #: The two accumulators and the last-transition timestamp are
+    #: meaningful to restore across a restart. `open_actuator_count` is
+    #: deliberately excluded: spec.md 16f requires it stay unavailable
+    #: until a fresh debounced reading exists again, so a restart must
+    #: never show a stale count from before it.
+    _RESTORABLE = {"open_transition_count", "last_transition_time", "confirmed_open_seconds"}
+
+    def __init__(self, entry_id: str, metric_key: str) -> None:
+        self._entry_id = entry_id
+        self._metric_key = metric_key
+        self._attr_unique_id = f"{entry_id}_actuator_stats_{metric_key}"
+        self._attr_translation_key = f"actuator_stats_{metric_key}"
+        self._attr_device_class = self._DEVICE_CLASS.get(metric_key)
+        self._attr_native_unit_of_measurement = self._UNIT.get(metric_key)
+        self._attr_state_class = self._STATE_CLASS.get(metric_key)
+        self._attr_native_value = None
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the accumulators/timestamp across a restart (spec.md
+        16f); `open_actuator_count` deliberately opts out (see above)."""
+        await super().async_added_to_hass()
+        if self._metric_key not in self._RESTORABLE:
+            return
+        last_state = await self.async_get_last_state()
+        if last_state is None or last_state.state in ("unknown", "unavailable"):
+            return
+        if self._metric_key == "last_transition_time":
+            parsed = dt_util.parse_datetime(last_state.state)
+            if parsed is not None:
+                self._attr_native_value = parsed
+            return
+        try:
+            self._attr_native_value = float(last_state.state)
+        except (TypeError, ValueError):
+            return
+
+    async def async_update(self) -> None:
+        """Copy the current statistic off the shared `ActuatorStatistics`.
+
+        Not gated by a `PollingGate`: nothing here touches the wire, so
+        there is nothing to throttle (mirrors
+        `ViegaConnectionHealthSensor`).
+        """
+        statistics = self.hass.data[DOMAIN][self._entry_id].get("actuator_statistics")
+        if statistics is None:
+            return
+        self._attr_native_value = getattr(statistics, self._metric_key, None)
 
     @property
     def device_info(self):

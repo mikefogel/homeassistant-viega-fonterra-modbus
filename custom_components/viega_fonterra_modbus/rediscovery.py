@@ -119,7 +119,9 @@ async def async_rediscover_entry(hass: HomeAssistant, entry: ConfigEntry) -> Red
         _LOGGER.warning(
             "Rediscovery failed for entry %s: %s", entry.entry_id, err, exc_info=True
         )
-        return RediscoveryReport(failed=True, error=str(err))
+        failed_report = RediscoveryReport(failed=True, error=str(err))
+        entry_data["last_rediscovery"] = failed_report.as_dict()
+        return failed_report
 
     if not new_rooms:
         # A live discovery that comes back empty must never silently
@@ -131,10 +133,16 @@ async def async_rediscover_entry(hass: HomeAssistant, entry: ConfigEntry) -> Red
             "topology instead of clearing it",
             entry.entry_id,
         )
-        return RediscoveryReport(failed=True, error="no rooms discovered from the device")
+        failed_report = RediscoveryReport(failed=True, error="no rooms discovered from the device")
+        entry_data["last_rediscovery"] = failed_report.as_dict()
+        return failed_report
 
     report = diff_topology(old_rooms, new_rooms)
     entry_data["rooms"] = new_rooms
+    # Kept for the extended diagnostics snapshot (spec.md 16e "discovery
+    # changes") - just the last report's own bounded dict, not a growing
+    # history.
+    entry_data["last_rediscovery"] = report.as_dict()
     _update_config_entry_rooms(hass, entry, new_rooms)
     await _reconcile_entities(hass, entry.entry_id, old_rooms, new_rooms, report)
     _log_and_fire_report(hass, entry.entry_id, report)

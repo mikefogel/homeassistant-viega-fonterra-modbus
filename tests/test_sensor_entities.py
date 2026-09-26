@@ -8,8 +8,10 @@ from types import SimpleNamespace
 from custom_components.viega_fonterra_modbus.const import DOMAIN
 from custom_components.viega_fonterra_modbus.modbus_handler import ViegaModbusClient
 from custom_components.viega_fonterra_modbus.registers import describe_error_code
+from custom_components.viega_fonterra_modbus.binary_sensor import ActuatorStatistics
 from custom_components.viega_fonterra_modbus.sensor import (
     ViegaActorLinkedSensor,
+    ViegaActuatorStatisticsSensor,
     ViegaBaseUnitIdentitySensor,
     ViegaBaseUnitTemperatureSensor,
     ViegaConnectionHealthSensor,
@@ -333,6 +335,101 @@ def test_health_sensor_device_classes_and_units_are_set_per_metric():
 
     counter = ViegaConnectionHealthSensor("entry_1", "invalid_value_count")
     assert counter._attr_state_class == SensorStateClass.TOTAL_INCREASING
+
+
+# --- Derived actuator statistics (spec.md 16f) ---------------------------
+
+
+def test_setup_entry_creates_one_sensor_per_actuator_statistic():
+    hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"rooms": {}, "identity": {}}}})
+    entry = SimpleNamespace(entry_id="entry_1")
+    added: list = []
+
+    asyncio.run(async_setup_entry(hass, entry, added.extend))
+
+    unique_ids = {getattr(entity, "_attr_unique_id", None) for entity in added}
+    for metric_key in ViegaActuatorStatisticsSensor.METRIC_KEYS:
+        assert f"entry_1_actuator_stats_{metric_key}" in unique_ids
+
+
+def test_actuator_statistics_sensor_copies_the_metric_off_the_shared_object():
+    stats = ActuatorStatistics()
+    stats.update({1: 1, 2: 0})
+    entity = ViegaActuatorStatisticsSensor("entry_1", "open_actuator_count")
+    entity.hass = SimpleNamespace(
+        data={DOMAIN: {"entry_1": {"actuator_statistics": stats}}}
+    )
+
+    asyncio.run(entity.async_update())
+
+    assert entity._attr_native_value == 1
+
+
+def test_actuator_statistics_sensor_is_a_noop_before_the_pump_has_ever_updated():
+    entity = ViegaActuatorStatisticsSensor("entry_1", "open_actuator_count")
+    entity.hass = SimpleNamespace(data={DOMAIN: {"entry_1": {}}})
+
+    asyncio.run(entity.async_update())  # must not raise
+
+    assert entity._attr_native_value is None
+
+
+def test_open_actuator_count_never_restores_a_stale_value():
+    """spec.md 16f: this metric must stay unavailable until a fresh
+    debounced reading exists again - a restart must not resurrect a stale
+    count from before it."""
+    entity = ViegaActuatorStatisticsSensor("entry_1", "open_actuator_count")
+
+    async def _fake_last_state():
+        return SimpleNamespace(state="3", attributes={})
+
+    entity.async_get_last_state = _fake_last_state
+
+    asyncio.run(entity.async_added_to_hass())
+
+    assert entity._attr_native_value is None
+
+
+def test_open_transition_count_and_confirmed_open_seconds_restore_on_add():
+    for metric_key, value in (
+        ("open_transition_count", "4"),
+        ("confirmed_open_seconds", "12.5"),
+    ):
+        entity = ViegaActuatorStatisticsSensor("entry_1", metric_key)
+
+        async def _fake_last_state(value=value):
+            return SimpleNamespace(state=value, attributes={})
+
+        entity.async_get_last_state = _fake_last_state
+        asyncio.run(entity.async_added_to_hass())
+
+        assert entity._attr_native_value == float(value)
+
+
+def test_last_transition_time_restores_as_a_parsed_datetime():
+    entity = ViegaActuatorStatisticsSensor("entry_1", "last_transition_time")
+
+    async def _fake_last_state():
+        return SimpleNamespace(state="2026-01-01T00:00:00+00:00", attributes={})
+
+    entity.async_get_last_state = _fake_last_state
+
+    asyncio.run(entity.async_added_to_hass())
+
+    assert entity._attr_native_value.year == 2026
+
+
+def test_actuator_statistics_sensor_ignores_unavailable_restored_state():
+    entity = ViegaActuatorStatisticsSensor("entry_1", "open_transition_count")
+
+    async def _fake_last_state():
+        return SimpleNamespace(state="unavailable", attributes={})
+
+    entity.async_get_last_state = _fake_last_state
+
+    asyncio.run(entity.async_added_to_hass())
+
+    assert entity._attr_native_value is None
 
 
 # --- State restoration across restarts (spec.md 15) ---------------------

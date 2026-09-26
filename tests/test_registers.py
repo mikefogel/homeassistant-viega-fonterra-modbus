@@ -7,6 +7,7 @@ from custom_components.viega_fonterra_modbus.registers import (
     REGISTER_DEFINITIONS,
     actor_registers,
     describe_error_code,
+    known_addresses_for_topology,
     pdu_address,
     resolve_room_number,
     room_name_register,
@@ -115,3 +116,65 @@ def test_describe_error_code_reports_unknown_for_undocumented_codes():
 
 def test_decode_text_registers_uses_big_endian_ascii_and_strips_padding():
     assert decode_text_registers([0x5649, 0x4547, 0x4100, 0x2020]) == "VIEGA"
+
+
+# --- known_addresses_for_topology (spec.md 16d) --------------------------
+
+
+def test_known_addresses_always_include_the_base_unit_registers():
+    holding, input_ = known_addresses_for_topology({})
+
+    assert holding == {BASE_UNIT_REGISTERS["operating_mode"], BASE_UNIT_REGISTERS["profile_mode"]}
+    assert input_ == {BASE_UNIT_REGISTERS["error_code"], BASE_UNIT_REGISTERS["flow_temperature"]}
+
+
+def test_known_addresses_include_a_rooms_target_and_power_registers():
+    holding, _ = known_addresses_for_topology({"room_1": {"name": "Wohnzimmer", "room_number": 1}})
+
+    regs = room_registers(1)
+    assert regs["power_level"] in holding
+    assert regs["target_temperature"] in holding
+
+
+def test_known_addresses_include_a_rooms_current_temperature_and_error_registers():
+    _, input_ = known_addresses_for_topology({"room_1": {"name": "Wohnzimmer", "room_number": 1}})
+
+    regs = room_registers(1)
+    assert regs["current_temperature"] in input_
+    assert regs["error_code"] in input_
+
+
+def test_known_addresses_include_every_actors_position_and_return_temperature():
+    _, input_ = known_addresses_for_topology(
+        {"room_1": {"name": "Wohnzimmer", "actor": [1, 2]}}
+    )
+
+    for actor_number in (1, 2):
+        regs = actor_registers(actor_number)
+        assert regs["position"] in input_
+        assert regs["return_temperature"] in input_
+
+
+def test_known_addresses_never_include_an_actuators_room_id_register():
+    """The Raum-ID register is real and documented, but is normally read
+    only during discovery/rediscovery, not every polling cycle - it must
+    never be treated as part of the per-cycle known set (spec.md 16d)."""
+    _, input_ = known_addresses_for_topology({"room_1": {"name": "Wohnzimmer", "actor": 1}})
+
+    assert actor_registers(1)["room_id"] not in input_
+
+
+def test_known_addresses_respect_an_explicit_target_temperature_register_override():
+    holding, _ = known_addresses_for_topology(
+        {"room_1": {"name": "Wohnzimmer", "room_number": 1, "target_temperature_register": 999}}
+    )
+
+    assert 999 in holding
+    assert room_registers(1)["target_temperature"] not in holding
+
+
+def test_known_addresses_skip_non_dict_and_unresolvable_rooms():
+    holding, input_ = known_addresses_for_topology({"room_1": "not a dict"})
+
+    assert holding == {BASE_UNIT_REGISTERS["operating_mode"], BASE_UNIT_REGISTERS["profile_mode"]}
+    assert input_ == {BASE_UNIT_REGISTERS["error_code"], BASE_UNIT_REGISTERS["flow_temperature"]}
