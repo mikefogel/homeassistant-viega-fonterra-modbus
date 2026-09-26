@@ -4,7 +4,9 @@ import asyncio
 from types import SimpleNamespace
 
 from custom_components.viega_fonterra_modbus import (
+    SERVICE_REDISCOVER,
     async_remove_config_entry_device,
+    async_setup,
     async_setup_entry,
     async_unload_entry,
 )
@@ -122,6 +124,98 @@ def test_setup_entry_does_not_call_a_removed_client_debug_toggle(monkeypatch):
     client = hass.data[DOMAIN]["entry_1"]["client"]
     assert not hasattr(client, "set_debug")
     assert not hasattr(client, "debug")
+
+
+# --- Domain-wide `rediscover` service (spec.md 16a) ----------------------
+
+
+class _FakeServices:
+    def __init__(self):
+        self.registered = {}
+
+    def async_register(self, domain, service, handler, schema=None):
+        self.registered[(domain, service)] = handler
+
+
+class _FakeDeviceEntry:
+    def __init__(self, config_entries):
+        self.config_entries = config_entries
+
+
+class _FakeDeviceRegistry:
+    def __init__(self, devices):
+        self._devices = devices
+
+    def async_get(self, device_id):
+        return self._devices.get(device_id)
+
+
+def test_async_setup_registers_the_rediscover_service():
+    hass = SimpleNamespace(services=_FakeServices(), data={})
+
+    result = asyncio.run(async_setup(hass, {}))
+
+    assert result is True
+    assert (DOMAIN, SERVICE_REDISCOVER) in hass.services.registered
+
+
+def test_rediscover_service_resolves_the_device_to_its_config_entry(monkeypatch):
+    calls: list[str] = []
+
+    async def fake_rediscover(hass, entry):
+        calls.append(entry.entry_id)
+
+    monkeypatch.setattr(
+        "custom_components.viega_fonterra_modbus.async_rediscover_entry", fake_rediscover
+    )
+    monkeypatch.setattr(
+        "custom_components.viega_fonterra_modbus.dr.async_get",
+        lambda hass: _FakeDeviceRegistry({"device_1": _FakeDeviceEntry({"entry_1"})}),
+    )
+
+    entry = SimpleNamespace(entry_id="entry_1")
+    hass = SimpleNamespace(
+        services=_FakeServices(),
+        data={DOMAIN: {"entry_1": {}}},
+        config_entries=SimpleNamespace(async_get_entry=lambda entry_id: entry),
+    )
+
+    asyncio.run(async_setup(hass, {}))
+    handler = hass.services.registered[(DOMAIN, SERVICE_REDISCOVER)]
+    asyncio.run(handler(SimpleNamespace(data={"device_id": "device_1"})))
+
+    assert calls == ["entry_1"]
+
+
+def test_rediscover_service_is_a_noop_when_the_device_has_no_loaded_entry(monkeypatch):
+    monkeypatch.setattr(
+        "custom_components.viega_fonterra_modbus.dr.async_get",
+        lambda hass: _FakeDeviceRegistry({"device_1": _FakeDeviceEntry({"entry_1"})}),
+    )
+    hass = SimpleNamespace(services=_FakeServices(), data={DOMAIN: {}})
+
+    asyncio.run(async_setup(hass, {}))
+    handler = hass.services.registered[(DOMAIN, SERVICE_REDISCOVER)]
+
+    asyncio.run(handler(SimpleNamespace(data={"device_id": "device_1"})))  # must not raise
+
+
+def test_rediscover_service_raises_for_an_unknown_device(monkeypatch):
+    monkeypatch.setattr(
+        "custom_components.viega_fonterra_modbus.dr.async_get",
+        lambda hass: _FakeDeviceRegistry({}),
+    )
+    hass = SimpleNamespace(services=_FakeServices(), data={DOMAIN: {}})
+
+    asyncio.run(async_setup(hass, {}))
+    handler = hass.services.registered[(DOMAIN, SERVICE_REDISCOVER)]
+
+    try:
+        asyncio.run(handler(SimpleNamespace(data={"device_id": "unknown"})))
+    except Exception:
+        pass
+    else:
+        raise AssertionError("expected an error for an unknown device_id")
 
 
 def test_device_can_always_be_removed():

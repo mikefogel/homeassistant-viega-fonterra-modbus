@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import logging
 
+import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
-from homeassistant.helpers import device_registry as dr
+from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
+from homeassistant.helpers import config_validation as cv, device_registry as dr
+from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN, PLATFORMS
 from .modbus_handler import ModbusClientError, ViegaModbusClient
 from .polling import SharedPolling
+from .rediscovery import async_rediscover_entry
 from .room_mapping import RoomMappingDiscovery
 from .registers import (
     BASE_UNIT_REGISTERS,
@@ -22,6 +25,44 @@ from .registers import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+SERVICE_REDISCOVER = "rediscover"
+_REDISCOVER_SCHEMA = vol.Schema({vol.Required("device_id"): cv.string})
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Register the domain-wide `rediscover` service (spec.md 16a).
+
+    Registered once here in `async_setup`, not per config entry in
+    `async_setup_entry`, since it targets a device (and thus a specific
+    entry) chosen at call time, not the entry currently being set up.
+    """
+
+    async def _async_handle_rediscover(call: ServiceCall) -> None:
+        device_registry = dr.async_get(hass)
+        device_entry = device_registry.async_get(call.data["device_id"])
+        if device_entry is None:
+            raise HomeAssistantError(f"Unknown device_id: {call.data['device_id']}")
+        entry_ids = [
+            entry_id
+            for entry_id in device_entry.config_entries
+            if entry_id in hass.data.get(DOMAIN, {})
+        ]
+        if not entry_ids:
+            _LOGGER.warning(
+                "Rediscover service called for device %s, which has no "
+                "loaded Viega Fonterra config entry",
+                call.data["device_id"],
+            )
+            return
+        entry = hass.config_entries.async_get_entry(entry_ids[0])
+        if entry is not None:
+            await async_rediscover_entry(hass, entry)
+
+    hass.services.async_register(
+        DOMAIN, SERVICE_REDISCOVER, _async_handle_rediscover, schema=_REDISCOVER_SCHEMA
+    )
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

@@ -352,6 +352,153 @@ def test_ignores_unknown_or_unavailable_restored_state():
     assert entity._attr_target_temperature == 20.0
 
 
+class _RecordingWriteThenReadClient:
+    """Records writes; subsequent reads return whatever `set_values` holds
+    for that address, defaulting to the write's own value if unset."""
+
+    def __init__(self):
+        self.writes: list[tuple[int, int]] = []
+        self.values_by_address: dict[int, int] = {}
+
+    async def write_register(self, address, value):
+        self.writes.append((address, value))
+        self.values_by_address.setdefault(address, value)
+
+    async def read_holding_registers(self, address, count=1):
+        return [self.values_by_address.get(address, 0)]
+
+    async def read_input_registers(self, address, count=1):
+        return [self.values_by_address.get(address, 0)]
+
+
+class _FakeSharedPolling:
+    """Minimal stand-in for `SharedPolling`: bumps `generation` once per
+    `bump()` call, mirroring a real polling window reopening."""
+
+    def __init__(self, client):
+        self._client = client
+        self.generation = 0
+
+    def bump(self) -> None:
+        self.generation += 1
+
+    async def read(self, hass, entry_id, bank, address, count=1):
+        reader = (
+            self._client.read_holding_registers
+            if bank == "holding"
+            else self._client.read_input_registers
+        )
+        return await reader(address, count)
+
+
+# --- Read-after-write verification (spec.md 16c) -------------------------
+
+
+def test_verified_write_that_matches_leaves_no_warning():
+    entity = _entity(room_config={"name": "Wohnzimmer", "actor": 1})
+    client = _RecordingWriteThenReadClient()
+    shared = _FakeSharedPolling(client)
+    entity.hass = SimpleNamespace(
+        data={DOMAIN: {"entry_1": {"client": client, "polling": shared}}}
+    )
+
+    asyncio.run(entity.async_set_hvac_mode("off"))
+    shared.bump()  # simulate the poll cache refreshing after the write
+    asyncio.run(entity.async_update())
+
+    assert entity.last_error_message == ""
+
+
+def test_a_mismatched_verification_reports_a_warning_and_keeps_the_device_value():
+    """spec.md 16c: "the device value remains authoritative" - a mismatch
+    must both report a diagnostic warning and reconcile the displayed state
+    to what the device actually reports, not the optimistically-written
+    value."""
+    entity = _entity(room_config={"name": "Wohnzimmer", "actor": 1})
+    client = _RecordingWriteThenReadClient()
+    shared = _FakeSharedPolling(client)
+    entity.hass = SimpleNamespace(
+        data={DOMAIN: {"entry_1": {"client": client, "polling": shared}}}
+    )
+
+    asyncio.run(entity.async_set_hvac_mode("off"))
+    assert entity.hvac_mode == "off"
+
+    # The device rejected/overrode the write and actually holds "heat" (1).
+    client.values_by_address[entity._registers["operating_mode"]] = 1
+    shared.bump()
+    asyncio.run(entity.async_update())
+
+    assert entity.hvac_mode == "heat"
+    assert "operating_mode" in entity.last_error_message
+    assert "warning" in entity.last_error_message
+
+
+def test_verification_ignores_a_read_still_from_the_write_time_cache_generation():
+    """A read served from the same cache generation active at write time may
+    still be the pre-write value - it must not be judged yet, only a read
+    from a strictly newer generation counts as verification."""
+    entity = _entity(room_config={"name": "Wohnzimmer", "actor": 1})
+    client = _RecordingWriteThenReadClient()
+    shared = _FakeSharedPolling(client)
+    entity.hass = SimpleNamespace(
+        data={DOMAIN: {"entry_1": {"client": client, "polling": shared}}}
+    )
+
+    asyncio.run(entity.async_set_hvac_mode("off"))
+    # Simulate a pre-write value still cached under the *same* generation.
+    client.values_by_address[entity._registers["operating_mode"]] = 1
+    asyncio.run(entity.async_update())  # generation unchanged - must not judge yet
+
+    assert entity.last_error_message == ""
+    # The pending check is still armed for the next, genuinely newer read.
+    assert "operating_mode" in entity._pending_writes
+
+
+def test_verification_waits_for_a_valid_value_skipping_the_error_sentinel():
+    entity = _entity(room_config={"name": "Wohnzimmer", "actor": 1})
+    client = _RecordingWriteThenReadClient()
+    shared = _FakeSharedPolling(client)
+    entity.hass = SimpleNamespace(
+        data={DOMAIN: {"entry_1": {"client": client, "polling": shared}}}
+    )
+
+    asyncio.run(entity.async_set_preset_mode("profile"))
+    shared.bump()
+    client.values_by_address[entity._registers["profile_mode"]] = -99
+    asyncio.run(entity.async_update())
+
+    # Still pending - a -99 read is not a "suitable" read to verify against.
+    assert "profile_mode" in entity._pending_writes
+    assert entity.last_error_message == ""
+
+    client.values_by_address[entity._registers["profile_mode"]] = 1
+    asyncio.run(entity.async_update())
+
+    assert "profile_mode" not in entity._pending_writes
+    assert entity.last_error_message == ""
+
+
+def test_a_failed_write_never_schedules_verification_or_changes_state():
+    entity = _entity(room_config={"name": "Wohnzimmer", "actor": 1})
+
+    class _FailingClient:
+        async def write_register(self, address, value):
+            raise RuntimeError("device offline")
+
+    entity.hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"client": _FailingClient()}}})
+
+    try:
+        asyncio.run(entity.async_set_hvac_mode("off"))
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("expected the write failure to propagate")
+
+    assert entity.hvac_mode == "heat"  # unchanged default
+    assert entity._pending_writes == {}
+
+
 def test_restore_is_a_noop_without_a_previous_state():
     entity = _entity()
 

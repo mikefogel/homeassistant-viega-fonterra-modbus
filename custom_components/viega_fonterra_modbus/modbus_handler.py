@@ -5,13 +5,25 @@ from __future__ import annotations
 import asyncio
 import logging
 import struct
+import time
+from datetime import datetime, timezone
 
 
 _LOGGER = logging.getLogger("custom_components.viega_fonterra_modbus.modbus")
 
 
 class ModbusClientError(RuntimeError):
-    """Raised when a Modbus request cannot be processed."""
+    """Raised when a Modbus request cannot be processed.
+
+    `exception_code` carries the device's own Modbus exception code (see
+    `validate_function_code`) when this error was raised for that reason,
+    so callers tracking connection health (spec.md 16b) can record it
+    without re-parsing the error message.
+    """
+
+    def __init__(self, message: str, exception_code: int | None = None) -> None:
+        super().__init__(message)
+        self.exception_code = exception_code
 
 
 class ViegaModbusClient:
@@ -33,6 +45,29 @@ class ViegaModbusClient:
         self._connected = False
         self._lock = asyncio.Lock()
         self._recv_buffer = b""
+
+        # Connection health metrics (spec.md 16b), derived entirely from
+        # this client's own request/response bookkeeping - reading them
+        # never issues an additional Modbus request of its own.
+        self.last_success_time: datetime | None = None
+        self.last_failure_time: datetime | None = None
+        self.consecutive_failures: int = 0
+        self.invalid_value_count: int = 0
+        self.last_exception_code: int | None = None
+        self.last_success_duration: float | None = None
+
+    def _record_success(self, duration: float, invalid_values: int = 0) -> None:
+        self.last_success_time = datetime.now(timezone.utc)
+        self.last_success_duration = duration
+        self.consecutive_failures = 0
+        self.invalid_value_count += invalid_values
+
+    def _record_failure(self, error: Exception) -> None:
+        self.last_failure_time = datetime.now(timezone.utc)
+        self.consecutive_failures += 1
+        exception_code = getattr(error, "exception_code", None)
+        if exception_code is not None:
+            self.last_exception_code = exception_code
 
     def _log_frame(self, direction: str, frame: bytes) -> None:
         """Log a Modbus frame with decoded header fields at DEBUG level.
@@ -96,7 +131,8 @@ class ViegaModbusClient:
             exception_code = response[8] if len(response) > 8 else None
             raise ModbusClientError(
                 f"Modbus exception response for function 0x{expected:02x}: "
-                f"exception code {exception_code}"
+                f"exception code {exception_code}",
+                exception_code=exception_code,
             )
         if function_code != expected:
             raise ValueError(
@@ -284,20 +320,29 @@ class ViegaModbusClient:
 
         request = self.build_read_request(address, count, unit_id=self.UNIT_ID)
         expected_transaction_id = int.from_bytes(request[0:2], byteorder="big")
+        start = time.monotonic()
         async with self._lock:
-            self._log_frame("TX", request)
-            self._writer.write(request)
-            await self._writer.drain()
-
             try:
-                response = await asyncio.wait_for(self._read_frame(), timeout=self.timeout)
-            except asyncio.TimeoutError:
-                raise ModbusClientError(f"Modbus read timeout after {self.timeout}s")
-            self._log_frame("RX", response)
-            self.validate_transaction_id(response, expected_transaction_id)
-            self.validate_function_code(response, 0x03)
-            values = self.decode_register_response(response)
-            self._validate_register_count(values, count)
+                self._log_frame("TX", request)
+                self._writer.write(request)
+                await self._writer.drain()
+
+                try:
+                    response = await asyncio.wait_for(self._read_frame(), timeout=self.timeout)
+                except asyncio.TimeoutError:
+                    raise ModbusClientError(f"Modbus read timeout after {self.timeout}s")
+                self._log_frame("RX", response)
+                self.validate_transaction_id(response, expected_transaction_id)
+                self.validate_function_code(response, 0x03)
+                values = self.decode_register_response(response)
+                self._validate_register_count(values, count)
+            except Exception as err:
+                self._record_failure(err)
+                raise
+            self._record_success(
+                time.monotonic() - start,
+                sum(1 for value in values if value == self.ERROR_SENTINEL),
+            )
             return values
 
     async def read_input_registers(self, address: int, count: int = 1) -> list[int]:
@@ -308,19 +353,28 @@ class ViegaModbusClient:
         request = self.build_read_request(address, count, unit_id=self.UNIT_ID)
         request = request[:7] + b"\x04" + request[8:]
         expected_transaction_id = int.from_bytes(request[0:2], byteorder="big")
+        start = time.monotonic()
         async with self._lock:
-            self._log_frame("TX", request)
-            self._writer.write(request)
-            await self._writer.drain()
             try:
-                response = await asyncio.wait_for(self._read_frame(), timeout=self.timeout)
-            except asyncio.TimeoutError:
-                raise ModbusClientError(f"Modbus input read timeout after {self.timeout}s")
-            self._log_frame("RX", response)
-            self.validate_transaction_id(response, expected_transaction_id)
-            self.validate_function_code(response, 0x04)
-            values = self.decode_int16_response(response)
-            self._validate_register_count(values, count)
+                self._log_frame("TX", request)
+                self._writer.write(request)
+                await self._writer.drain()
+                try:
+                    response = await asyncio.wait_for(self._read_frame(), timeout=self.timeout)
+                except asyncio.TimeoutError:
+                    raise ModbusClientError(f"Modbus input read timeout after {self.timeout}s")
+                self._log_frame("RX", response)
+                self.validate_transaction_id(response, expected_transaction_id)
+                self.validate_function_code(response, 0x04)
+                values = self.decode_int16_response(response)
+                self._validate_register_count(values, count)
+            except Exception as err:
+                self._record_failure(err)
+                raise
+            self._record_success(
+                time.monotonic() - start,
+                sum(1 for value in values if value == self.ERROR_SENTINEL),
+            )
             return values
 
     async def write_register(self, address: int, value: int) -> None:
@@ -331,16 +385,22 @@ class ViegaModbusClient:
 
         request = self.build_write_request(address, value, unit_id=self.UNIT_ID)
         expected_transaction_id = int.from_bytes(request[0:2], byteorder="big")
+        start = time.monotonic()
         async with self._lock:
-            self._log_frame("TX", request)
-            self._writer.write(request)
-            await self._writer.drain()
-
             try:
-                response = await asyncio.wait_for(self._read_frame(), timeout=self.timeout)
-            except asyncio.TimeoutError:
-                raise ModbusClientError(f"Modbus write timeout after {self.timeout}s")
-            self._log_frame("RX", response)
-            self.validate_transaction_id(response, expected_transaction_id)
-            self.validate_function_code(response, 0x10)
+                self._log_frame("TX", request)
+                self._writer.write(request)
+                await self._writer.drain()
+
+                try:
+                    response = await asyncio.wait_for(self._read_frame(), timeout=self.timeout)
+                except asyncio.TimeoutError:
+                    raise ModbusClientError(f"Modbus write timeout after {self.timeout}s")
+                self._log_frame("RX", response)
+                self.validate_transaction_id(response, expected_transaction_id)
+                self.validate_function_code(response, 0x10)
+            except Exception as err:
+                self._record_failure(err)
+                raise
+            self._record_success(time.monotonic() - start)
 

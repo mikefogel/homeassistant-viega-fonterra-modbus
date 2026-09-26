@@ -706,6 +706,192 @@ def test_disconnect_does_not_hang_when_wait_closed_never_returns():
     assert client._connected is False
 
 
+def test_successful_read_records_connection_health_metrics():
+    """spec.md 16b: every metric must update from a successful request
+    without any extra Modbus traffic beyond the request itself."""
+    log: list[bytes] = []
+
+    class FakeWriter:
+        def write(self, data: bytes) -> None:
+            log.append(bytes(data))
+
+        async def drain(self) -> None:
+            return None
+
+    class FakeReader:
+        async def read(self, n: int) -> bytes:
+            transaction_id = log[-1][0:2]
+            return transaction_id + b"\x00\x00\x00\x05\x01\x03\x02\x00\x2a"
+
+    client = ViegaModbusClient("192.168.1.50", 502)
+    client._reader = FakeReader()
+    client._writer = FakeWriter()
+    client._connected = True
+
+    assert client.last_success_time is None
+    assert client.consecutive_failures == 0
+
+    asyncio.run(client.read_holding_registers(0, 1))
+
+    assert client.last_success_time is not None
+    assert client.last_success_duration is not None
+    assert client.last_success_duration >= 0
+    assert client.consecutive_failures == 0
+    assert client.invalid_value_count == 0
+
+
+def test_a_sentinel_value_is_still_a_successful_request_but_counts_as_invalid():
+    """A `-99` reading is a valid Modbus response carrying the device's own
+    error sentinel (spec.md 10) - it must count toward
+    `invalid_value_count`, not toward `consecutive_failures`, which is
+    reserved for requests that failed outright."""
+    log: list[bytes] = []
+
+    class FakeWriter:
+        def write(self, data: bytes) -> None:
+            log.append(bytes(data))
+
+        async def drain(self) -> None:
+            return None
+
+    class FakeReader:
+        async def read(self, n: int) -> bytes:
+            transaction_id = log[-1][0:2]
+            return transaction_id + b"\x00\x00\x00\x05\x01\x03\x02\xff\x9d"
+
+    client = ViegaModbusClient("192.168.1.50", 502)
+    client._reader = FakeReader()
+    client._writer = FakeWriter()
+    client._connected = True
+
+    asyncio.run(client.read_holding_registers(0, 1))
+
+    assert client.invalid_value_count == 1
+    assert client.consecutive_failures == 0
+    assert client.last_success_time is not None
+
+
+def test_failed_read_increments_consecutive_failures_and_records_the_timestamp():
+    client = ViegaModbusClient("192.168.1.50", 502, timeout=0.01)
+
+    class HangingReader:
+        async def read(self, n: int) -> bytes:
+            await asyncio.sleep(10)
+            return b""
+
+    class FakeWriter:
+        def write(self, data: bytes) -> None:
+            return None
+
+        async def drain(self) -> None:
+            return None
+
+    client._reader = HangingReader()
+    client._writer = FakeWriter()
+    client._connected = True
+
+    try:
+        asyncio.run(client.read_holding_registers(0, 1))
+    except ModbusClientError:
+        pass
+
+    assert client.consecutive_failures == 1
+    assert client.last_failure_time is not None
+    assert client.last_success_time is None
+
+    try:
+        asyncio.run(client.read_holding_registers(0, 1))
+    except ModbusClientError:
+        pass
+
+    assert client.consecutive_failures == 2
+
+
+def test_a_later_success_resets_consecutive_failures_to_zero():
+    client = ViegaModbusClient("192.168.1.50", 502)
+    client.consecutive_failures = 3
+
+    log: list[bytes] = []
+
+    class FakeWriter:
+        def write(self, data: bytes) -> None:
+            log.append(bytes(data))
+
+        async def drain(self) -> None:
+            return None
+
+    class FakeReader:
+        async def read(self, n: int) -> bytes:
+            transaction_id = log[-1][0:2]
+            return transaction_id + b"\x00\x00\x00\x05\x01\x03\x02\x00\x2a"
+
+    client._reader = FakeReader()
+    client._writer = FakeWriter()
+    client._connected = True
+
+    asyncio.run(client.read_holding_registers(0, 1))
+
+    assert client.consecutive_failures == 0
+
+
+def test_a_modbus_exception_response_records_its_exception_code():
+    """spec.md 16b: "last Modbus exception code, when available" - sourced
+    from the same exception response `validate_function_code` (spec.md 11)
+    already rejects, not a second parse of the error message."""
+    log: list[bytes] = []
+
+    class FakeWriter:
+        def write(self, data: bytes) -> None:
+            log.append(bytes(data))
+
+        async def drain(self) -> None:
+            return None
+
+    class FakeReader:
+        async def read(self, n: int) -> bytes:
+            transaction_id = log[-1][0:2]
+            return transaction_id + b"\x00\x00\x00\x03\x01\x83\x02"
+
+    client = ViegaModbusClient("192.168.1.50", 502)
+    client._reader = FakeReader()
+    client._writer = FakeWriter()
+    client._connected = True
+
+    try:
+        asyncio.run(client.read_holding_registers(0, 1))
+    except ModbusClientError:
+        pass
+
+    assert client.last_exception_code == 2
+    assert client.consecutive_failures == 1
+
+
+def test_write_register_also_records_success_metrics():
+    log: list[bytes] = []
+
+    class FakeWriter:
+        def write(self, data: bytes) -> None:
+            log.append(bytes(data))
+
+        async def drain(self) -> None:
+            return None
+
+    class FakeReader:
+        async def read(self, n: int) -> bytes:
+            transaction_id = log[-1][0:2]
+            return transaction_id + b"\x00\x00\x00\x06\x01\x10\x00\x32\x00\x01"
+
+    client = ViegaModbusClient("192.168.1.50", 502)
+    client._reader = FakeReader()
+    client._writer = FakeWriter()
+    client._connected = True
+
+    asyncio.run(client.write_register(50, 205))
+
+    assert client.last_success_time is not None
+    assert client.consecutive_failures == 0
+
+
 def test_disconnect_resets_state_even_when_wait_closed_raises():
     """A disconnect failure (e.g. ConnectionResetError) must still leave the
     client in a clean, reconnectable state rather than stuck 'connected'."""

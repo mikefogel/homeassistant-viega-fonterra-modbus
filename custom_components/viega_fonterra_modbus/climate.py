@@ -13,6 +13,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import DOMAIN, MIN_SCAN_INTERVAL
 from .device import build_device_info
+from .entity_tracking import register_platform
 from .polling import PollingGate
 from .registers import (
     BASE_UNIT_REGISTERS,
@@ -35,18 +36,23 @@ async def async_setup_entry(
     entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
     rooms = entry_data.get("rooms", {})
 
-    entities = [
-        ViegaRoomClimateEntity(
-            entry.entry_id,
-            room_id,
-            room_config.get("name", room_id) if isinstance(room_config, dict) else room_id,
-            21.5,
-            22.0,
-            room_config,
-        )
-        for room_id, room_config in rooms.items()
-    ]
-    async_add_entities(entities)
+    registry = register_platform(hass, entry.entry_id, "climate", async_add_entities)
+    for room_id, room_config in rooms.items():
+        registry.add_room(room_id, build_room_entities(entry.entry_id, room_id, room_config))
+
+
+def build_room_entities(
+    entry_id: str, room_id: str, room_config: dict[str, object] | int | None
+) -> list["ViegaRoomClimateEntity"]:
+    """Build the single Climate entity a room contributes.
+
+    Shared by the initial `async_setup_entry` above and by the explicit
+    rediscovery action (`rediscovery.py`, spec.md 16a), which needs to
+    rebuild one room's entity after a live topology change without
+    reloading the whole config entry.
+    """
+    name = room_config.get("name", room_id) if isinstance(room_config, dict) else room_id
+    return [ViegaRoomClimateEntity(entry_id, room_id, name, 21.5, 22.0, room_config)]
 
 
 class ViegaRoomClimateEntity(ClimateEntity, RestoreEntity):
@@ -115,6 +121,16 @@ class ViegaRoomClimateEntity(ClimateEntity, RestoreEntity):
         self._base_error_code: int | None = None
         self._operating_mode = 1
         self._profile_mode = 0
+        self.last_error_message = ""
+        # Read-after-write verification (spec.md 16c): after a successful
+        # write, the expected raw register value is stashed here, keyed by
+        # the same names used in `self._registers`/`_read_values`. It is
+        # checked against the *next* successfully read raw value for that
+        # register - not necessarily the very next poll tick, since the
+        # shared cache (`polling.py`) may still be serving a pre-write
+        # value until its own gate opens again - and cleared either way, so
+        # a mismatch is only ever reported once per write.
+        self._pending_writes: dict[str, tuple[int, int, int]] = {}
         supported_features = ClimateEntityFeature(0)
         if self._registers["target_temperature"] is not None:
             supported_features |= ClimateEntityFeature.TARGET_TEMPERATURE
@@ -203,8 +219,10 @@ class ViegaRoomClimateEntity(ClimateEntity, RestoreEntity):
         if "polling" not in self.hass.data.get(DOMAIN, {}).get(self._entry_id, {}):
             if not self._polling_gate.is_due(self.hass, self._entry_id):
                 return
-        client = self.hass.data[DOMAIN][self._entry_id]["client"]
+        entry_data = self.hass.data[DOMAIN][self._entry_id]
+        client = entry_data["client"]
         values = await self._read_values(client)
+        self._verify_pending_writes(values, entry_data.get("polling"))
         if _LOGGER.isEnabledFor(logging.DEBUG):
             _LOGGER.debug(
                 "Room %s (%s): raw register values=%s registers(PDU)=%s",
@@ -289,6 +307,42 @@ class ViegaRoomClimateEntity(ClimateEntity, RestoreEntity):
         """
         return value if value is not None and value != -99 else previous
 
+    def _verify_pending_writes(self, values: dict[str, int | None], shared) -> None:
+        """Check a just-written register against the device's own next
+        valid read of it (spec.md 16c: "the device value remains
+        authoritative").
+
+        `generation` guards against a false mismatch from the shared poll
+        cache still holding a value fetched *before* the write went out:
+        only a read whose cache generation is strictly newer than the one
+        active at write time can actually reflect the write. Without a
+        shared cache (`shared` is `None`), every read is live, so there is
+        nothing to wait for.
+        """
+        generation = shared.generation if shared is not None else 0
+        for key, (address, expected, write_generation) in list(self._pending_writes.items()):
+            if generation <= write_generation:
+                continue
+            raw = values.get(key)
+            if raw is None or raw == -99:
+                continue
+            del self._pending_writes[key]
+            if raw != expected:
+                self.last_error_message = (
+                    f"warning: {key} write not confirmed - wrote {expected} "
+                    f"to register {address}, device now reports {raw}"
+                )
+                _LOGGER.warning(
+                    "Room %s: %s write verification mismatch: wrote %s to "
+                    "register %s, device now reports %s",
+                    self.room_id, key, expected, address, raw,
+                )
+
+    def _record_pending_write(self, key: str, address: int, expected: int) -> None:
+        shared = self.hass.data[DOMAIN][self._entry_id].get("polling")
+        generation = shared.generation if shared is not None else 0
+        self._pending_writes[key] = (address, expected, generation)
+
     async def async_set_temperature(self, **kwargs) -> None:
         """Write the requested target temperature to the room register."""
         temperature = kwargs.get("temperature")
@@ -305,26 +359,31 @@ class ViegaRoomClimateEntity(ClimateEntity, RestoreEntity):
         client = self.hass.data[DOMAIN][self._entry_id]["client"]
         await client.write_register(int(target_register), register_value)
         self._attr_target_temperature = float(temperature)
+        self._record_pending_write("target_temperature", int(target_register), register_value)
 
     async def async_set_hvac_mode(self, hvac_mode: str) -> None:
         """Write the operating mode to holding register 40001."""
         if hvac_mode not in self._attr_hvac_modes:
             raise ValueError(f"unsupported HVAC mode: {hvac_mode}")
+        register_value = {"off": 0, "heat": 1, "cool": 2}[hvac_mode]
+        address = int(self._registers["operating_mode"])
         await self.hass.data[DOMAIN][self._entry_id]["client"].write_register(
-            int(self._registers["operating_mode"]),
-            {"off": 0, "heat": 1, "cool": 2}[hvac_mode],
+            address, register_value
         )
-        self._operating_mode = {"off": 0, "heat": 1, "cool": 2}[hvac_mode]
+        self._operating_mode = register_value
+        self._record_pending_write("operating_mode", address, register_value)
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
         """Write the profile mode to holding register 40002."""
         if preset_mode not in self.preset_modes:
             raise ValueError(f"unsupported preset mode: {preset_mode}")
         value = self.preset_modes.index(preset_mode)
+        address = int(self._registers["profile_mode"])
         await self.hass.data[DOMAIN][self._entry_id]["client"].write_register(
-            int(self._registers["profile_mode"]), value
+            address, value
         )
         self._profile_mode = value
+        self._record_pending_write("profile_mode", address, value)
 
     @property
     def device_info(self):

@@ -44,6 +44,11 @@ class SharedPolling:
         self._gate = PollingGate()
         self._values: dict[tuple[str, int, int], list[int]] = {}
         self._lock = asyncio.Lock()
+        #: Incremented every time the cache is cleared for a new polling
+        #: window. Used by write-verification (spec.md 16c) to tell a
+        #: freshly fetched register value apart from one still sitting in
+        #: the cache from before a write was issued.
+        self.generation = 0
 
     async def read(self, hass: HomeAssistant, entry_id: str, bank: str, address: int, count: int = 1):
         """Read a register range, reusing the current polling cycle result."""
@@ -51,6 +56,7 @@ class SharedPolling:
         async with self._lock:
             if self._gate.is_due(hass, entry_id):
                 self._values.clear()
+                self.generation += 1
             if key in self._values:
                 return self._values[key]
             client = hass.data[DOMAIN][entry_id]["client"]
@@ -59,3 +65,16 @@ class SharedPolling:
             values = await reader(int(address), int(count))
             self._values[key] = values
             return values
+
+    async def run_exclusive(self, action):
+        """Run `action` (a zero-arg async callable) while holding this
+        entry's shared polling lock.
+
+        Used by the explicit rediscovery action (spec.md 16a) so its own
+        run of raw Modbus reads over the shared connection cannot interleave
+        with a normal entity poll cycle's cache population - it reuses the
+        same lock every regular `read()` call already goes through, instead
+        of opening a second connection or running a second poller.
+        """
+        async with self._lock:
+            return await action()

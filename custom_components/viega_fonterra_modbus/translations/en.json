@@ -82,6 +82,24 @@
       },
       "room_diagnostic": {
         "name": "{room} diagnostic"
+      },
+      "health_last_success_time": {
+        "name": "Last successful Modbus response"
+      },
+      "health_last_failure_time": {
+        "name": "Last failed Modbus request"
+      },
+      "health_consecutive_failures": {
+        "name": "Consecutive Modbus failures"
+      },
+      "health_invalid_value_count": {
+        "name": "Invalid Modbus value count"
+      },
+      "health_last_exception_code": {
+        "name": "Last Modbus exception code"
+      },
+      "health_last_success_duration": {
+        "name": "Last Modbus request duration"
       }
     },
     "binary_sensor": {
@@ -98,6 +116,18 @@
     "number": {
       "power_level": {
         "name": "{room} power level"
+      }
+    }
+  },
+  "services": {
+    "rediscover": {
+      "name": "Rediscover device",
+      "description": "Re-reads the room and actuator topology from the device and updates entities in place.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "The Viega Fonterra module to rediscover."
+        }
       }
     }
   }

@@ -11,6 +11,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import DOMAIN, MIN_SCAN_INTERVAL
 from .device import build_device_info
+from .entity_tracking import register_platform
 from .modbus_handler import ViegaModbusClient
 from .polling import PollingGate
 from .registers import resolve_room_number, room_registers
@@ -25,12 +26,25 @@ async def async_setup_entry(
 ) -> None:
     """Set up one power-level number for each room with a resolvable register."""
     rooms = hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get("rooms", {})
-    entities = [
-        ViegaPowerLevelNumber(entry.entry_id, room_id, room_config)
-        for room_id, room_config in rooms.items()
-        if isinstance(room_config, dict)
-    ]
-    async_add_entities(entity for entity in entities if entity.address is not None)
+    registry = register_platform(hass, entry.entry_id, "number", async_add_entities)
+    for room_id, room_config in rooms.items():
+        registry.add_room(room_id, build_room_entities(entry.entry_id, room_id, room_config))
+
+
+def build_room_entities(
+    entry_id: str, room_id: str, room_config: object
+) -> list["ViegaPowerLevelNumber"]:
+    """Build the power-level Number entity a room contributes, if any.
+
+    Shared by the initial `async_setup_entry` above and by the explicit
+    rediscovery action (`rediscovery.py`, spec.md 16a). Returns an empty
+    list when the room has no resolvable power-level register, matching
+    `async_setup_entry`'s previous filter on `entity.address is not None`.
+    """
+    if not isinstance(room_config, dict):
+        return []
+    entity = ViegaPowerLevelNumber(entry_id, room_id, room_config)
+    return [entity] if entity.address is not None else []
 
 
 class ViegaPowerLevelNumber(NumberEntity, RestoreEntity):
@@ -62,6 +76,13 @@ class ViegaPowerLevelNumber(NumberEntity, RestoreEntity):
             "room": str(room_config.get("name", room_id))
         }
         self._attr_native_value = None
+        self.last_error_message = ""
+        # Read-after-write verification (spec.md 16c): the level most
+        # recently written, cleared once the next successfully-read raw
+        # value (from a cache generation newer than the write) has been
+        # compared against it. See climate.py's `_verify_pending_writes`
+        # for why the generation check matters.
+        self._pending_write: tuple[int, int] | None = None
         self._polling_gate = PollingGate()
 
     async def async_added_to_hass(self) -> None:
@@ -90,7 +111,24 @@ class ViegaPowerLevelNumber(NumberEntity, RestoreEntity):
         except Exception:
             return
         if values and values[0] != ViegaModbusClient.ERROR_SENTINEL:
+            self._verify_pending_write(values[0], entry_data.get("polling"))
             self._attr_native_value = values[0]
+
+    def _verify_pending_write(self, raw: int, shared) -> None:
+        """Check a just-written power level against the device's own next
+        valid read of it (spec.md 16c)."""
+        if self._pending_write is None:
+            return
+        expected, write_generation = self._pending_write
+        generation = shared.generation if shared is not None else 0
+        if generation <= write_generation:
+            return
+        self._pending_write = None
+        if raw != expected:
+            self.last_error_message = (
+                f"warning: power_level write not confirmed - wrote {expected} "
+                f"to register {self.address}, device now reports {raw}"
+            )
 
     async def async_set_native_value(self, value: float) -> None:
         """Write a new actuator power level."""
@@ -102,6 +140,8 @@ class ViegaPowerLevelNumber(NumberEntity, RestoreEntity):
         client = self.hass.data[DOMAIN][self._entry_id]["client"]
         await client.write_register(self.address, level)
         self._attr_native_value = level
+        shared = self.hass.data[DOMAIN][self._entry_id].get("polling")
+        self._pending_write = (level, shared.generation if shared is not None else 0)
 
     @property
     def device_info(self):

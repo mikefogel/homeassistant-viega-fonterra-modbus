@@ -117,6 +117,7 @@ Depending on the discovered rooms/actuators and available registers, the integra
 | Binary sensor | `binary_sensor.fonterra_base_unit_error` | On when the base-unit error code is non-zero |
 | Sensor | `sensor.fonterra_wohnzimmer_diagnostic` | Textual communication status for that room |
 | Binary sensor | `binary_sensor.fonterra_circulation_pump` | Derived circulation-pump indicator (see below) |
+| Sensor | `sensor.fonterra_last_successful_modbus_response` and five more `..._health_*` sensors | Connection health metrics (see below) |
 
 Operating mode and profile mode are set on the base unit itself, not per
 room — changing them from any one room's thermostat card changes them for
@@ -152,6 +153,27 @@ automation:
         target:
           entity_id: switch.heizkreispumpe
 ```
+
+### Connection health metrics
+
+Each module also exposes six diagnostic sensors derived entirely from the shared Modbus client's own bookkeeping — none of them issues an extra Modbus request:
+
+- last successful response timestamp
+- last failed request timestamp
+- consecutive communication-failure count
+- invalid-value count (including the `-99` sentinel)
+- last Modbus exception code, when available
+- duration of the most recent successful request
+
+These are diagnostic only: a communication failure never overwrites a room's last valid value, and no host/port/network information is exposed through them.
+
+### Rediscovering the topology on demand
+
+Beyond the automatic discovery that runs on every setup (see "Initial discovery" above), you can trigger a rediscovery of an already-running module at any time with the `viega_fonterra_modbus.rediscover` service (Developer Tools → Actions), targeting the module's device. It re-reads the actuator Raum-ID and room-name registers, compares the result with the currently loaded topology, and updates entities in place — added, removed, renamed, or reassigned rooms and actuators are logged and reported as a `viega_fonterra_modbus_rediscovery` event — without reloading the config entry or reconnecting. If the device can't be read during the rediscovery attempt, the previously working topology is left untouched.
+
+### Write verification
+
+After writing a target temperature, operating mode, profile mode, or power level, the integration checks the device's own next valid read of that register against what was written. If the device reports something else (a rejected or overridden write), the displayed value is reconciled to what the device actually reports and a warning is logged — the device's value is always authoritative.
 
 ## Example dashboard
 

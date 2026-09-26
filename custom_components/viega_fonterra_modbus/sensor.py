@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
+from types import SimpleNamespace
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -11,13 +12,14 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory, UnitOfTemperature
+from homeassistant.const import EntityCategory, UnitOfTemperature, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import DOMAIN, MIN_SCAN_INTERVAL
 from .device import build_device_info
 from .diagnostic import ViegaDiagnosticTextEntity, _room_error_address
+from .entity_tracking import register_platform
 from .modbus_handler import ViegaModbusClient
 from .polling import PollingGate
 from .registers import (
@@ -93,19 +95,14 @@ async def async_setup_entry(
         )
     )
 
-    entities.extend(_actor_temperature_sensors(entry, rooms))
-
     entities.extend(
-        ViegaDiagnosticTextEntity(
-            entry.entry_id,
-            f"{room_config.get('name', room_id)} diagnostic",
-            room_id=room_id,
-            address=_room_error_address(room_id, room_config),
-            room_name=room_config.get("name", room_id),
-        )
-        for room_id, room_config in rooms.items()
-        if isinstance(room_config, dict)
+        ViegaConnectionHealthSensor(entry.entry_id, metric_key)
+        for metric_key in ViegaConnectionHealthSensor.METRIC_KEYS
     )
+
+    registry = register_platform(hass, entry.entry_id, "sensor", async_add_entities)
+    for room_id, room_config in rooms.items():
+        registry.add_room(room_id, build_room_entities(entry.entry_id, room_id, room_config))
 
     if _LOGGER.isEnabledFor(logging.DEBUG):
         _LOGGER.debug(
@@ -113,6 +110,32 @@ async def async_setup_entry(
             entry.entry_id, len(entities), [e.unique_id for e in entities if hasattr(e, "unique_id")],
         )
     async_add_entities(entities)
+
+
+def build_room_entities(entry_id: str, room_id: str, room_config: object) -> list[SensorEntity]:
+    """Build every sensor-platform entity a single room contributes.
+
+    Shared by the initial `async_setup_entry` above and by the explicit
+    rediscovery action (`rediscovery.py`, spec.md 16a), which needs to
+    (re)build just one room's entities after a live topology change without
+    reloading the whole config entry.
+    """
+    if not isinstance(room_config, dict):
+        return []
+    room_name = room_config.get("name", room_id)
+    entities: list[SensorEntity] = list(
+        _actor_temperature_sensors(SimpleNamespace(entry_id=entry_id), {room_id: room_config})
+    )
+    entities.append(
+        ViegaDiagnosticTextEntity(
+            entry_id,
+            f"{room_name} diagnostic",
+            room_id=room_id,
+            address=_room_error_address(room_id, room_config),
+            room_name=room_name,
+        )
+    )
+    return entities
 
 
 def _identity_entity(entry, key, address, count, text, identity):
@@ -456,6 +479,69 @@ class ViegaBaseUnitTemperatureSensor(SensorEntity, RestoreEntity):
             return
 
         self._attr_native_value = values[0] / 10
+
+    @property
+    def device_info(self):
+        return build_device_info(self.hass, self._entry_id)
+
+
+class ViegaConnectionHealthSensor(SensorEntity):
+    """One connection-health metric, read straight off the shared client's
+    own bookkeeping (spec.md 16b) - no register read of its own is ever
+    issued for this entity, since every metric is already a byproduct of
+    whatever other entity most recently used the shared connection.
+
+    Not a `RestoreEntity`: the metrics live on `ViegaModbusClient`, a fresh
+    instance created on every setup, so they always start back at their
+    natural defaults (`None`/`0`) when the integration reloads or Home
+    Assistant restarts - restoring a stale prior value here would disagree
+    with that fresh client state and could never be corrected until the
+    metric changes again.
+    """
+
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    #: Every metric this entity can expose, and how to present it. Matches
+    #: the attribute names `ViegaModbusClient` tracks them under 1:1.
+    METRIC_KEYS = (
+        "last_success_time",
+        "last_failure_time",
+        "consecutive_failures",
+        "invalid_value_count",
+        "last_exception_code",
+        "last_success_duration",
+    )
+    _DEVICE_CLASS = {
+        "last_success_time": SensorDeviceClass.TIMESTAMP,
+        "last_failure_time": SensorDeviceClass.TIMESTAMP,
+    }
+    _UNIT = {"last_success_duration": UnitOfTime.SECONDS}
+    _STATE_CLASS = {
+        "consecutive_failures": SensorStateClass.MEASUREMENT,
+        "invalid_value_count": SensorStateClass.TOTAL_INCREASING,
+        "last_success_duration": SensorStateClass.MEASUREMENT,
+    }
+
+    def __init__(self, entry_id: str, metric_key: str) -> None:
+        self._entry_id = entry_id
+        self._metric_key = metric_key
+        self._attr_unique_id = f"{entry_id}_health_{metric_key}"
+        self._attr_translation_key = f"health_{metric_key}"
+        self._attr_device_class = self._DEVICE_CLASS.get(metric_key)
+        self._attr_native_unit_of_measurement = self._UNIT.get(metric_key)
+        self._attr_state_class = self._STATE_CLASS.get(metric_key)
+        self._attr_native_value = None
+
+    async def async_update(self) -> None:
+        """Copy the current metric value off the shared client.
+
+        Deliberately not gated by a `PollingGate`: there is nothing to
+        throttle since reading these attributes never touches the wire
+        (spec.md 16b "without an additional polling request").
+        """
+        client = self.hass.data[DOMAIN][self._entry_id]["client"]
+        self._attr_native_value = getattr(client, self._metric_key, None)
 
     @property
     def device_info(self):

@@ -12,6 +12,7 @@ from custom_components.viega_fonterra_modbus.sensor import (
     ViegaActorLinkedSensor,
     ViegaBaseUnitIdentitySensor,
     ViegaBaseUnitTemperatureSensor,
+    ViegaConnectionHealthSensor,
     ViegaRegisterSensor,
     _actor_temperature_sensors,
     async_setup_entry,
@@ -266,6 +267,72 @@ def test_setup_entry_creates_return_temperature_sensors_for_room_actuators():
 
     unique_ids = {getattr(entity, "_attr_unique_id", None) for entity in added}
     assert "entry_1_room_1_actor1_return_temperature" in unique_ids
+
+
+# --- Connection health metrics (spec.md 16b) -----------------------------
+
+
+class _ClientWithHealthMetrics:
+    """Stand-in for `ViegaModbusClient` exposing only the health attributes
+    a `ViegaConnectionHealthSensor` reads - proves the entity never issues
+    a Modbus request of its own."""
+
+    def __init__(self, **metrics):
+        for key in ViegaConnectionHealthSensor.METRIC_KEYS:
+            setattr(self, key, metrics.get(key))
+
+    async def read_holding_registers(self, address, count=1):
+        raise AssertionError("health sensor must not perform a Modbus read")
+
+    async def read_input_registers(self, address, count=1):
+        raise AssertionError("health sensor must not perform a Modbus read")
+
+
+def test_setup_entry_creates_one_health_sensor_per_metric():
+    hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"rooms": {}, "identity": {}}}})
+    entry = SimpleNamespace(entry_id="entry_1")
+    added: list = []
+
+    asyncio.run(async_setup_entry(hass, entry, added.extend))
+
+    unique_ids = {getattr(entity, "_attr_unique_id", None) for entity in added}
+    for metric_key in ViegaConnectionHealthSensor.METRIC_KEYS:
+        assert f"entry_1_health_{metric_key}" in unique_ids
+
+
+def test_health_sensor_copies_the_metric_straight_off_the_client():
+    client = _ClientWithHealthMetrics(consecutive_failures=3)
+    entity = ViegaConnectionHealthSensor("entry_1", "consecutive_failures")
+    entity.hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"client": client}}})
+
+    asyncio.run(entity.async_update())
+
+    assert entity._attr_native_value == 3
+
+
+def test_health_sensor_never_performs_a_modbus_read():
+    client = _ClientWithHealthMetrics(last_success_duration=0.02)
+    entity = ViegaConnectionHealthSensor("entry_1", "last_success_duration")
+    entity.hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"client": client}}})
+
+    asyncio.run(entity.async_update())  # would raise if it read a register
+
+    assert entity._attr_native_value == 0.02
+
+
+def test_health_sensor_device_classes_and_units_are_set_per_metric():
+    from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
+    from homeassistant.const import UnitOfTime
+
+    timestamp = ViegaConnectionHealthSensor("entry_1", "last_success_time")
+    assert timestamp._attr_device_class == SensorDeviceClass.TIMESTAMP
+
+    duration = ViegaConnectionHealthSensor("entry_1", "last_success_duration")
+    assert duration._attr_native_unit_of_measurement == UnitOfTime.SECONDS
+    assert duration._attr_state_class == SensorStateClass.MEASUREMENT
+
+    counter = ViegaConnectionHealthSensor("entry_1", "invalid_value_count")
+    assert counter._attr_state_class == SensorStateClass.TOTAL_INCREASING
 
 
 # --- State restoration across restarts (spec.md 15) ---------------------

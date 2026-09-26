@@ -100,6 +100,82 @@ def test_setup_entry_only_adds_entities_with_a_resolvable_register():
     assert added[0]._room_id == "room_1"
 
 
+# --- Read-after-write verification (spec.md 16c) -------------------------
+
+
+class _FakeSharedPolling:
+    def __init__(self, client):
+        self._client = client
+        self.generation = 0
+
+    def bump(self) -> None:
+        self.generation += 1
+
+    async def read(self, hass, entry_id, bank, address, count=1):
+        return await self._client.read_holding_registers(address, count)
+
+
+class _WriteThenReadClient:
+    def __init__(self):
+        self.value = None
+
+    async def write_register(self, address, value):
+        self.value = value
+
+    async def read_holding_registers(self, address, count=1):
+        return [self.value if self.value is not None else 0]
+
+
+def test_matching_verification_leaves_no_error_message():
+    entity = ViegaPowerLevelNumber("entry_1", "room_1", {"name": "Wohnzimmer"})
+    client = _WriteThenReadClient()
+    shared = _FakeSharedPolling(client)
+    entity.hass = SimpleNamespace(
+        data={DOMAIN: {"entry_1": {"client": client, "polling": shared}}}
+    )
+
+    asyncio.run(entity.async_set_native_value(4))
+    shared.bump()
+    asyncio.run(entity.async_update())
+
+    assert entity.last_error_message == ""
+    assert entity._attr_native_value == 4
+
+
+def test_mismatched_verification_reports_a_warning_and_keeps_the_device_value():
+    entity = ViegaPowerLevelNumber("entry_1", "room_1", {"name": "Wohnzimmer"})
+    client = _WriteThenReadClient()
+    shared = _FakeSharedPolling(client)
+    entity.hass = SimpleNamespace(
+        data={DOMAIN: {"entry_1": {"client": client, "polling": shared}}}
+    )
+
+    asyncio.run(entity.async_set_native_value(4))
+    client.value = 7  # the device actually kept/reports a different level
+    shared.bump()
+    asyncio.run(entity.async_update())
+
+    assert entity._attr_native_value == 7
+    assert "power_level" in entity.last_error_message
+    assert "warning" in entity.last_error_message
+
+
+def test_verification_ignores_a_read_from_the_same_write_time_generation():
+    entity = ViegaPowerLevelNumber("entry_1", "room_1", {"name": "Wohnzimmer"})
+    client = _WriteThenReadClient()
+    shared = _FakeSharedPolling(client)
+    entity.hass = SimpleNamespace(
+        data={DOMAIN: {"entry_1": {"client": client, "polling": shared}}}
+    )
+
+    asyncio.run(entity.async_set_native_value(4))
+    client.value = 7
+    asyncio.run(entity.async_update())  # no bump: still the write-time generation
+
+    assert entity.last_error_message == ""
+    assert entity._pending_write is not None
+
+
 # --- State restoration across restarts (spec.md 15) ---------------------
 
 

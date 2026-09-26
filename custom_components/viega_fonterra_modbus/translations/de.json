@@ -82,6 +82,24 @@
       },
       "room_diagnostic": {
         "name": "{room} Diagnose"
+      },
+      "health_last_success_time": {
+        "name": "Letzte erfolgreiche Modbus-Antwort"
+      },
+      "health_last_failure_time": {
+        "name": "Letzte fehlgeschlagene Modbus-Anfrage"
+      },
+      "health_consecutive_failures": {
+        "name": "Aufeinanderfolgende Modbus-Fehler"
+      },
+      "health_invalid_value_count": {
+        "name": "Anzahl ungültiger Modbus-Werte"
+      },
+      "health_last_exception_code": {
+        "name": "Letzter Modbus-Fehlercode"
+      },
+      "health_last_success_duration": {
+        "name": "Dauer der letzten Modbus-Anfrage"
       }
     },
     "binary_sensor": {
@@ -98,6 +116,18 @@
     "number": {
       "power_level": {
         "name": "{room} Leistungsstufe"
+      }
+    }
+  },
+  "services": {
+    "rediscover": {
+      "name": "Gerät neu erkennen",
+      "description": "Liest Raum- und Aktortopologie erneut vom Gerät ein und aktualisiert die Entitäten direkt.",
+      "fields": {
+        "device_id": {
+          "name": "Gerät",
+          "description": "Das Viega-Fonterra-Modul, das neu erkannt werden soll."
+        }
       }
     }
   }

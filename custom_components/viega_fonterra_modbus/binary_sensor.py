@@ -8,6 +8,7 @@ sensor exposed by sensor.py.
 from __future__ import annotations
 
 from datetime import timedelta
+from types import SimpleNamespace
 
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
@@ -20,11 +21,17 @@ from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import DOMAIN, MIN_SCAN_INTERVAL
 from .device import build_device_info
+from .entity_tracking import register_platform
 from .modbus_handler import ViegaModbusClient
 from .polling import PollingGate
 from .registers import BASE_UNIT_REGISTERS, actor_registers, room_actor_numbers
 
 SCAN_INTERVAL = timedelta(seconds=MIN_SCAN_INTERVAL)
+
+#: Synthetic "room" key the circulation pump entity (module-level, not
+#: room-scoped) is tracked under, so rediscovery can rebuild it through the
+#: same `PlatformEntities` machinery used for real rooms.
+PUMP_TRACKING_KEY = "__circulation_pump__"
 
 
 async def async_setup_entry(
@@ -34,18 +41,37 @@ async def async_setup_entry(
 ) -> None:
     """Set up the base-unit error indicator and per-actuator position sensors."""
     rooms = hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get("rooms", {})
-    entities: list[BinarySensorEntity] = [
-        ViegaBaseUnitErrorBinarySensor(entry.entry_id)
-    ]
-    entities.extend(_actor_position_sensors(entry, rooms))
+    async_add_entities([ViegaBaseUnitErrorBinarySensor(entry.entry_id)])
 
-    pump_addresses = _all_actuator_position_addresses(rooms)
-    if pump_addresses:
-        entities.append(
-            ViegaCirculationPumpBinarySensor(entry.entry_id, pump_addresses)
-        )
+    registry = register_platform(hass, entry.entry_id, "binary_sensor", async_add_entities)
+    for room_id, room_config in rooms.items():
+        registry.add_room(room_id, build_room_entities(entry.entry_id, room_id, room_config))
 
-    async_add_entities(entities)
+    pump_entity = build_pump_entity(entry.entry_id, rooms)
+    if pump_entity is not None:
+        registry.add_room(PUMP_TRACKING_KEY, [pump_entity])
+
+
+def build_room_entities(
+    entry_id: str, room_id: str, room_config: object
+) -> list["ViegaActuatorPositionBinarySensor"]:
+    """Build every actuator-position entity a single room contributes.
+
+    Shared by the initial `async_setup_entry` above and by the explicit
+    rediscovery action (`rediscovery.py`, spec.md 16a).
+    """
+    if not isinstance(room_config, dict):
+        return []
+    return _actor_position_sensors(SimpleNamespace(entry_id=entry_id), {room_id: room_config})
+
+
+def build_pump_entity(
+    entry_id: str, rooms: dict[str, object]
+) -> "ViegaCirculationPumpBinarySensor | None":
+    """Build the single circulation-pump entity for the whole module, or
+    `None` when no room currently has a used actuator (spec.md 5c)."""
+    addresses = _all_actuator_position_addresses(rooms)
+    return ViegaCirculationPumpBinarySensor(entry_id, addresses) if addresses else None
 
 
 def _all_actuator_position_addresses(rooms: dict[str, object]) -> dict[int, int]:
