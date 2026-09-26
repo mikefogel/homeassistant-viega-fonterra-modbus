@@ -20,7 +20,14 @@
           "invalid_timeout": "Enter a timeout between 1 and 30 seconds.",
           "cannot_connect": "Unable to connect to the Viega module."
         }
-      },
+      }
+    },
+    "abort": {
+      "already_configured": "This host and port are already configured."
+    }
+  },
+  "options": {
+    "step": {
       "init": {
         "title": "Configure Viega Fonterra module",
         "description": "Edit the module connection and room configuration.",
@@ -42,9 +49,6 @@
           "cannot_connect": "Unable to connect to the Viega module."
         }
       }
-    },
-    "abort": {
-      "already_configured": "This host and port are already configured."
     }
   },
   "entity": {

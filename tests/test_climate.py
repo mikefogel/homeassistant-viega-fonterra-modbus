@@ -83,6 +83,32 @@ def test_set_hvac_mode_writes_the_operating_mode_register_and_updates_state():
     assert entity.hvac_mode == "off"
 
 
+def test_set_hvac_mode_does_not_change_current_or_target_temperature():
+    """spec.md 5a.1: "Selecting a new mode must not change
+    current_temperature or target_temperature"."""
+    entity = _entity()
+    entity._attr_current_temperature = 21.5
+    entity._attr_target_temperature = 22.0
+    entity.hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"client": _RecordingClient()}}})
+
+    asyncio.run(entity.async_set_hvac_mode("off"))
+
+    assert entity._attr_current_temperature == 21.5
+    assert entity._attr_target_temperature == 22.0
+
+
+def test_set_preset_mode_does_not_change_current_or_target_temperature():
+    entity = _entity()
+    entity._attr_current_temperature = 21.5
+    entity._attr_target_temperature = 22.0
+    entity.hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"client": _RecordingClient()}}})
+
+    asyncio.run(entity.async_set_preset_mode("profile"))
+
+    assert entity._attr_current_temperature == 21.5
+    assert entity._attr_target_temperature == 22.0
+
+
 def test_set_hvac_mode_rejects_an_unsupported_mode():
     entity = _entity()
     entity.hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"client": _RecordingClient()}}})

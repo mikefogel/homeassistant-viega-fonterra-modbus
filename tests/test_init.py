@@ -12,7 +12,11 @@ from custom_components.viega_fonterra_modbus import (
     async_unload_entry,
 )
 from custom_components.viega_fonterra_modbus.const import DOMAIN
-from custom_components.viega_fonterra_modbus.modbus_handler import ViegaModbusClient
+from custom_components.viega_fonterra_modbus.modbus_handler import (
+    ModbusClientError,
+    ViegaModbusClient,
+)
+from homeassistant.exceptions import ConfigEntryNotReady
 
 
 class _FakeConfigEntriesForSetup:
@@ -125,6 +129,35 @@ def test_setup_entry_does_not_call_a_removed_client_debug_toggle(monkeypatch):
     client = hass.data[DOMAIN]["entry_1"]["client"]
     assert not hasattr(client, "set_debug")
     assert not hasattr(client, "debug")
+
+
+def test_setup_entry_lets_home_assistant_retry_when_the_initial_connect_fails(monkeypatch):
+    """spec.md 6c: "If the initial Modbus TCP connection cannot be
+    established when a config entry is set up, the integration must signal
+    Home Assistant to retry with backoff (rather than leaving the entry in
+    a hard error state that requires a manual reload)." - a raised
+    `ConfigEntryNotReady` is exactly that signal; anything else (a bare
+    exception, or swallowing the error and continuing) would not trigger
+    Home Assistant's own retry-with-backoff mechanism."""
+
+    async def fake_connect_that_fails(self):
+        raise ModbusClientError("Connection timeout after 5s")
+
+    monkeypatch.setattr(ViegaModbusClient, "connect", fake_connect_that_fails)
+
+    entry = _make_entry({"host": "192.168.8.20", "port": 1502})
+    hass = SimpleNamespace(data={}, config_entries=_FakeConfigEntriesForSetup())
+
+    try:
+        asyncio.run(async_setup_entry(hass, entry))
+    except ConfigEntryNotReady as err:
+        assert "192.168.8.20" in str(err)
+    else:
+        raise AssertionError("expected ConfigEntryNotReady when the initial connect fails")
+
+    # No half-initialized entry data must be left behind for a connection
+    # that never actually succeeded.
+    assert "entry_1" not in hass.data.get(DOMAIN, {})
 
 
 # --- Domain-wide `rediscover` service (spec.md 16a) ----------------------

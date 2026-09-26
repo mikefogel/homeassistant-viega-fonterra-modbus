@@ -172,10 +172,19 @@ visual and behavioral model should follow the Daikin Onecta climate integration
 - The Climate entity is the single primary control surface for the room. Its
   state must provide both `current_temperature` (Ist-Temperatur) and
   `target_temperature` (Soll-Temperatur), in degrees Celsius.
-- The entity must set `temperature_unit`,
-  `target_temperature_step`, `min_temp`, and `max_temp` from the Viega register
-  definition. These values allow the standard Home Assistant thermostat card to
-  render the temperature control with the correct range and increment.
+- The entity must set `temperature_unit`, `target_temperature_step`, `min_temp`,
+  and `max_temp` to the manual's documented values for a room setpoint (page 91):
+  `°C`, a `0.5`°C step, and a range of `5`-`30`°C in `heat`/`off` mode or
+  `16`-`30`°C in `cool` mode. These allow the standard Home Assistant thermostat
+  card to render the temperature control with the correct range and increment.
+  Unlike `target_temperature_register`/`power_level_register`/etc. (§5b), this
+  range/step/unit is not itself a per-room register value the device reports -
+  the manual documents one fixed setpoint range and step for every room, not a
+  separate one per room - so it is implemented as fixed, mode-dependent
+  constants directly on the Climate entity (`climate.py`'s `min_temp`/
+  `max_temp`/`target_temperature_step` properties and `_attr_temperature_unit`),
+  not as an additional field in `registers.py`'s per-room register mapping.
+  `async_set_temperature` validates a write against this same range (§5b).
 - `ClimateEntityFeature.TARGET_TEMPERATURE` must be advertised only when a
   writable target-temperature holding register is configured and supported.
   Read-only rooms must still expose the current and target values when available,
