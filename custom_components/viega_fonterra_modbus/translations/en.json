@@ -1,0 +1,154 @@
+{
+  "title": "Viega Fonterra Smart Control",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add Viega Fonterra module",
+        "description": "Enter the module IP address or hostname, Modbus port, and device name. Rooms are discovered automatically from the device once connected.",
+        "data": {
+          "host": "IP address or hostname",
+          "port": "Modbus port",
+          "device_name": "Device name",
+          "polling_interval": "Polling interval (seconds)",
+          "modbus_timeout": "Modbus timeout (seconds)",
+          "modbus_debug": "Enable Modbus frame debug logging"
+        },
+        "errors": {
+          "invalid_host": "Enter a valid host or IP address.",
+          "required": "This field is required.",
+          "invalid_port": "Enter a port between 1 and 65535.",
+          "invalid_timeout": "Enter a timeout between 1 and 30 seconds.",
+          "cannot_connect": "Unable to connect to the Viega module."
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "This host and port are already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Configure Viega Fonterra module",
+        "description": "Edit the module connection and room configuration.",
+        "data": {
+          "host": "IP address or hostname",
+          "port": "Modbus port",
+          "device_name": "Device name",
+          "polling_interval": "Polling interval (seconds)",
+          "modbus_timeout": "Modbus timeout (seconds)",
+          "modbus_debug": "Enable Modbus frame debug logging",
+          "room_target_register": "Target-temperature holding register"
+        },
+        "errors": {
+          "invalid_host": "Enter a valid host or IP address.",
+          "required": "This field is required.",
+          "invalid_port": "Enter a port between 1 and 65535.",
+          "invalid_timeout": "Enter a timeout between 1 and 30 seconds.",
+          "invalid_polling_interval": "Enter a polling interval between 5 and 300 seconds.",
+          "cannot_connect": "Unable to connect to the Viega module."
+        }
+      }
+    }
+  },
+  "entity": {
+    "climate": {
+      "room": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "manual": "Manual",
+              "profile": "Profile",
+              "setback": "Setback"
+            }
+          }
+        }
+      }
+    },
+    "sensor": {
+      "wlan_serial_number": {
+        "name": "WLAN module serial number"
+      },
+      "base_unit_serial_number": {
+        "name": "Base unit serial number"
+      },
+      "base_unit_name": {
+        "name": "Base unit name"
+      },
+      "base_unit_error_code": {
+        "name": "Base unit error code"
+      },
+      "flow_temperature": {
+        "name": "Flow temperature"
+      },
+      "actuator_return_temperature": {
+        "name": "{room} actuator {actor} return temperature"
+      },
+      "room_diagnostic": {
+        "name": "{room} diagnostic"
+      },
+      "health_last_success_time": {
+        "name": "Last successful Modbus response"
+      },
+      "health_last_failure_time": {
+        "name": "Last failed Modbus request"
+      },
+      "health_consecutive_failures": {
+        "name": "Consecutive Modbus failures"
+      },
+      "health_invalid_value_count": {
+        "name": "Invalid Modbus value count"
+      },
+      "health_last_exception_code": {
+        "name": "Last Modbus exception code"
+      },
+      "health_last_success_duration": {
+        "name": "Last Modbus request duration"
+      },
+      "actuator_stats_open_actuator_count": {
+        "name": "Currently open actuators"
+      },
+      "actuator_stats_open_transition_count": {
+        "name": "Confirmed open-transition count"
+      },
+      "actuator_stats_last_transition_time": {
+        "name": "Last confirmed actuator transition"
+      },
+      "actuator_stats_confirmed_open_seconds": {
+        "name": "Confirmed open time"
+      }
+    },
+    "binary_sensor": {
+      "base_unit_error": {
+        "name": "Base unit error"
+      },
+      "actuator_position": {
+        "name": "{room} actuator {actor} position"
+      },
+      "circulation_pump": {
+        "name": "Circulation pump"
+      }
+    },
+    "number": {
+      "power_level": {
+        "name": "{room} power level"
+      }
+    }
+  },
+  "services": {
+    "rediscover": {
+      "name": "Rediscover device",
+      "description": "Re-reads the room and actuator topology from the device and updates entities in place.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "The Viega Fonterra module to rediscover."
+        }
+      }
+    },
+    "overview": {
+      "name": "Multi-module overview",
+      "description": "Returns a per-module summary across every configured Viega Fonterra module: reachability, base-unit errors, stale/failed communication, and room/actuator counts."
+    }
+  }
+}
