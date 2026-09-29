@@ -1,13 +1,17 @@
 {
   "domain": "viega_fonterra_modbus",
   "name": "Viega Fonterra Smart Control",
-  "version": "v1.0.0",
+  "codeowners": [
+    "mikefogel"
+  ],
   "config_flow": true,
-  "documentation": "https://github.com/mikefogel/homeassistant-viega-fonterra-modbus",
-  "issue_tracker": "https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/issues",
-  "requirements": [],
   "dependencies": [],
-  "codeowners": ["mikefogel"],
+  "documentation": "https://github.com/mikefogel/homeassistant-viega-fonterra-modbus",
   "iot_class": "local_polling",
-  "loggers": ["custom_components.viega_fonterra_modbus"]
+  "issue_tracker": "https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/issues",
+  "loggers": [
+    "custom_components.viega_fonterra_modbus"
+  ],
+  "requirements": [],
+  "version": "v1.0.1"
 }
