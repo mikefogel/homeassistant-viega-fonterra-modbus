@@ -2,7 +2,7 @@
   "domain": "viega_fonterra_modbus",
   "name": "Viega Fonterra Smart Control",
   "codeowners": [
-    "mikefogel"
+    "@mikefogel"
   ],
   "config_flow": true,
   "dependencies": [],

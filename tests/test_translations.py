@@ -65,14 +65,27 @@ def test_de_and_en_expose_exactly_the_same_translation_keys():
 
 
 def test_every_config_flow_error_key_is_translated_in_both_languages():
+    """Flow errors are looked up under `config.error`, shared by all steps -
+    not per step. hassfest rejects `config.step.<step>.errors`, and Home
+    Assistant would show the raw key (e.g. "cannot_connect") instead."""
     for language in ("de", "en"):
         data = _load(language)
-        user_errors = set(data["config"]["step"]["user"].get("errors", {}))
+        user_errors = set(data["config"].get("error", {}))
 
         assert user_errors == EXPECTED_USER_ERRORS, (
-            f"{language}.json config.step.user.errors: expected "
+            f"{language}.json config.error: expected "
             f"{EXPECTED_USER_ERRORS}, got {user_errors}"
         )
+
+
+def test_flow_errors_are_not_nested_inside_a_step():
+    for language in ("de", "en"):
+        data = _load(language)
+        for section in ("config", "options"):
+            for step_id, step in data[section]["step"].items():
+                assert "errors" not in step, (
+                    f"{language}.json {section}.step.{step_id}.errors: move to {section}.error"
+                )
 
 
 def test_every_options_flow_error_key_is_translated_in_both_languages():
@@ -86,10 +99,10 @@ def test_every_options_flow_error_key_is_translated_in_both_languages():
             f"{language}.json: options.config should not exist - the "
             "options flow's own strings belong directly under options.step"
         )
-        init_errors = set(data["options"]["step"]["init"].get("errors", {}))
+        init_errors = set(data["options"].get("error", {}))
 
         assert init_errors == EXPECTED_INIT_ERRORS, (
-            f"{language}.json options.step.init.errors: expected "
+            f"{language}.json options.error: expected "
             f"{EXPECTED_INIT_ERRORS}, got {init_errors}"
         )
 

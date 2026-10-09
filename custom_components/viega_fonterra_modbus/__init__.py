@@ -28,6 +28,9 @@ from .registers import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# Set up through the UI only; no YAML configuration.
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
 SERVICE_REDISCOVER = "rediscover"
 SERVICE_OVERVIEW = "overview"
 _REDISCOVER_SCHEMA = vol.Schema({vol.Required("device_id"): cv.string})

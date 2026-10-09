@@ -6,6 +6,14 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Error messages in the setup and options dialogs (e.g. "Unable to connect
+  to the Viega module") were shown as raw keys such as `cannot_connect`
+  instead of translated text.
+- `manifest.json` code owner and the missing UI-only `CONFIG_SCHEMA`, both
+  reported by Home Assistant's hassfest validator.
+
 ## [1.1.0] - 2026-10-09
 
 ### Added
