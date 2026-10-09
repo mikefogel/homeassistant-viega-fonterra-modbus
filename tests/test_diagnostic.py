@@ -10,12 +10,14 @@ from custom_components.viega_fonterra_modbus.diagnostic import (
 )
 
 
-def test_diagnostic_entity_exposes_text_status():
-    """Diagnostic values should be textual and readable by operators."""
-    entity = ViegaDiagnosticTextEntity(None, "temperature_flow", "error: sensor invalid")
+def test_diagnostic_entity_exposes_a_translatable_status_key():
+    """spec.md 5d: the state is a key from the enum options; Home Assistant
+    shows its translated text."""
+    entity = ViegaDiagnosticTextEntity(None, "temperature_flow", "no_error")
 
     assert entity.name == "temperature_flow"
-    assert entity.state == "error: sensor invalid"
+    assert entity.state == "no_error"
+    assert "no_error" in entity.options and "error_21" in entity.options
 
 
 def test_room_scoped_diagnostic_name_is_localized_via_translation_key():
@@ -40,7 +42,7 @@ def test_diagnostic_entity_defaults_to_sensor_invalid_status():
     """Without an explicit status, the entity defaults to a sensible message."""
     entity = ViegaDiagnosticTextEntity(None, "temperature_flow")
 
-    assert entity.status == "error: sensor invalid"
+    assert entity.status == "sensor_invalid"
 
 
 def test_diagnostic_entity_setup_call_shape_resolves_entry_and_name():
@@ -51,7 +53,7 @@ def test_diagnostic_entity_setup_call_shape_resolves_entry_and_name():
 
     assert entity._entry_id == "entry_1"
     assert entity.name == "Wohnzimmer diagnostic"
-    assert entity.status == "error: sensor invalid"
+    assert entity.status == "sensor_invalid"
     assert entity._attr_unique_id == "entry_1_Wohnzimmer diagnostic_diagnostic"
 
 
@@ -96,26 +98,63 @@ def test_setup_entry_creates_one_diagnostic_entity_per_room_with_a_default_statu
     rooms_shown = {entity._attr_translation_placeholders["room"] for entity in added}
     assert rooms_shown == {"Wohnzimmer", "room_2"}
     assert all(entity._attr_translation_key == "room_diagnostic" for entity in added)
-    assert all(entity.status == "error: sensor invalid" for entity in added)
+    assert all(entity.status == "sensor_invalid" for entity in added)
 
 
 # --- State restoration across restarts (spec.md 15) ---------------------
 
 
-def test_restores_last_status_text_on_add():
+def test_restores_last_status_key_on_add():
     entity = ViegaDiagnosticTextEntity(
         "entry_1", "Wohnzimmer diagnostic", room_id="room_1", room_name="Wohnzimmer"
     )
 
     async def _fake_last_state():
-        return SimpleNamespace(state="No error", attributes={})
+        return SimpleNamespace(state="error_22", attributes={"error_code": 22})
 
     entity.async_get_last_state = _fake_last_state
 
     asyncio.run(entity.async_added_to_hass())
 
-    assert entity.status == "No error"
-    assert entity.state == "No error"
+    assert entity.native_value == "error_22"
+    assert entity.extra_state_attributes == {"error_code": 22}
+
+
+def test_restores_english_text_saved_by_an_older_version():
+    """spec.md 5d: "No error" saved before the upgrade becomes "no_error"."""
+    for old_text, key in (
+        ("No error", "no_error"),
+        ("Room: no connection to the room thermostat", "error_21"),
+        ("Unknown error (code 99)", "unknown_error"),
+        ("error: sensor invalid", "sensor_invalid"),
+    ):
+        entity = ViegaDiagnosticTextEntity(
+            "entry_1", "Wohnzimmer diagnostic", room_id="room_1", room_name="Wohnzimmer"
+        )
+
+        async def _fake_last_state(text=old_text):
+            return SimpleNamespace(state=text, attributes={})
+
+        entity.async_get_last_state = _fake_last_state
+        asyncio.run(entity.async_added_to_hass())
+
+        assert entity.native_value == key, old_text
+
+
+def test_update_reports_the_key_and_the_raw_code():
+    entity = ViegaDiagnosticTextEntity(
+        "entry_1", "Wohnzimmer diagnostic", room_id="room_1", room_name="Wohnzimmer", address=50
+    )
+
+    class _Client:
+        async def read_input_registers(self, address, count=1):
+            return [24]
+
+    entity.hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"client": _Client()}}})
+    asyncio.run(entity.async_update())
+
+    assert entity.native_value == "error_24"
+    assert entity.extra_state_attributes == {"error_code": 24}
 
 
 def test_ignores_unknown_restored_status():
@@ -130,4 +169,4 @@ def test_ignores_unknown_restored_status():
 
     asyncio.run(entity.async_added_to_hass())
 
-    assert entity.status == "error: sensor invalid"
+    assert entity.status == "sensor_invalid"

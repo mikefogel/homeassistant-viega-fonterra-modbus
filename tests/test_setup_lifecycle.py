@@ -258,3 +258,30 @@ async def test_entities_are_updated_by_the_coordinator_not_polled(hass, fake_dev
     ]
     assert platform_entities
     assert all(entity.should_poll is False for entity in platform_entities)
+
+
+async def test_ui_shows_translated_keys_and_units(hass, fake_device, monkeypatch):
+    """spec.md 5d end to end: the room diagnostic is an enum with a key
+    state, the error description is a key, the power level has the
+    translated unit (Home Assistant's default language is English in tests)."""
+    from custom_components.viega_fonterra_modbus.registers import room_registers
+
+    room_error = room_registers(1)["error_code"]
+
+    async def read_input_registers(self, address, count=1):
+        return [22 if address + i == room_error else 0 for i in range(count)]
+
+    monkeypatch.setattr(FakeClient, "read_input_registers", read_input_registers)
+    entry = _entry()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    diagnostic = hass.states.get("sensor.fonterra_wohnzimmer_diagnostic")
+    assert diagnostic.state == "error_22"
+    assert diagnostic.attributes["error_code"] == 22
+    assert "no_error" in diagnostic.attributes["options"]
+    assert hass.states.get("sensor.fonterra_base_unit_error_code").attributes["description"] == "no_error"
+    assert hass.states.get("number.fonterra_wohnzimmer_power_level").attributes[
+        "unit_of_measurement"
+    ] == "level"

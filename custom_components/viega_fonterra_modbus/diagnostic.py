@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.restore_state import RestoreEntity
@@ -13,14 +13,17 @@ from .const import DOMAIN
 from .device import build_device_info
 from .registers import (
     BASE_UNIT_REGISTERS,
-    describe_error_code,
+    ERROR_KEY_SENSOR_INVALID,
+    ERROR_STATE_KEYS,
+    error_code_key,
+    error_key_from_legacy_text,
     resolve_room_number,
     room_registers,
 )
 from .modbus_handler import ViegaModbusClient
 from .entity import ViegaCoordinatedEntity
 
-DEFAULT_STATUS = "error: sensor invalid"
+DEFAULT_STATUS = ERROR_KEY_SENSOR_INVALID
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -65,9 +68,15 @@ def _room_error_address(room_id: str, room_config: object) -> int:
 
 
 class ViegaDiagnosticTextEntity(ViegaCoordinatedEntity, SensorEntity, RestoreEntity):
-    """Represent a textual diagnosis entity for a failed sensor or unit."""
+    """A room's error/warning state as a translated enum (spec.md 3b/5d).
+
+    The state is a key (`no_error`, `error_21`, `unknown_error`, ...) whose
+    text comes from `translations/*.json`; the raw code is an attribute.
+    """
 
     _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = list(ERROR_STATE_KEYS)
 
     def __init__(
         self,
@@ -97,19 +106,29 @@ class ViegaDiagnosticTextEntity(ViegaCoordinatedEntity, SensorEntity, RestoreEnt
             (f"{entry_id}_{name}_diagnostic" if entry_id is not None else None)
         )
         self._attr_native_value = status
+        self._error_code: int | None = None
 
     @property
-    def state(self) -> str:
-        return self.status
+    def extra_state_attributes(self) -> dict[str, object] | None:
+        if self._error_code is None:
+            return None
+        return {"error_code": self._error_code}
 
     async def async_added_to_hass(self) -> None:
-        """Restore the last known value across restarts (spec.md 15)."""
+        """Restore the last known value across restarts (spec.md 15),
+        including English texts saved by older versions (spec.md 5d)."""
         await super().async_added_to_hass()
         last_state = await self.async_get_last_state()
         if last_state is None or last_state.state in ("unknown", "unavailable"):
             return
-        self.status = last_state.state
-        self._attr_native_value = self.status
+        key = error_key_from_legacy_text(last_state.state)
+        if key is None:
+            return
+        self.status = key
+        self._attr_native_value = key
+        code = last_state.attributes.get("error_code")
+        if isinstance(code, int):
+            self._error_code = code
 
     async def async_update(self) -> None:
         """Refresh the diagnostic status from the shared error-code poll."""
@@ -121,7 +140,8 @@ class ViegaDiagnosticTextEntity(ViegaCoordinatedEntity, SensorEntity, RestoreEnt
             values = await (shared.read(self.hass, self._entry_id, "input", self._address, 1)
                             if shared else entry_data["client"].read_input_registers(self._address, 1))
             if values and values[0] != ViegaModbusClient.ERROR_SENTINEL:
-                self.status = describe_error_code(values[0])
+                self._error_code = values[0]
+                self.status = error_code_key(values[0])
                 self._attr_native_value = self.status
                 if _LOGGER.isEnabledFor(logging.DEBUG):
                     _LOGGER.debug(

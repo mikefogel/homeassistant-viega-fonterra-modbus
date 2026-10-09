@@ -25,7 +25,7 @@ from .entity import ViegaCoordinatedEntity
 from .registers import (
     BASE_UNIT_REGISTERS,
     actor_registers,
-    describe_error_code,
+    error_code_key,
     decode_text_registers,
     room_actor_numbers,
 )
@@ -316,7 +316,7 @@ class ViegaBaseUnitIdentitySensor(ViegaCoordinatedEntity, SensorEntity, RestoreE
             self._attr_native_value = value
             if self._sensor_key == "base_unit_error_code":
                 self._attr_extra_state_attributes = {
-                    "description": describe_error_code(value)
+                    "description": error_code_key(value)
                 }
 
     async def async_update(self) -> None:
@@ -342,8 +342,9 @@ class ViegaBaseUnitIdentitySensor(ViegaCoordinatedEntity, SensorEntity, RestoreE
             self._attr_native_value = values[0]
 
             if self._sensor_key == "base_unit_error_code":
+                # A translated key (spec.md 5d), not the English table text.
                 self._attr_extra_state_attributes = {
-                    "description": describe_error_code(values[0])
+                    "description": error_code_key(values[0])
                 }
                 issues = self.hass.data[DOMAIN][self._entry_id].get("issues")
                 if issues is not None:

@@ -76,7 +76,27 @@
         "name": "Base unit name"
       },
       "base_unit_error_code": {
-        "name": "Base unit error code"
+        "name": "Base unit error code",
+        "state_attributes": {
+          "description": {
+            "name": "Description",
+            "state": {
+              "sensor_invalid": "No valid value",
+              "no_error": "No error",
+              "error_3": "Base unit: at least one room thermostat is no longer connected",
+              "error_4": "Base unit: fault on the actuator bus",
+              "error_5": "Base unit: fault at the flow-temperature sensor",
+              "error_6": "Base unit: fault at the return-temperature sensor",
+              "error_7": "Base unit: no further room thermostats can be registered",
+              "error_9": "Base unit: replace the backup battery",
+              "error_10": "Warning: risk of condensation, flow temperature too low",
+              "error_21": "No connection to the room thermostat",
+              "error_22": "Warning: room thermostat battery is weak",
+              "error_24": "Warning: connection to the room thermostat is weak",
+              "unknown_error": "Unknown error"
+            }
+          }
+        }
       },
       "flow_temperature": {
         "name": "Flow temperature"
@@ -85,7 +105,27 @@
         "name": "{room} actuator {actor} return temperature"
       },
       "room_diagnostic": {
-        "name": "{room} diagnostic"
+        "name": "{room} diagnostic",
+        "state": {
+          "sensor_invalid": "No valid value",
+          "no_error": "No error",
+          "error_3": "Base unit: at least one room thermostat is no longer connected",
+          "error_4": "Base unit: fault on the actuator bus",
+          "error_5": "Base unit: fault at the flow-temperature sensor",
+          "error_6": "Base unit: fault at the return-temperature sensor",
+          "error_7": "Base unit: no further room thermostats can be registered",
+          "error_9": "Base unit: replace the backup battery",
+          "error_10": "Warning: risk of condensation, flow temperature too low",
+          "error_21": "No connection to the room thermostat",
+          "error_22": "Warning: room thermostat battery is weak",
+          "error_24": "Warning: connection to the room thermostat is weak",
+          "unknown_error": "Unknown error"
+        },
+        "state_attributes": {
+          "error_code": {
+            "name": "Error code"
+          }
+        }
       },
       "health_last_success_time": {
         "name": "Last successful Modbus response"
@@ -137,7 +177,8 @@
     },
     "number": {
       "power_level": {
-        "name": "{room} power level"
+        "name": "{room} power level",
+        "unit_of_measurement": "level"
       }
     }
   },

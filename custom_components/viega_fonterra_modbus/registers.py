@@ -208,10 +208,50 @@ ERROR_CODE_WARNINGS: frozenset[int] = frozenset({10, 22, 24})
 
 
 def describe_error_code(code: int | None) -> str:
-    """Return a human-readable description for a base-unit error code."""
+    """Return the English description of an error code, for logs and the
+    diagnostics export. Entities show the translated text of
+    `error_code_key()` instead (spec.md 3b/5d)."""
     if code is None:
         return "Unknown"
     return BASE_UNIT_ERROR_CODES.get(code, f"Unknown error (code {code})")
+
+
+#: State before any valid error-code value has been read.
+ERROR_KEY_SENSOR_INVALID = "sensor_invalid"
+ERROR_KEY_UNKNOWN = "unknown_error"
+
+
+def error_code_key(code: int) -> str:
+    """Return the translation key for an error code (spec.md 3b/5d)."""
+    if code == 0:
+        return "no_error"
+    if code in BASE_UNIT_ERROR_CODES:
+        return f"error_{code}"
+    return ERROR_KEY_UNKNOWN
+
+
+#: Every key `error_code_key()` and the diagnostic entity can produce, i.e.
+#: the options of the room diagnostic enum sensor.
+ERROR_STATE_KEYS: tuple[str, ...] = (
+    ERROR_KEY_SENSOR_INVALID,
+    *(error_code_key(code) for code in sorted(BASE_UNIT_ERROR_CODES)),
+    ERROR_KEY_UNKNOWN,
+)
+
+
+def error_key_from_legacy_text(text: str) -> str | None:
+    """Map a state saved by a version that still showed English text
+    (e.g. "No error") to its key, so a restart after the upgrade keeps it."""
+    if text in ERROR_STATE_KEYS:
+        return text
+    if text == "error: sensor invalid":
+        return ERROR_KEY_SENSOR_INVALID
+    if text.startswith("Unknown error (code "):
+        return ERROR_KEY_UNKNOWN
+    for code, description in BASE_UNIT_ERROR_CODES.items():
+        if text == description:
+            return error_code_key(code)
+    return None
 REGISTER_DEFINITIONS: dict[str, dict[str, int | str | None]] = {
     "temperature_flow": {"address": 1000, "name": "Flow temperature", "unit": "°C"},
     "temperature_return": {"address": 1001, "name": "Return temperature", "unit": "°C"},

@@ -76,7 +76,27 @@
         "name": "Basiseinheit Bezeichnung"
       },
       "base_unit_error_code": {
-        "name": "Basiseinheit Fehlercode"
+        "name": "Basiseinheit Fehlercode",
+        "state_attributes": {
+          "description": {
+            "name": "Beschreibung",
+            "state": {
+              "sensor_invalid": "Kein gültiger Wert",
+              "no_error": "Kein Fehler",
+              "error_3": "Basiseinheit: Mindestens ein Raumthermostat ist nicht mehr verbunden",
+              "error_4": "Basiseinheit: Störung am Stellantriebs-Bus",
+              "error_5": "Basiseinheit: Störung am Vorlauftemperaturfühler",
+              "error_6": "Basiseinheit: Störung am Rücklauftemperaturfühler",
+              "error_7": "Basiseinheit: Keine weiteren Raumthermostate anmeldbar",
+              "error_9": "Basiseinheit: Pufferbatterie ersetzen",
+              "error_10": "Warnung: Kondensationsgefahr, Vorlauftemperatur zu niedrig",
+              "error_21": "Keine Verbindung zum Raumthermostat",
+              "error_22": "Warnung: Batterie des Raumthermostats schwach",
+              "error_24": "Warnung: Verbindung zum Raumthermostat schwach",
+              "unknown_error": "Unbekannter Fehler"
+            }
+          }
+        }
       },
       "flow_temperature": {
         "name": "Vorlauftemperatur"
@@ -85,7 +105,27 @@
         "name": "{room} Aktor {actor} Rücklauftemperatur"
       },
       "room_diagnostic": {
-        "name": "{room} Diagnose"
+        "name": "{room} Diagnose",
+        "state": {
+          "sensor_invalid": "Kein gültiger Wert",
+          "no_error": "Kein Fehler",
+          "error_3": "Basiseinheit: Mindestens ein Raumthermostat ist nicht mehr verbunden",
+          "error_4": "Basiseinheit: Störung am Stellantriebs-Bus",
+          "error_5": "Basiseinheit: Störung am Vorlauftemperaturfühler",
+          "error_6": "Basiseinheit: Störung am Rücklauftemperaturfühler",
+          "error_7": "Basiseinheit: Keine weiteren Raumthermostate anmeldbar",
+          "error_9": "Basiseinheit: Pufferbatterie ersetzen",
+          "error_10": "Warnung: Kondensationsgefahr, Vorlauftemperatur zu niedrig",
+          "error_21": "Keine Verbindung zum Raumthermostat",
+          "error_22": "Warnung: Batterie des Raumthermostats schwach",
+          "error_24": "Warnung: Verbindung zum Raumthermostat schwach",
+          "unknown_error": "Unbekannter Fehler"
+        },
+        "state_attributes": {
+          "error_code": {
+            "name": "Fehlercode"
+          }
+        }
       },
       "health_last_success_time": {
         "name": "Letzte erfolgreiche Modbus-Antwort"
@@ -137,7 +177,8 @@
     },
     "number": {
       "power_level": {
-        "name": "{room} Leistungsstufe"
+        "name": "{room} Leistungsstufe",
+        "unit_of_measurement": "Stufe"
       }
     }
   },

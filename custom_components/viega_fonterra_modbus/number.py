@@ -53,7 +53,8 @@ class ViegaPowerLevelNumber(ViegaCoordinatedEntity, NumberEntity, RestoreEntity)
     _attr_native_min_value = 0
     _attr_native_max_value = 10
     _attr_native_step = 1
-    _attr_native_unit_of_measurement = "level"
+    # The unit is a word, so it is translated (spec.md 5d):
+    # entity.number.power_level.unit_of_measurement.
 
     def __init__(
         self, entry_id: str, room_id: str, room_config: dict[str, object]

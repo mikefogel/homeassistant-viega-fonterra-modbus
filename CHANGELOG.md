@@ -21,6 +21,16 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The room diagnostic sensor and the base-unit error-code description are
+  now shown in your language ("Kein Fehler" instead of "No error"). The
+  diagnostic sensor's state and the `description` attribute now hold a key
+  such as `no_error` or `error_22`; automations that compared the old
+  English text need to use the key instead. States saved by older versions
+  are converted automatically.
+- The power level's unit is translated ("Stufe").
+- Actuator positions show a valve icon, the pump indicator a pump icon, and
+  the room diagnostic a check mark or warning icon.
+
 - Each module is now polled by one central update cycle at its polling
   interval, which updates all of its entities together, instead of every
   entity being polled by Home Assistant every 5 seconds. Same values, fewer

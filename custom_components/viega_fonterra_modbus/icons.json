@@ -1,0 +1,34 @@
+{
+  "entity": {
+    "binary_sensor": {
+      "actuator_position": {
+        "default": "mdi:valve-closed",
+        "state": {
+          "on": "mdi:valve-open"
+        }
+      },
+      "circulation_pump": {
+        "default": "mdi:pump-off",
+        "state": {
+          "on": "mdi:pump"
+        }
+      }
+    },
+    "sensor": {
+      "room_diagnostic": {
+        "default": "mdi:alert-circle-outline",
+        "state": {
+          "no_error": "mdi:check-circle-outline"
+        }
+      }
+    }
+  },
+  "services": {
+    "rediscover": {
+      "service": "mdi:magnify-scan"
+    },
+    "overview": {
+      "service": "mdi:view-list"
+    }
+  }
+}

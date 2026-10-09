@@ -153,3 +153,29 @@ def test_exception_messages_use_the_same_placeholders_in_every_language():
         de_placeholders = set(re.findall(r"\{(\w+)\}", de[key]["message"]))
         en_placeholders = set(re.findall(r"\{(\w+)\}", en[key]["message"]))
         assert de_placeholders == en_placeholders, key
+
+
+def test_every_error_state_key_is_translated():
+    """spec.md 5d: the room diagnostic state and the error-code description
+    attribute are keys; each needs a text in every language."""
+    from custom_components.viega_fonterra_modbus.registers import ERROR_STATE_KEYS
+
+    for language in ("de", "en"):
+        sensor = _load(language)["entity"]["sensor"]
+        assert set(sensor["room_diagnostic"]["state"]) == set(ERROR_STATE_KEYS), language
+        description = sensor["base_unit_error_code"]["state_attributes"]["description"]
+        assert set(description["state"]) == set(ERROR_STATE_KEYS), language
+
+
+def test_power_level_unit_is_translated():
+    assert _load("de")["entity"]["number"]["power_level"]["unit_of_measurement"] == "Stufe"
+    assert _load("en")["entity"]["number"]["power_level"]["unit_of_measurement"] == "level"
+
+
+def test_icons_use_a_valve_for_actuators_and_a_pump_for_the_pump_indicator():
+    icons = json.loads((TRANSLATIONS_DIR.parent / "icons.json").read_text(encoding="utf-8"))
+    position = icons["entity"]["binary_sensor"]["actuator_position"]
+    assert position == {"default": "mdi:valve-closed", "state": {"on": "mdi:valve-open"}}
+    pump = icons["entity"]["binary_sensor"]["circulation_pump"]
+    assert pump == {"default": "mdi:pump-off", "state": {"on": "mdi:pump"}}
+    assert set(icons["services"]) == {"rediscover", "overview"}

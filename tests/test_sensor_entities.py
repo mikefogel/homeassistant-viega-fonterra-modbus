@@ -7,7 +7,6 @@ from types import SimpleNamespace
 
 from custom_components.viega_fonterra_modbus.const import DOMAIN
 from custom_components.viega_fonterra_modbus.modbus_handler import ViegaModbusClient
-from custom_components.viega_fonterra_modbus.registers import describe_error_code
 from custom_components.viega_fonterra_modbus.binary_sensor import ActuatorStatistics
 from custom_components.viega_fonterra_modbus.sensor import (
     ViegaActorLinkedSensor,
@@ -86,7 +85,7 @@ def test_error_code_sensor_stores_raw_code_and_unknown_description():
     asyncio.run(sensor.async_update())
 
     assert sensor._attr_native_value == 99
-    assert sensor._attr_extra_state_attributes == {"description": "Unknown error (code 99)"}
+    assert sensor._attr_extra_state_attributes == {"description": "unknown_error"}
 
 
 def test_error_code_sensor_reports_no_error_for_zero():
@@ -97,7 +96,7 @@ def test_error_code_sensor_reports_no_error_for_zero():
     asyncio.run(sensor.async_update())
 
     assert sensor._attr_native_value == 0
-    assert sensor._attr_extra_state_attributes == {"description": "No error"}
+    assert sensor._attr_extra_state_attributes == {"description": "no_error"}
 
 
 def test_identity_sensor_keeps_last_value_on_error_sentinel():
@@ -463,9 +462,7 @@ def test_identity_sensor_restores_error_code_and_its_description():
     asyncio.run(sensor.async_added_to_hass())
 
     assert sensor._attr_native_value == 7
-    assert sensor._attr_extra_state_attributes == {
-        "description": describe_error_code(7)
-    }
+    assert sensor._attr_extra_state_attributes == {"description": "error_7"}
 
 
 def test_identity_sensor_ignores_unknown_and_unavailable_restored_state():

@@ -41,7 +41,7 @@ This custom integration connects one or more Viega Fonterra Smart Control system
 - Clear, translated error messages when a change can't be applied, in the setup dialogs and for every action
 - One polling cycle per module that updates all of its entities together, with adjacent registers read in a single request
 - A multi-module overview for installations with more than one Viega module
-- Localized (German/English) entity names and thermostat preset labels
+- Localized (German/English) entity names, states (e.g. "Kein Fehler"), units (power level "Stufe") and thermostat preset labels, plus fitting icons (valve for actuators, pump for the pump indicator)
 - Downloadable configuration diagnostics (JSON) for checking an installation against the device
 - Optional Modbus TX/RX frame-level debug logging
 - Transaction-ID, function-code, and response-length validation on every Modbus frame
@@ -139,9 +139,9 @@ Depending on the discovered rooms/actuators and available registers, the integra
 | Sensor | `sensor.fonterra_wohnzimmer_actuator_1_return_temperature` | One actuator's return temperature |
 | Binary sensor | `binary_sensor.fonterra_wohnzimmer_actuator_1_position` | One actuator's position (open/closed) |
 | Sensor | `sensor.fonterra_wlan_serial_number` / `..._base_unit_serial_number` / `..._base_unit_name` | Diagnostic identity values |
-| Sensor | `sensor.fonterra_base_unit_error_code` | Raw base-unit error code + description |
+| Sensor | `sensor.fonterra_base_unit_error_code` | Raw base-unit error code + translated description |
 | Binary sensor | `binary_sensor.fonterra_base_unit_error` | On when the base-unit error code is non-zero |
-| Sensor | `sensor.fonterra_wohnzimmer_diagnostic` | Textual communication status for that room |
+| Sensor | `sensor.fonterra_wohnzimmer_diagnostic` | That room's error/warning state in your language (e.g. "Kein Fehler", "Warnung: Batterie des Raumthermostats schwach"), with the raw code as attribute |
 | Binary sensor | `binary_sensor.fonterra_circulation_pump` | Derived circulation-pump indicator (see below) |
 | Sensor | `sensor.fonterra_last_successful_modbus_response` and seven more `..._health_*` sensors | Connection health metrics (see below) |
 | Sensor | `sensor.fonterra_currently_open_actuators` and three more `..._actuator_stats_*` sensors | Derived actuator statistics (see below) |
