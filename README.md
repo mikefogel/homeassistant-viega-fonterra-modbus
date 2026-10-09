@@ -463,6 +463,59 @@ features:
     preset_modes: [manual, profile, setback]
 ```
 
+## Heating time per room
+
+Each room's climate entity reports what the room is doing right now (see "Entities"), so Home Assistant can add up how long a room has been heating each day — handy for seeing which rooms need the most heat. It takes two built-in helpers per room and no extra integration. Recording starts with version 1.1.0 of this integration; earlier history has no heating information.
+
+**1. A "room is heating" sensor.** *Settings → Devices & services → Helpers → Create helper → Template → Template a binary sensor*:
+
+- Name: `Küche heizt`
+- State template: `{{ state_attr('climate.fonterra_kuche', 'hvac_action') == 'heating' }}`
+
+Use your room's climate entity ID. For cooling, compare with `'cooling'` instead.
+
+**2. The daily heating time.** *Create helper → History stats* (on older Home Assistant versions without this helper in the UI, use the YAML below):
+
+- Entity: `binary_sensor.kuche_heizt` (Home Assistant drops umlauts from entity IDs: "Küche" becomes `kuche`)
+- State: `on`
+- Type: *Time*
+- Start: `{{ today_at() }}`, End: `{{ now() }}`
+
+The result, e.g. `sensor.kuche_heizdauer_heute`, shows today's heating time in hours and starts again at 0 every midnight.
+
+The same in YAML (`configuration.yaml`):
+
+```yaml
+template:
+  - binary_sensor:
+      - name: "Küche heizt"
+        state: "{{ state_attr('climate.fonterra_kuche', 'hvac_action') == 'heating' }}"
+
+sensor:
+  - platform: history_stats
+    name: "Küche Heizdauer heute"
+    entity_id: binary_sensor.kuche_heizt
+    state: "on"
+    type: time
+    start: "{{ today_at() }}"
+    end: "{{ now() }}"
+```
+
+To compare rooms day by day, the built-in **statistics graph** card shows the daily totals as bars (the daily maximum of a value that resets at midnight is that day's total):
+
+```yaml
+type: statistics-graph
+title: Heating time per day
+chart_type: bar
+period: day
+days_to_show: 14
+stat_types:
+  - max
+entities:
+  - sensor.kuche_heizdauer_heute
+  - sensor.wohnzimmer_heizdauer_heute
+```
+
 ## Verifying your configuration
 
 Two built-in ways to check that the integration resolved your installation correctly, without editing any files:

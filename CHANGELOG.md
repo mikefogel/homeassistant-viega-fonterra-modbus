@@ -13,6 +13,8 @@ and versions follow [Semantic Versioning](https://semver.org/).
   meaning of each code translated; they clear themselves.
 - Importable blueprint that switches a separately wired circulation pump
   from the circulation-pump indicator, with a run-on time.
+- README guide: daily heating time per room with built-in helpers and a
+  bar chart of the daily totals.
 - Automatic checks on GitHub for every change (tests, Home Assistant's
   hassfest validator, HACS validation) and a weekly test against the
   newest Home Assistant version.

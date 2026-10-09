@@ -1381,8 +1381,12 @@ users can import it with one click instead of copying YAML:
 
 The README must show how to get each room's heating time per day from the
 Climate entity's `hvac_action` (§5a.2) with Home Assistant's built-in
-**History stats** helper (UI and YAML), and how to show it on a dashboard
-with built-in cards (§5a.3). This needs no code in the integration.
+helpers (UI and YAML), and how to show it on a dashboard with built-in cards
+(§5a.3). This needs no code in the integration. Because the **History
+stats** helper counts an entity's state, not an attribute, the guide first
+derives a template binary sensor ("room is heating") from `hvac_action` and
+then applies History stats to that sensor; the README snippet must be kept
+working against the Home Assistant versions the CI tests (§12a).
 
 ## 17. Open items (to do, not yet scheduled)
 
