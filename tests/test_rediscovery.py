@@ -7,8 +7,23 @@ from custom_components.viega_fonterra_modbus import binary_sensor as binary_sens
 from custom_components.viega_fonterra_modbus import rediscovery
 from custom_components.viega_fonterra_modbus.const import DOMAIN
 from custom_components.viega_fonterra_modbus.entity_tracking import register_platform
-from custom_components.viega_fonterra_modbus.polling import SharedPolling
 from custom_components.viega_fonterra_modbus.room_mapping import RoomMappingDiscovery
+
+
+class SharedPolling:
+    """Stand-in for the module's polling coordinator: rediscovery only uses
+    its `run_exclusive` (spec.md 16a) and, after a change,
+    `async_request_refresh` (spec.md 16i)."""
+
+    def __init__(self) -> None:
+        self.generation = 0
+        self.refresh_requests = 0
+
+    async def run_exclusive(self, action):
+        return await action()
+
+    async def async_request_refresh(self) -> None:
+        self.refresh_requests += 1
 
 
 # --- diff_topology (pure) -------------------------------------------------

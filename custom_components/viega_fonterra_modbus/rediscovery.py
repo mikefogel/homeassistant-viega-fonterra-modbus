@@ -145,6 +145,9 @@ async def async_rediscover_entry(hass: HomeAssistant, entry: ConfigEntry) -> Red
     entry_data["last_rediscovery"] = report.as_dict()
     _update_config_entry_rooms(hass, entry, new_rooms)
     await _reconcile_entities(hass, entry.entry_id, old_rooms, new_rooms, report)
+    if report.changed and hasattr(polling, "async_request_refresh"):
+        # Poll the new topology's registers soon (spec.md 16i).
+        await polling.async_request_refresh()
     _log_and_fire_report(hass, entry.entry_id, report)
     return report
 

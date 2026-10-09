@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 from types import SimpleNamespace
 
 from homeassistant.components.sensor import (
@@ -17,12 +16,12 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, MIN_SCAN_INTERVAL
+from .const import DOMAIN
 from .device import build_device_info
 from .diagnostic import ViegaDiagnosticTextEntity, _room_error_address
 from .entity_tracking import register_platform
 from .modbus_handler import ViegaModbusClient
-from .polling import PollingGate
+from .entity import ViegaCoordinatedEntity
 from .registers import (
     BASE_UNIT_REGISTERS,
     actor_registers,
@@ -31,7 +30,6 @@ from .registers import (
     room_actor_numbers,
 )
 
-SCAN_INTERVAL = timedelta(seconds=MIN_SCAN_INTERVAL)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -193,7 +191,7 @@ def _actor_temperature_sensors(
     return sensors
 
 
-class ViegaRegisterSensor(SensorEntity):
+class ViegaRegisterSensor(ViegaCoordinatedEntity, SensorEntity):
     """Expose a register-backed sensor entity."""
 
     _attr_has_entity_name = True
@@ -215,13 +213,9 @@ class ViegaRegisterSensor(SensorEntity):
         self._attr_native_value = 0
         self.last_error_message = ""
 
-        self._polling_gate = PollingGate()
 
     async def async_update(self) -> None:
         """Read the current register value from the Modbus client."""
-
-        if not self._polling_gate.is_due(self.hass, self._entry_id):
-            return
 
         client = self.hass.data[DOMAIN].get(self._entry_id, {}).get("client")
         if client is None:
@@ -271,7 +265,7 @@ class ViegaRegisterSensor(SensorEntity):
         return build_device_info(self.hass, self._entry_id)
 
 
-class ViegaBaseUnitIdentitySensor(SensorEntity, RestoreEntity):
+class ViegaBaseUnitIdentitySensor(ViegaCoordinatedEntity, SensorEntity, RestoreEntity):
     """Expose base-unit identity and error registers as diagnostic sensors."""
 
     _attr_has_entity_name = True
@@ -303,7 +297,6 @@ class ViegaBaseUnitIdentitySensor(SensorEntity, RestoreEntity):
             self._attr_native_value = initial
         self.last_error_message = ""
 
-        self._polling_gate = PollingGate()
 
     async def async_added_to_hass(self) -> None:
         """Restore the last known value across restarts (spec.md 15)."""
@@ -328,9 +321,6 @@ class ViegaBaseUnitIdentitySensor(SensorEntity, RestoreEntity):
 
     async def async_update(self) -> None:
         """Read and decode the identity or base-unit error register."""
-
-        if not self._polling_gate.is_due(self.hass, self._entry_id):
-            return
 
         client = self.hass.data[DOMAIN][self._entry_id]["client"]
         try:
@@ -366,7 +356,7 @@ class ViegaBaseUnitIdentitySensor(SensorEntity, RestoreEntity):
         return build_device_info(self.hass, self._entry_id)
 
 
-class ViegaActorLinkedSensor(SensorEntity, RestoreEntity):
+class ViegaActorLinkedSensor(ViegaCoordinatedEntity, SensorEntity, RestoreEntity):
     """Expose a register linked to one of a room's actuators."""
 
     _attr_has_entity_name = True
@@ -399,7 +389,6 @@ class ViegaActorLinkedSensor(SensorEntity, RestoreEntity):
         if unit == UnitOfTemperature.CELSIUS:
             self._attr_device_class = SensorDeviceClass.TEMPERATURE
             self._attr_state_class = SensorStateClass.MEASUREMENT
-        self._polling_gate = PollingGate()
 
     async def async_added_to_hass(self) -> None:
         """Restore the last known value across restarts (spec.md 15)."""
@@ -413,9 +402,6 @@ class ViegaActorLinkedSensor(SensorEntity, RestoreEntity):
             return
 
     async def async_update(self) -> None:
-        if not self._polling_gate.is_due(self.hass, self._entry_id):
-            return
-
         client = self.hass.data[DOMAIN][self._entry_id]["client"]
         try:
             shared = self.hass.data[DOMAIN][self._entry_id].get("polling")
@@ -436,7 +422,7 @@ class ViegaActorLinkedSensor(SensorEntity, RestoreEntity):
         return build_device_info(self.hass, self._entry_id)
 
 
-class ViegaBaseUnitTemperatureSensor(SensorEntity, RestoreEntity):
+class ViegaBaseUnitTemperatureSensor(ViegaCoordinatedEntity, SensorEntity, RestoreEntity):
     """Expose a base-unit-level temperature register (e.g. manifold flow).
 
     Unlike room/actuator registers, this value is measured once for the
@@ -459,7 +445,6 @@ class ViegaBaseUnitTemperatureSensor(SensorEntity, RestoreEntity):
         self._attr_unique_id = f"{entry_id}_{sensor_key}"
         self._attr_translation_key = sensor_key
         self._attr_native_value = None
-        self._polling_gate = PollingGate()
 
     async def async_added_to_hass(self) -> None:
         """Restore the last known value across restarts (spec.md 15)."""
@@ -473,9 +458,6 @@ class ViegaBaseUnitTemperatureSensor(SensorEntity, RestoreEntity):
             return
 
     async def async_update(self) -> None:
-        if not self._polling_gate.is_due(self.hass, self._entry_id):
-            return
-
         client = self.hass.data[DOMAIN][self._entry_id]["client"]
         try:
             shared = self.hass.data[DOMAIN][self._entry_id].get("polling")
@@ -494,7 +476,7 @@ class ViegaBaseUnitTemperatureSensor(SensorEntity, RestoreEntity):
         return build_device_info(self.hass, self._entry_id)
 
 
-class ViegaConnectionHealthSensor(SensorEntity):
+class ViegaConnectionHealthSensor(ViegaCoordinatedEntity, SensorEntity):
     """One connection-health metric, read straight off the shared client's
     own bookkeeping (spec.md 16b) - no register read of its own is ever
     issued for this entity, since every metric is already a byproduct of
@@ -549,9 +531,9 @@ class ViegaConnectionHealthSensor(SensorEntity):
     async def async_update(self) -> None:
         """Copy the current metric value off the shared client.
 
-        Deliberately not gated by a `PollingGate`: there is nothing to
-        throttle since reading these attributes never touches the wire
-        (spec.md 16b "without an additional polling request").
+        Runs after every polling cycle like every other entity, but never
+        touches the wire itself (spec.md 16b "without an additional polling
+        request").
         """
         client = self.hass.data[DOMAIN][self._entry_id]["client"]
         self._attr_native_value = getattr(client, self._metric_key, None)
@@ -561,7 +543,7 @@ class ViegaConnectionHealthSensor(SensorEntity):
         return build_device_info(self.hass, self._entry_id)
 
 
-class ViegaActuatorStatisticsSensor(SensorEntity, RestoreEntity):
+class ViegaActuatorStatisticsSensor(ViegaCoordinatedEntity, SensorEntity, RestoreEntity):
     """One derived actuator statistic (spec.md 16f), read straight off the
     shared `ActuatorStatistics` object (`binary_sensor.py`) that the
     circulation-pump entity already updates as part of its own debounced
@@ -624,8 +606,7 @@ class ViegaActuatorStatisticsSensor(SensorEntity, RestoreEntity):
     async def async_update(self) -> None:
         """Copy the current statistic off the shared `ActuatorStatistics`.
 
-        Not gated by a `PollingGate`: nothing here touches the wire, so
-        there is nothing to throttle (mirrors
+        Never touches the wire itself (mirrors
         `ViegaConnectionHealthSensor`).
         """
         statistics = self.hass.data[DOMAIN][self._entry_id].get("actuator_statistics")

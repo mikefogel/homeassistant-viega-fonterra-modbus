@@ -93,7 +93,6 @@ def test_turns_off_for_error_code_zero():
     assert entity._attr_is_on is True
 
     entity.hass.data[DOMAIN]["entry_1"]["client"] = _FakeClient(values=[0])
-    entity._polling_gate._next_due = 0.0  # force the next update to actually read
 
     asyncio.run(entity.async_update())
 
@@ -195,9 +194,36 @@ def _pump_entity(actuator_addresses: dict[int, int], client) -> ViegaCirculation
 
 
 def _tick(entity) -> None:
-    """Force the polling gate open and run one update cycle."""
-    entity._polling_gate._next_due = 0.0
+    """Run one update cycle (one polling cycle's reading per actuator)."""
     asyncio.run(entity.async_update())
+
+
+def test_pump_counts_each_polling_cycle_only_once():
+    """An extra update within the same coordinator cycle (e.g. "update
+    entity") must not advance the debounce with the same reading twice."""
+    client = _MultiActuatorClient({250: 1})
+    entity = ViegaCirculationPumpBinarySensor("entry_1", {1: 250})
+
+    class _Cycle:
+        generation = 1
+
+        async def read(self, hass, entry_id, bank, address, count=1):
+            return await client.read_input_registers(address, count)
+
+    cycle = _Cycle()
+    entity.hass = SimpleNamespace(
+        data={DOMAIN: {"entry_1": {"client": client, "polling": cycle}}}
+    )
+
+    for _ in range(3):
+        asyncio.run(entity.async_update())  # same cycle three times
+    assert entity._attr_is_on is None
+
+    cycle.generation = 2
+    asyncio.run(entity.async_update())
+    cycle.generation = 3
+    asyncio.run(entity.async_update())
+    assert entity._attr_is_on is True
 
 
 def test_pump_name_is_localized_via_translation_key():

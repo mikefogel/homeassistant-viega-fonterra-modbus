@@ -2,22 +2,20 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
 
 from homeassistant.components.number import NumberEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .const import DOMAIN, MIN_SCAN_INTERVAL
+from .const import DOMAIN
 from .device import build_device_info
 from .entity_tracking import register_platform
 from .errors import async_write_register, invalid_request
 from .modbus_handler import ViegaModbusClient
-from .polling import PollingGate
+from .entity import ViegaCoordinatedEntity
 from .registers import resolve_room_number, room_registers
 
-SCAN_INTERVAL = timedelta(seconds=MIN_SCAN_INTERVAL)
 
 
 async def async_setup_entry(
@@ -48,7 +46,7 @@ def build_room_entities(
     return [entity] if entity.address is not None else []
 
 
-class ViegaPowerLevelNumber(NumberEntity, RestoreEntity):
+class ViegaPowerLevelNumber(ViegaCoordinatedEntity, NumberEntity, RestoreEntity):
     """Read and write the documented room power-level register."""
 
     _attr_has_entity_name = True
@@ -84,7 +82,6 @@ class ViegaPowerLevelNumber(NumberEntity, RestoreEntity):
         # compared against it. See climate.py's `_verify_pending_writes`
         # for why the generation check matters.
         self._pending_write: tuple[int, int] | None = None
-        self._polling_gate = PollingGate()
 
     async def async_added_to_hass(self) -> None:
         """Restore the last known value across restarts (spec.md 15)."""
@@ -100,9 +97,7 @@ class ViegaPowerLevelNumber(NumberEntity, RestoreEntity):
     async def async_update(self) -> None:
         """Read the current actuator power level."""
         entry_data = self.hass.data[DOMAIN][self._entry_id]
-        if self.address is None or (
-            "polling" not in entry_data and not self._polling_gate.is_due(self.hass, self._entry_id)
-        ):
+        if self.address is None:
             return
         client = entry_data["client"]
         try:

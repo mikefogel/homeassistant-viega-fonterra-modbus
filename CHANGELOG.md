@@ -19,6 +19,14 @@ and versions follow [Semantic Versioning](https://semver.org/).
   hassfest validator, HACS validation) and a weekly test against the
   newest Home Assistant version.
 
+### Changed
+
+- Each module is now polled by one central update cycle at its polling
+  interval, which updates all of its entities together, instead of every
+  entity being polled by Home Assistant every 5 seconds. Same values, fewer
+  wake-ups, and a change you make is read back from the device right away
+  instead of after a full interval.
+
 ### Fixed
 
 - Error messages in the setup and options dialogs (e.g. "Unable to connect

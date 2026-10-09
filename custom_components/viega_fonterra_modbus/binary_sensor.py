@@ -8,7 +8,7 @@ sensor exposed by sensor.py.
 from __future__ import annotations
 
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from homeassistant.components.binary_sensor import (
@@ -20,14 +20,13 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .const import DOMAIN, MIN_SCAN_INTERVAL
+from .const import DOMAIN
 from .device import build_device_info
 from .entity_tracking import register_platform
 from .modbus_handler import ViegaModbusClient
-from .polling import PollingGate
+from .entity import ViegaCoordinatedEntity
 from .registers import BASE_UNIT_REGISTERS, actor_registers, room_actor_numbers
 
-SCAN_INTERVAL = timedelta(seconds=MIN_SCAN_INTERVAL)
 
 #: Synthetic "room" key the circulation pump entity (module-level, not
 #: room-scoped) is tracked under, so rediscovery can rebuild it through the
@@ -130,7 +129,7 @@ def _actor_position_sensors(
     return sensors
 
 
-class ViegaBaseUnitErrorBinarySensor(BinarySensorEntity, RestoreEntity):
+class ViegaBaseUnitErrorBinarySensor(ViegaCoordinatedEntity, BinarySensorEntity, RestoreEntity):
     """Report whether the base unit currently reports a non-zero error code."""
 
     _attr_has_entity_name = True
@@ -143,7 +142,6 @@ class ViegaBaseUnitErrorBinarySensor(BinarySensorEntity, RestoreEntity):
         self._attr_unique_id = f"{entry_id}_base_unit_error"
         self._attr_translation_key = "base_unit_error"
         self._attr_is_on = False
-        self._polling_gate = PollingGate()
 
     async def async_added_to_hass(self) -> None:
         """Restore the last known value across restarts (spec.md 15)."""
@@ -155,8 +153,6 @@ class ViegaBaseUnitErrorBinarySensor(BinarySensorEntity, RestoreEntity):
 
     async def async_update(self) -> None:
         entry_data = self.hass.data[DOMAIN][self._entry_id]
-        if "polling" not in entry_data and not self._polling_gate.is_due(self.hass, self._entry_id):
-            return
         client = entry_data["client"]
         try:
             shared = entry_data.get("polling")
@@ -177,7 +173,7 @@ class ViegaBaseUnitErrorBinarySensor(BinarySensorEntity, RestoreEntity):
         return build_device_info(self.hass, self._entry_id)
 
 
-class ViegaActuatorPositionBinarySensor(BinarySensorEntity, RestoreEntity):
+class ViegaActuatorPositionBinarySensor(ViegaCoordinatedEntity, BinarySensorEntity, RestoreEntity):
     """Report an actuator's open/closed state (manual: 0=closed, 1=open)."""
 
     _attr_has_entity_name = True
@@ -200,7 +196,6 @@ class ViegaActuatorPositionBinarySensor(BinarySensorEntity, RestoreEntity):
             "actor": str(actor_number),
         }
         self._attr_is_on = None
-        self._polling_gate = PollingGate()
 
     async def async_added_to_hass(self) -> None:
         """Restore the last known value across restarts (spec.md 15)."""
@@ -211,8 +206,6 @@ class ViegaActuatorPositionBinarySensor(BinarySensorEntity, RestoreEntity):
         self._attr_is_on = last_state.state == "on"
 
     async def async_update(self) -> None:
-        if not self._polling_gate.is_due(self.hass, self._entry_id):
-            return
         client = self.hass.data[DOMAIN][self._entry_id]["client"]
         try:
             shared = self.hass.data[DOMAIN][self._entry_id].get("polling")
@@ -279,7 +272,7 @@ class ActuatorStatistics:
         self._last_aggregate = aggregate
 
 
-class ViegaCirculationPumpBinarySensor(BinarySensorEntity, RestoreEntity):
+class ViegaCirculationPumpBinarySensor(ViegaCoordinatedEntity, BinarySensorEntity, RestoreEntity):
     """Derived on/off indicator for an externally controlled circulation pump.
 
     The Viega register map has no dedicated pump register - this is a
@@ -314,7 +307,10 @@ class ViegaCirculationPumpBinarySensor(BinarySensorEntity, RestoreEntity):
         self._candidate: dict[int, int | None] = dict.fromkeys(actuator_addresses)
         self._candidate_count: dict[int, int] = dict.fromkeys(actuator_addresses, 0)
         self._accepted: dict[int, int | None] = dict.fromkeys(actuator_addresses)
-        self._polling_gate = PollingGate()
+        # Polling cycle last fed into the debounce: an extra update within
+        # the same cycle (e.g. "update entity") must not count the same
+        # reading twice (spec.md 5c "3 consecutive reads").
+        self._last_generation: int | None = None
 
     async def async_added_to_hass(self) -> None:
         """Restore the last known value across restarts (spec.md 15)."""
@@ -325,10 +321,13 @@ class ViegaCirculationPumpBinarySensor(BinarySensorEntity, RestoreEntity):
         self._attr_is_on = last_state.state == "on"
 
     async def async_update(self) -> None:
-        if not self._polling_gate.is_due(self.hass, self._entry_id):
-            return
         client = self.hass.data[DOMAIN][self._entry_id]["client"]
         shared = self.hass.data[DOMAIN][self._entry_id].get("polling")
+        generation = getattr(shared, "generation", None)
+        if generation is not None:
+            if generation == self._last_generation:
+                return
+            self._last_generation = generation
 
         for actuator_number, address in self._actuator_addresses.items():
             try:

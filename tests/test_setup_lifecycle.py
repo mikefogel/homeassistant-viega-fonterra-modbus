@@ -225,3 +225,36 @@ async def test_a_user_change_to_the_entry_still_reloads_it(hass, fake_device):
     assert len(fake_device.instances) == 2
     assert fake_device.instances[0].disconnect_calls == 1
     assert hass.data[DOMAIN][entry.entry_id]["polling_interval"] == 60
+
+
+async def test_entities_are_updated_by_the_coordinator_not_polled(hass, fake_device, monkeypatch):
+    """spec.md 16i: one polling cycle feeds every entity; Home Assistant no
+    longer polls them one by one."""
+    from custom_components.viega_fonterra_modbus.registers import BASE_UNIT_REGISTERS
+
+    values = {BASE_UNIT_REGISTERS["flow_temperature"]: 352}
+
+    async def read_input_registers(self, address, count=1):
+        return [values.get(address + i, 0) for i in range(count)]
+
+    monkeypatch.setattr(FakeClient, "read_input_registers", read_input_registers)
+    entry = _entry()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.states.get("sensor.fonterra_flow_temperature").state == "35.2"
+
+    values[BASE_UNIT_REGISTERS["flow_temperature"]] = 400
+    await hass.data[DOMAIN][entry.entry_id]["polling"].async_refresh()
+    await hass.async_block_till_done()
+
+    assert hass.states.get("sensor.fonterra_flow_temperature").state == "40.0"
+    platform_entities = [
+        entity
+        for registry in hass.data[DOMAIN][entry.entry_id]["platform_entities"].values()
+        for entities in registry.by_room.values()
+        for entity in entities
+    ]
+    assert platform_entities
+    assert all(entity.should_poll is False for entity in platform_entities)

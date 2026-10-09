@@ -233,17 +233,18 @@ def test_async_update_isolates_a_single_register_failure():
     assert entity._attr_target_temperature == 22.0
 
 
-def test_async_update_skips_the_read_when_the_polling_gate_is_not_due():
+def test_entity_is_not_polled_by_home_assistant_when_a_coordinator_exists():
+    """spec.md 16i: the module's coordinator drives updates; without one
+    (an entity used on its own) Home Assistant polls it as before."""
+    from custom_components.viega_fonterra_modbus.coordinator import ViegaDataCoordinator
+
     entity = _entity(room_config={"name": "Wohnzimmer", "actor": 1})
-    client = _RecordingReadClient()
-    entity.hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"client": client}}})
+    entity.hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"client": _RecordingReadClient()}}})
+    assert entity.should_poll is True
 
-    asyncio.run(entity.async_update())
-    reads_after_first_update = len(client.holding_reads) + len(client.input_reads)
-
-    asyncio.run(entity.async_update())
-
-    assert len(client.holding_reads) + len(client.input_reads) == reads_after_first_update
+    coordinator = ViegaDataCoordinator.__new__(ViegaDataCoordinator)
+    entity.hass.data[DOMAIN]["entry_1"]["polling"] = coordinator
+    assert entity.should_poll is False
 
 
 def test_async_update_keeps_the_previous_temperature_across_repeated_error_sentinel_reads():

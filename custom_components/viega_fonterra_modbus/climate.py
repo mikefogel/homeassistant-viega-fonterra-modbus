@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 
 from homeassistant.components.climate import (
     ClimateEntity,
@@ -15,11 +14,11 @@ from homeassistant.const import UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .const import DOMAIN, MIN_SCAN_INTERVAL
+from .const import DOMAIN
 from .device import build_device_info
 from .entity_tracking import register_platform
 from .errors import async_write_register, invalid_request
-from .polling import PollingGate
+from .entity import ViegaCoordinatedEntity
 from .registers import (
     BASE_UNIT_REGISTERS,
     actor_registers,
@@ -28,7 +27,6 @@ from .registers import (
     room_registers,
 )
 
-SCAN_INTERVAL = timedelta(seconds=MIN_SCAN_INTERVAL)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -60,7 +58,7 @@ def build_room_entities(
     return [ViegaRoomClimateEntity(entry_id, room_id, name, 21.5, 22.0, room_config)]
 
 
-class ViegaRoomClimateEntity(ClimateEntity, RestoreEntity):
+class ViegaRoomClimateEntity(ViegaCoordinatedEntity, ClimateEntity, RestoreEntity):
     """Minimal Home Assistant climate implementation for a room thermostat."""
 
     _attr_has_entity_name = True
@@ -88,7 +86,6 @@ class ViegaRoomClimateEntity(ClimateEntity, RestoreEntity):
         actor = actor_registers(actor_numbers[0]) if actor_numbers else {}
         self._entry_id = entry_id
         self.room_id = room_id
-        self._polling_gate = PollingGate()
         self._attr_unique_id = f"{entry_id}_{room_id}_thermostat"
         self._attr_name = room_name
         self._attr_current_temperature = current_temperature
@@ -312,9 +309,6 @@ class ViegaRoomClimateEntity(ClimateEntity, RestoreEntity):
 
     async def async_update(self) -> None:
         """Read room and controller values from the documented registers."""
-        if "polling" not in self.hass.data.get(DOMAIN, {}).get(self._entry_id, {}):
-            if not self._polling_gate.is_due(self.hass, self._entry_id):
-                return
         entry_data = self.hass.data[DOMAIN][self._entry_id]
         client = entry_data["client"]
         values = await self._read_values(client)

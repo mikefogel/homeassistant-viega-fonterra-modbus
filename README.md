@@ -604,7 +604,10 @@ custom_components/viega_fonterra_modbus/
 ├── diagnostic.py         # Per-room diagnostic text entity
 ├── diagnostics.py        # Home Assistant "Download diagnostics" export
 ├── modbus_handler.py     # Modbus TCP client and connection-health bookkeeping
-├── polling.py            # Shared per-entry polling gate and register-block coalescing
+├── coordinator.py        # One polling cycle per module (block reads) feeding all entities
+├── entity.py             # Base class for entities updated by the coordinator
+├── errors.py             # Translated errors for user actions
+├── issues.py             # Settings → Repairs entries (unreachable module, base-unit errors)
 ├── registers.py          # Register address map and topology helpers
 ├── room_mapping.py       # Automatic room/actuator discovery
 ├── rediscovery.py        # Explicit rediscovery action

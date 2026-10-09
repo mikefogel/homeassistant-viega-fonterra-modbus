@@ -672,15 +672,10 @@ or a manual options-flow edit.
 
 ### 6c. Polling model
 
-`polling_interval` gates how often each entity performs an actual Modbus
-read, not how often Home Assistant calls the entity's update method. Every
-platform polls at a fixed 5-second `SCAN_INTERVAL` (the spec-mandated
-minimum), and each entity tracks the time of its last real read; it skips
-the Modbus request and keeps its last known value whenever less than
-`polling_interval` seconds have passed, and performs the read otherwise.
-This lets each config entry honor its own configured interval without a
-shared per-device scheduler, while still allowing `polling_interval` values
-down to the 5-second minimum.
+Each config entry has one polling coordinator (§16i) that reads all of the
+module's registers once per `polling_interval` (minimum 5 seconds) and then
+updates every entity of that module. Entities are not polled by Home
+Assistant individually and never read the device themselves.
 
 If the initial Modbus TCP connection cannot be established when a config
 entry is set up, the integration must signal Home Assistant to retry with
@@ -1291,20 +1286,34 @@ unknown or reserved addresses.
 
 ### 16i. Central update coordinator
 
-Today every entity polls on its own every `5` seconds (`SCAN_INTERVAL`) and
-a per-entity `PollingGate` plus the shared cache (`polling.py`, §6c) skip the
-actual Modbus read until the module's `polling_interval` has elapsed. This
-works, but it is not Home Assistant's usual model. A future version may
-replace it with one `DataUpdateCoordinator` per config entry:
+Implemented in `coordinator.py` (`ViegaDataCoordinator`, one
+`DataUpdateCoordinator` per config entry, stored as the entry's `polling`
+object) and `entity.py` (`ViegaCoordinatedEntity`). It replaced the former
+per-entity polling, in which every entity was polled every `5` seconds and a
+per-entity `PollingGate` with a shared cache skipped reads until
+`polling_interval` had elapsed.
 
-- one polling cycle per module at its configured `polling_interval`, reading
-  every register the topology needs (using the contiguous block reads of
-  §16d) and notifying all of the module's entities together;
-- entities become `CoordinatorEntity`s that only map the coordinator's data
-  to their state and no longer perform their own reads;
-- a write (§10a) triggers an early refresh, which also serves read-after-write
-  verification (§16c);
-- connection loss and reconnection (§11c) are handled in one place.
+- One polling cycle per module at its configured `polling_interval` reads
+  every register the topology needs (`known_addresses_for_topology`) plus
+  any other register an entity has asked for in the last
+  `REQUEST_TTL_CYCLES` cycles, using the contiguous block reads of §16d, and
+  then notifies all of the module's entities together.
+- Entities set `should_poll = False` and, after each cycle, run their own
+  value handling against that cycle's data through the coordinator's
+  `read()`, which never touches the device; a register missing from the
+  cycle behaves like a failed read. They deliberately do not use Home
+  Assistant's `CoordinatorEntity`, whose availability follows the cycle's
+  success: here entities must stay available and keep their last valid
+  values during an outage, and their proven per-entity value handling
+  (`-99`, last valid value, verification) is kept as is.
+- A failed block read only drops that block's registers from the cycle; a
+  cycle never raises `UpdateFailed`.
+- A successful write (§10a) and a rediscovery that changed the topology
+  request an early cycle, which also serves read-after-write verification
+  (§16c). The cycle counter (`generation`) is what verification and the
+  circulation-pump debounce (§5c, counted once per cycle) rely on.
+- Connection loss and reconnection (§11c) stay in the transport; rediscovery
+  runs through `run_exclusive()` so it never interleaves with a cycle.
 
 The existing guarantees must be kept unchanged: last valid value on failed or
 `-99` reads (§10), entities stay available and keep their values during an

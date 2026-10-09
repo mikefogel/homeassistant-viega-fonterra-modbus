@@ -18,7 +18,7 @@ from .registers import (
     room_registers,
 )
 from .modbus_handler import ViegaModbusClient
-from .polling import PollingGate
+from .entity import ViegaCoordinatedEntity
 
 DEFAULT_STATUS = "error: sensor invalid"
 
@@ -64,7 +64,7 @@ def _room_error_address(room_id: str, room_config: object) -> int:
     return BASE_UNIT_REGISTERS["error_code"]
 
 
-class ViegaDiagnosticTextEntity(SensorEntity, RestoreEntity):
+class ViegaDiagnosticTextEntity(ViegaCoordinatedEntity, SensorEntity, RestoreEntity):
     """Represent a textual diagnosis entity for a failed sensor or unit."""
 
     _attr_has_entity_name = True
@@ -92,7 +92,6 @@ class ViegaDiagnosticTextEntity(SensorEntity, RestoreEntity):
         self.status = status
         self._room_id = room_id
         self._address = address if address is not None else BASE_UNIT_REGISTERS["error_code"]
-        self._polling_gate = PollingGate()
         self._attr_unique_id = (
             f"{entry_id}_{room_id}_diagnostic" if entry_id is not None and room_id else
             (f"{entry_id}_{name}_diagnostic" if entry_id is not None else None)
@@ -117,8 +116,6 @@ class ViegaDiagnosticTextEntity(SensorEntity, RestoreEntity):
         if self._entry_id is None:
             return
         entry_data = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
-        if "polling" not in entry_data and not self._polling_gate.is_due(self.hass, self._entry_id):
-            return
         try:
             shared = entry_data.get("polling")
             values = await (shared.read(self.hass, self._entry_id, "input", self._address, 1)

@@ -16,7 +16,7 @@ from .errors import action_failed, invalid_request
 from .issues import ModuleIssues
 from .modbus_handler import ModbusClientError, ViegaModbusClient
 from .overview import async_multi_module_overview
-from .polling import SharedPolling
+from .coordinator import ViegaDataCoordinator
 from .rediscovery import async_rediscover_entry
 from .room_mapping import RoomMappingDiscovery
 from .registers import (
@@ -160,7 +160,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "modbus_timeout": timeout,
         "rooms": rooms,
         "device_id": entry.options.get("device_id", ""),
-        "polling": SharedPolling(),
+        # One polling cycle per module for all entities (spec.md 16i).
+        "polling": ViegaDataCoordinator(
+            hass, entry, client, entry.data.get("polling_interval", 30)
+        ),
         "identity": identity,
     }
     # Repairs entries for an unreachable module or a base-unit error (spec.md 16j).
@@ -186,6 +189,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if _LOGGER.isEnabledFor(logging.DEBUG):
         _log_resolved_topology(entry.entry_id, rooms, identity)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    # First cycle right away; a failure only leaves entities on their
+    # restored values (spec.md 10/15), it does not fail the setup.
+    await hass.data[DOMAIN][entry.entry_id]["polling"].async_refresh()
     _LOGGER.debug("Set up Viega Fonterra entry %s", entry.entry_id)
     return True
 
