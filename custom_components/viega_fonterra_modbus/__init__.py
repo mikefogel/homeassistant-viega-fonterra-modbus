@@ -160,14 +160,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "identity": identity,
     }
 
+    # Remember the configuration this setup applies, so the update listener
+    # can tell the persisting of discovered rooms below apart from a change
+    # made by the user (see `async_reload_entry`). Stored *before* the
+    # update: Home Assistant may run the listener eagerly inside
+    # `async_update_entry`.
+    applied_options = {**entry.options, "rooms": rooms, "_identity": identity}
+    hass.data[DOMAIN][entry.entry_id]["applied_config"] = (
+        dict(entry.data),
+        applied_options,
+    )
     update_entry = getattr(hass.config_entries, "async_update_entry", None)
     if update_entry and (
         rooms != entry.options.get("rooms", {}) or identity
     ):
-        update_entry(
-            entry,
-            options={**entry.options, "rooms": rooms, "_identity": identity},
-        )
+        update_entry(entry, options=applied_options)
     if _LOGGER.isEnabledFor(logging.DEBUG):
         _log_resolved_topology(entry.entry_id, rooms, identity)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -228,8 +235,22 @@ def _log_resolved_topology(
         )
 
 
+def _config_snapshot(entry: ConfigEntry) -> tuple[dict, dict]:
+    return dict(entry.data), dict(entry.options)
+
+
 async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload the entry after settings are changed in the UI."""
+    """Reload the entry after settings are changed in the UI.
+
+    `async_setup_entry` itself persists the discovered rooms and identity
+    into the entry's options, which also triggers this listener. Reloading
+    for that would set the module up a second time right away - a second
+    discovery run and a second connection - so a change that only matches
+    what the running setup already applied is ignored.
+    """
+    entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if entry_data is not None and entry_data.get("applied_config") == _config_snapshot(entry):
+        return
     await hass.config_entries.async_reload(entry.entry_id)
 
 

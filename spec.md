@@ -1029,10 +1029,18 @@ dependencies must be declared in `requirements-test.txt`.
 The harness is set up (`tests/conftest.py`) and covers the setup flow's
 successful-connection, cannot-connect, and duplicate-host/port-rejection
 paths, and the options flow's save/cannot-connect paths, including a
-multi-actuator room round trip (`tests/test_config_flow_flows.py`). Reload
-and removal flows through the harness (as opposed to the unit-level
-coverage already in `tests/test_init.py`/`tests/test_modbus_handler.py`)
-remain open.
+multi-actuator room round trip (`tests/test_config_flow_flows.py`). Setup,
+reload, connection retry, and removal are covered through the harness in
+`tests/test_setup_lifecycle.py`: entry states, stable entity unique IDs
+across a reload, every opened connection being closed again, removal while
+`disconnect()` fails, and one module's reload leaving another untouched.
+
+Setting up an entry persists the discovered rooms and identity into its
+options, which also fires the entry's update listener. That listener must
+not reload the entry for this self-made change - only for a change that
+differs from the configuration the running setup applied - otherwise every
+first setup (and every topology change) immediately runs a second setup
+with a second discovery and a second connection.
 
 ### Configuration diagnostics export
 
