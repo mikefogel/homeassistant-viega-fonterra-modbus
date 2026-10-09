@@ -6,6 +6,14 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### ✨ Added
+
+- 🔁 The circulation-pump blueprint accepts several indicators, so one pump
+  shared by several Viega modules (e.g. three floors) runs while any of them
+  needs heat. Automations created with a single indicator keep working.
+- 📖 README: step-by-step guide for creating the pump automation, for one
+  shared pump and for one pump per module.
+
 ## [1.2.0] - 2026-10-10
 
 ### ⚠️ Please check after updating

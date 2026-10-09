@@ -1409,20 +1409,26 @@ viega_fonterra_modbus/circulation_pump.yaml`) that switches a separately
 wired circulation pump from the derived circulation-pump indicator (§5c), so
 users can import it with one click instead of copying YAML:
 
-- Inputs: the circulation-pump indicator (`binary_sensor` of this
-  integration), the pump switch (`switch`, `light`, or `input_boolean`), and a
-  run-on time after the last actuator closes (default `5` minutes, `0`
-  allowed).
-- Turns the pump on when the indicator turns `on`; turns it off when the
-  indicator has been `off` for the run-on time. If the indicator turns `on`
+- Inputs: one or more circulation-pump indicators (`binary_sensor` of this
+  integration, one per module), the pump switch (`switch`, `light`, or
+  `input_boolean`), and a run-on time after the last actuator closes
+  (default `5` minutes, `0` allowed). Several indicators cover a pump shared
+  by several modules (e.g. one pump for three floors, each with its own
+  Fonterra base unit); separately wired pumps per module use one automation
+  each. An automation created with a single indicator keeps working.
+- Turns the pump on as soon as any selected indicator turns `on`; turns it
+  off only when every selected indicator is `off` and the one that turned
+  off last has stayed `off` for the run-on time. If any indicator turns `on`
   again during the run-on time, the pump stays on.
-- Ignores `unavailable`/`unknown` indicator states: the pump keeps its
-  current state.
+- Ignores `unavailable`/`unknown` indicator states: while any selected
+  indicator is in such a state, the pump is not switched off (it is still
+  switched on when another indicator turns `on`).
 - Uses only automation syntax supported by the minimum Home Assistant
   version in `hacs.json`.
 - The README links an import button
   (`my.home-assistant.io/redirect/blueprint_import`) to the blueprint's raw
-  URL on the `main` branch. The blueprint is part of release archives.
+  URL on the `main` branch and explains step by step how to create the
+  automation, for one shared pump and for one pump per module. The blueprint is part of release archives.
 - A test validates the blueprint against Home Assistant's blueprint schema.
 
 ### 16l. Heating time per room (documentation)

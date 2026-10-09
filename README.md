@@ -182,7 +182,21 @@ The easiest way is the ready-made blueprint — import it, pick the indicator an
 
 [![Open your Home Assistant instance and show the blueprint import dialog with the circulation-pump blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fmikefogel%2Fhomeassistant-viega-fonterra-modbus%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fviega_fonterra_modbus%2Fcirculation_pump.yaml)
 
-The pump turns on as soon as any actuator opens and off once all actuators have stayed closed for the run-on time; if an actuator opens again in between, the pump simply keeps running. After a Home Assistant restart with open actuators it is switched on right away, and an unavailable indicator leaves the pump as it is. ([Blueprint source](blueprints/automation/viega_fonterra_modbus/circulation_pump.yaml))
+The pump turns on as soon as any actuator opens and off once all actuators have stayed closed for the run-on time; if an actuator opens again in between, the pump simply keeps running. After a Home Assistant restart with open actuators it is switched on right away, and while an indicator is unavailable the pump is not switched off. ([Blueprint source](blueprints/automation/viega_fonterra_modbus/circulation_pump.yaml))
+
+**Setting it up, step by step**
+
+1. Click the button above (or go to *Settings → Automations & scenes → Blueprints → Import blueprint* and paste the blueprint's URL), then **Import blueprint**.
+2. In the blueprint list, open **Viega Fonterra – circulation pump** and choose **Create automation**.
+3. **Circulation-pump indicator(s):** pick the "Circulation pump" sensor of every Viega module whose heating circuits this pump supplies.
+4. **Pump switch:** pick the switch or relay that powers the pump.
+5. **Run-on time:** how long the pump keeps running after the last actuator has closed (default 5 minutes).
+6. Save the automation and give it a name, e.g. "Heizkreispumpe".
+
+Which indicators to pick depends on how your pumps are wired. With three modules, one per floor, e.g. `binary_sensor.dachgeschoss_umwalzpumpe`, `binary_sensor.obergeschoss_umwalzpumpe` and `binary_sensor.erdgeschoss_umwalzpumpe`:
+
+- **One pump for the whole house:** create **one** automation and select **all three** indicators. The pump runs while any floor needs heat and switches off once every floor has been closed for the run-on time.
+- **One pump per floor:** create **three** automations, each with **one** floor's indicator and that floor's pump switch.
 
 If you prefer a plain automation without run-on time:
 

@@ -2,20 +2,28 @@ blueprint:
   name: Viega Fonterra – circulation pump
   description: >-
     Switches a separately wired circulation pump from the Viega Fonterra
-    circulation-pump indicator: on as soon as any actuator of the module
-    opens, off once all actuators have been closed for the run-on time. If an
-    actuator opens again during the run-on time, the pump simply stays on.
-    Unavailable or unknown indicator states leave the pump as it is.
+    circulation-pump indicator(s): on as soon as any actuator opens, off once
+    all actuators have been closed for the run-on time. If an actuator opens
+    again during the run-on time, the pump simply stays on.
+
+
+    Select one indicator per Viega module that feeds this pump - e.g. all
+    three floors for one shared pump, or just one floor for a pump of its
+    own. While an indicator is unavailable or unknown, the pump is not
+    switched off.
   domain: automation
   source_url: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/blob/main/blueprints/automation/viega_fonterra_modbus/circulation_pump.yaml
   homeassistant:
     min_version: "2024.6.0"
   input:
     pump_indicator:
-      name: Circulation-pump indicator
-      description: The "Circulation pump" binary sensor of your Viega Fonterra module.
+      name: Circulation-pump indicator(s)
+      description: >-
+        The "Circulation pump" binary sensor of every Viega Fonterra module
+        whose heating circuits this pump supplies.
       selector:
         entity:
+          multiple: true
           filter:
             - integration: viega_fonterra_modbus
               domain: binary_sensor
@@ -41,13 +49,20 @@ blueprint:
 
 mode: queued
 
+variables:
+  # A single entity (automations created with an older version of this
+  # blueprint) or a list of entities.
+  indicators: !input pump_indicator
+  indicator_states: >-
+    {{ expand(indicators) | map(attribute='state') | list }}
+
 trigger:
   - platform: state
     entity_id: !input pump_indicator
     to: "on"
     id: pump_on
-  # Only fires once the indicator has stayed "off" for the whole run-on time;
-  # turning "on" again in between cancels it.
+  # Fires once an indicator has stayed "off" for the whole run-on time; the
+  # condition below then checks that all the others are off too.
   - platform: state
     entity_id: !input pump_indicator
     to: "off"
@@ -69,9 +84,8 @@ action:
                 conditions:
                   - condition: trigger
                     id: started
-                  - condition: state
-                    entity_id: !input pump_indicator
-                    state: "on"
+                  - condition: template
+                    value_template: "{{ 'on' in indicator_states }}"
         sequence:
           - service: homeassistant.turn_on
             target:
@@ -79,6 +93,10 @@ action:
       - conditions:
           - condition: trigger
             id: pump_off
+          - condition: template
+            value_template: >-
+              {{ indicator_states | length > 0
+                 and indicator_states | select('ne', 'off') | list | length == 0 }}
         sequence:
           - service: homeassistant.turn_off
             target:
