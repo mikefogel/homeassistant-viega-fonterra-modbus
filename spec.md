@@ -1011,6 +1011,10 @@ Packaging and release:
   for development files; any new development-only path must be added to
   `.gitattributes`.
 - The test suite must pass before a release is tagged.
+- `CHANGELOG.md` (Keep a Changelog format) lists every user-visible change
+  under `[Unreleased]` as it is committed; a release renames that section to
+  the new version and date, and its text is used as the GitHub release
+  notes.
 
 ## 12a. Test coverage and diagnostics export
 
