@@ -6,48 +6,55 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Added
+## [1.2.0] - 2026-10-10
 
-- Entries under Settings → Repairs when a module has not responded for
-  30 minutes and when the base unit reports an error code, with the
-  meaning of each code translated; they clear themselves.
-- Importable blueprint that switches a separately wired circulation pump
-  from the circulation-pump indicator, with a run-on time.
-- README guide: daily heating time per room with built-in helpers and a
-  bar chart of the daily totals.
-- Automatic checks on GitHub for every change (tests, Home Assistant's
-  hassfest validator, HACS validation) and a weekly test against the
-  newest Home Assistant version.
+### ⚠️ Please check after updating
 
-### Changed
+- 🔑 The room diagnostic sensor's state and the base-unit error-code
+  sensor's `description` attribute now hold a key such as `no_error` or
+  `error_22` (shown translated in the UI). Automations or templates that
+  compared the old English text, e.g. `state == "No error"`, need to use the
+  key instead. States saved by older versions are converted automatically.
 
-- The room diagnostic sensor and the base-unit error-code description are
-  now shown in your language ("Kein Fehler" instead of "No error"). The
-  diagnostic sensor's state and the `description` attribute now hold a key
-  such as `no_error` or `error_22`; automations that compared the old
-  English text need to use the key instead. States saved by older versions
-  are converted automatically.
-- The power level's unit is translated ("Stufe").
-- Actuator positions show a valve icon, the pump indicator a pump icon, and
-  the room diagnostic a check mark or warning icon.
+### ✨ Added
 
-- Each module is now polled by one central update cycle at its polling
-  interval, which updates all of its entities together, instead of every
-  entity being polled by Home Assistant every 5 seconds. Same values, fewer
-  wake-ups, and a change you make is read back from the device right away
-  instead of after a full interval.
+- 🛠️ **Repairs notifications** under Settings → Repairs when a module has
+  not responded for 30 minutes or the base unit reports an error code, with
+  the meaning of each code translated. They clear themselves.
+- 🔁 **Circulation-pump blueprint**, importable with one click: switches a
+  separately wired pump from the circulation-pump indicator, with a run-on
+  time.
+- ⏱️ **Heating time per room**: README guide for daily heating time with
+  built-in helpers, shown as a bar chart per day.
+- 🎨 **Icons**: actuator positions show a valve, the pump indicator a pump,
+  the room diagnostic a check mark or warning symbol.
+- 🤖 **Automatic checks** on GitHub for every change (tests, Home
+  Assistant's hassfest validator, HACS validation) and a weekly test
+  against the newest Home Assistant version.
 
-### Fixed
+### 🔄 Changed
 
-- Error messages in the setup and options dialogs (e.g. "Unable to connect
-  to the Viega module") were shown as raw keys such as `cannot_connect`
-  instead of translated text.
-- `manifest.json` code owner and the missing UI-only `CONFIG_SCHEMA`, both
-  reported by Home Assistant's hassfest validator.
+- ⚡ **One polling cycle per module**: all of a module's values are read
+  once per polling interval and update every entity together, instead of
+  every entity being polled by Home Assistant every 5 seconds. A change you
+  make is read back from the device right away instead of after a full
+  interval.
+- 🌍 **More translations**: the room diagnostic and the error-code
+  description appear in your language ("Kein Fehler" instead of "No
+  error"), and the power level's unit is translated ("Stufe").
+
+### 🐛 Fixed
+
+- 💬 Error messages in the setup and options dialogs (e.g. "Unable to
+  connect to the Viega module") were shown as raw keys such as
+  `cannot_connect` instead of translated text.
+- 🧹 `manifest.json` code owner, a missing UI-only `CONFIG_SCHEMA`, and
+  `hacs.json` keys the current HACS no longer accepts, found by the new
+  automatic checks.
 
 ## [1.1.0] - 2026-10-09
 
-### Added
+### ✨ Added
 
 - Each room's climate entity shows what the room is doing right now —
   heating, cooling, idle, or off — on the built-in thermostat and tile cards,
@@ -64,7 +71,7 @@ and versions follow [Semantic Versioning](https://semver.org/).
   module, and for a failed rediscovery.
 - Tile-card dashboard example in the README.
 
-### Changed
+### 🔄 Changed
 
 - The preset (profile mode) control is only offered while the module is
   heating, matching the device, which supports profile mode only in heating
@@ -72,7 +79,7 @@ and versions follow [Semantic Versioning](https://semver.org/).
 - A read that fails because the connection broke is retried once on a new
   connection; writes are never repeated automatically.
 
-### Fixed
+### 🐛 Fixed
 
 - After a connection loss every request failed until the integration was
   reloaded by hand, while all values silently froze.
@@ -85,7 +92,7 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [1.0.1] - 2026-09-29
 
-### Fixed
+### 🐛 Fixed
 
 - HACS could not detect the integration because compiled `__pycache__`
   folders were committed; they are removed and ignored.
@@ -106,7 +113,8 @@ First release.
   configuration diagnostics.
 - German and English translations.
 
-[Unreleased]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/releases/tag/v1.0.0
