@@ -1,5 +1,9 @@
 # Viega Fonterra Smart Control for Home Assistant
 
+[![Tests](https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/actions/workflows/tests.yml/badge.svg)](https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/actions/workflows/tests.yml)
+[![Validate](https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/actions/workflows/validate.yml/badge.svg)](https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/actions/workflows/validate.yml)
+[![Latest Home Assistant](https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/actions/workflows/latest-home-assistant.yml/badge.svg)](https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/actions/workflows/latest-home-assistant.yml)
+
 > **⚠️ Disclaimer — please read**
 >
 > This is an **independent, community-developed, unofficial** Home Assistant integration.
@@ -28,11 +32,14 @@ This custom integration connects one or more Viega Fonterra Smart Control system
 - What each room is doing right now — heating, cooling, idle, or off — shown on the built-in thermostat and tile cards and as colored bands in the history graph
 - Room power-level Number entities
 - Flow temperature (one shared entity per module), per-actuator return temperature, and per-actuator position (open/closed)
-- Derived, debounced circulation-pump indicator for driving your own pump automation, plus derived actuator statistics (open count, transition count, cumulative open time)
+- Derived, debounced circulation-pump indicator for driving your own pump automation, with a ready-made, one-click importable blueprint (including a run-on time), plus derived actuator statistics (open count, transition count, cumulative open time)
+- Guide for daily heating time per room with Home Assistant's built-in helpers, as a bar chart per day
 - WLAN module and base-unit identity diagnostics
 - Base-unit error code and error status
 - Automatic reconnection after a lost connection, with connection-health diagnostics and an on-demand rediscovery action for an already-running module
-- Clear, translated error messages when a change can't be applied
+- Notifications under Settings → Repairs when a module is unreachable for 30 minutes or the base unit reports an error code, with the code's meaning translated
+- Clear, translated error messages when a change can't be applied, in the setup dialogs and for every action
+- One polling cycle per module that updates all of its entities together, with adjacent registers read in a single request
 - A multi-module overview for installations with more than one Viega module
 - Localized (German/English) entity names and thermostat preset labels
 - Downloadable configuration diagnostics (JSON) for checking an installation against the device
@@ -81,7 +88,7 @@ The setup form accepts:
 | Host | IPv4 address or resolvable hostname of the WLAN module/base unit | `192.168.0.188` |
 | Port | Modbus TCP port | `502` |
 | Device name | The Home Assistant device name for this module | `Fonterra` |
-| Polling interval | Seconds between Modbus reads per entity | `30` (range `5`–`300`) |
+| Polling interval | Seconds between two polling cycles of the module (all its values are read once per cycle) | `30` (range `5`–`300`) |
 | Modbus timeout | Seconds to wait for a Modbus response | `5` (range `1`–`30`) |
 
 The integration validates the connection before creating the entry. To add another Fonterra module (a second physical base unit), repeat the setup flow with that module's own host/port/device name — each module gets its own connection, device, polling configuration, and entities, and one module's failure or reload never affects another.
@@ -227,11 +234,13 @@ Beyond the automatic discovery that runs on every setup (see "Setup" above), you
 
 ### Write verification
 
-After writing a target temperature, operating mode, profile mode, or power level, the integration checks the device's own next valid read of that register against what was written. If the device reports something else (a rejected or overridden write), the displayed value is reconciled to what the device actually reports and a warning is logged — the device's value is always authoritative.
+After writing a target temperature, operating mode, profile mode, or power level, the integration starts a polling cycle right away and checks the device's own next valid read of that register against what was written. If the device reports something else (a rejected or overridden write), the displayed value is reconciled to what the device actually reports and a warning is logged — the device's value is always authoritative.
 
-### Fewer Modbus requests per poll
+### One polling cycle per module
 
-When several rooms' registers happen to be adjacent on the device (e.g. two rooms' power-level/target-temperature registers, or two actuators' position/return-temperature registers), the integration combines them into a single Modbus request instead of one request per register. Input and holding registers are never combined with each other, and only registers actually read every cycle are ever grouped this way — an undocumented gap between two registers is never bridged. This is purely a transport-level optimization: polling intervals, availability, and scaling are unaffected, and a failed combined request is retried the same way a failed single-register request always was.
+Each module is read in one polling cycle per polling interval: the integration reads every value the module's entities need and then updates all of them together — entities are not polled by Home Assistant one by one. After you change a value (temperature, mode, preset, power level) the next cycle runs right away, so the device's own value shows up within seconds instead of after a full interval.
+
+Within a cycle, registers that are adjacent on the device (e.g. two rooms' power-level/target-temperature registers, or one actuator's position/return-temperature registers) are read with a single Modbus request. Input and holding registers are never combined, and an undocumented gap between two registers is never bridged. If one of these requests fails, only its values are skipped for that cycle: the affected entities keep their last valid values and stay available, and the next cycle tries again.
 
 ### Extended diagnostics snapshot
 
@@ -551,6 +560,14 @@ This means automatic discovery has never succeeded for this module (see "Setup" 
 
 A register value of `-99` means the device itself considers the value unavailable (for example, no room thermostat is paired for that room). The integration keeps the previous valid value and exposes the communication problem through the room's diagnostic entity. Cross-check the affected room/actuator's register addresses using "Verifying your configuration" above.
 
+### A Repairs entry says the module is not reachable
+
+The module has not answered for 30 minutes. The integration keeps reconnecting on its own (see "Automatic reconnection"); all values stay at their last known state in the meantime. Check that the base unit and its WLAN module have power and network, and that nothing else (e.g. a router change) moved the module to a different IP address — if it did, update the host under **Configure**. The entry disappears by itself once the module answers again.
+
+### The heating bands in the history graph look striped
+
+Expected: Fonterra actuators often open and close every few minutes while regulating, and a room's activity (heating/idle) follows them directly. The striping shows when water actually flows. Whether to smooth this is an open item (see `spec.md` §17).
+
 ### Changing the mode/preset in one room changes it everywhere
 
 Expected — see "Entities" above: operating mode and profile mode are one shared register per base unit, not per room.
@@ -558,6 +575,10 @@ Expected — see "Entities" above: operating mode and profile mode are one share
 ### A module won't delete, or the integration entry's "Delete" seems to hang
 
 Removing a module always succeeds, even when its device is offline or unreachable — the socket close is time-bounded to the module's configured Modbus timeout. The device can also be removed from its own device page (Settings → Devices & services → Devices → the module), not only from the integration entry.
+
+### The preset control is missing
+
+Expected in cooling mode and in standby: the device only offers profile mode (Manual/Profile/Setback) while heating, so the preset control is only shown in heating mode.
 
 ### Preset labels ("Manuell"/"Profil"/"Absenkbetrieb") show in English
 
@@ -586,10 +607,35 @@ This is a community project maintained on a best-effort basis. Issues and pull r
 
 ### Running tests
 
+The pinned test environment needs Python 3.12:
+
 ```bash
-pip install -r requirements-test.txt
-pytest tests/
+python3.12 -m venv .venv
+.venv/bin/pip install -r requirements-test.txt
+.venv/bin/python -m pytest
 ```
+
+To check against the newest Home Assistant as well (needs the Python version that release requires, currently 3.14):
+
+```bash
+python3.14 -m venv .venv-latest
+.venv-latest/bin/pip install pytest-homeassistant-custom-component
+.venv-latest/bin/python -m pytest
+```
+
+Home Assistant's own validator (hassfest) runs locally with Docker or Podman:
+
+```bash
+docker run --rm -v "$PWD":/github/workspace:ro ghcr.io/home-assistant/hassfest
+```
+
+### Continuous integration
+
+GitHub Actions run on every push to `main` and every pull request: the test suite (`tests.yml`), hassfest and the HACS validation (`validate.yml`). Every Monday the test suite also runs against the newest Home Assistant release (`latest-home-assistant.yml`) as an early warning; a failure there means the pinned test version should be updated, not that the current release is broken. The badges at the top of this file show the current status.
+
+### Releases
+
+Every user-visible change is listed under "Unreleased" in [CHANGELOG.md](CHANGELOG.md). A release renames that section to the new version, sets the same version in `manifest.json` (e.g. `1.2.0`) and the Git tag (`v1.2.0`), and uses the section as the GitHub release notes. Tests, CI workflows and other development files are excluded from release downloads via `.gitattributes`; HACS only installs `custom_components/viega_fonterra_modbus/`.
 
 ### Project structure
 
@@ -615,8 +661,16 @@ custom_components/viega_fonterra_modbus/
 ├── entity_tracking.py    # Per-room entity bookkeeping used by rediscovery
 ├── device.py             # Shared device_info builder
 ├── const.py              # Constants and defaults
+├── translations/         # German and English texts (entities, dialogs, errors, repairs)
 ├── services.yaml         # Service definitions (rediscover, overview)
 └── manifest.json         # Integration metadata (domain, version, ...)
+
+blueprints/automation/viega_fonterra_modbus/
+└── circulation_pump.yaml # Circulation-pump blueprint
+tests/                    # Test suite (pytest-homeassistant-custom-component)
+.github/workflows/        # CI: tests, hassfest/HACS validation, weekly latest-HA run
+spec.md                   # Binding specification
+CHANGELOG.md              # User-visible changes per version
 ```
 
 ## Icon / branding
@@ -626,6 +680,7 @@ custom_components/viega_fonterra_modbus/
 ## Documentation
 
 - [System specification](spec.md)
+- [Changelog](CHANGELOG.md)
 - [Register address map](RegisterMap.md)
 - [Viega Fonterra Smart Control manual](https://www.viega.de/content/dam/viega-assets/viega-worldwide-assets/products/surface-tempering/fonterra-smart-control/technical-documents/instructions-for-use/Fonterra%20Smart%20Control-de-DE.pdf) (hosted by Viega, see "Third-party documentation" below)
 - [Home Assistant documentation](https://www.home-assistant.io/)
