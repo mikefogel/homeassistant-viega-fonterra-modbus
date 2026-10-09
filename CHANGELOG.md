@@ -11,6 +11,8 @@ and versions follow [Semantic Versioning](https://semver.org/).
 - Entries under Settings → Repairs when a module has not responded for
   30 minutes and when the base unit reports an error code, with the
   meaning of each code translated; they clear themselves.
+- Importable blueprint that switches a separately wired circulation pump
+  from the circulation-pump indicator, with a run-on time.
 - Automatic checks on GitHub for every change (tests, Home Assistant's
   hassfest validator, HACS validation) and a weekly test against the
   newest Home Assistant version.

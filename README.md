@@ -169,7 +169,15 @@ The Fonterra register map uses signed 16-bit input values. Temperatures are scal
 
 Every actuator's raw open/closed reading is debounced before it can affect this entity: a reading only counts once the actuator's position register has returned the *same* value on 3 consecutive reads, so a single noisy or transitional reading cannot flip the pump. A failed read or a `-99` value is skipped — it neither advances nor resets that actuator's debounce counter.
 
-This entity writes nothing back to the device and does not control anything on the Fonterra system. It is meant to drive your own automation for a circulation pump that is wired and switched independently (e.g. via a smart relay):
+This entity writes nothing back to the device and does not control anything on the Fonterra system. It is meant to drive your own automation for a circulation pump that is wired and switched independently (e.g. via a smart relay).
+
+The easiest way is the ready-made blueprint — import it, pick the indicator and your pump switch, and set a run-on time (default 5 minutes):
+
+[![Open your Home Assistant instance and show the blueprint import dialog with the circulation-pump blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fmikefogel%2Fhomeassistant-viega-fonterra-modbus%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fviega_fonterra_modbus%2Fcirculation_pump.yaml)
+
+The pump turns on as soon as any actuator opens and off once all actuators have stayed closed for the run-on time; if an actuator opens again in between, the pump simply keeps running. After a Home Assistant restart with open actuators it is switched on right away, and an unavailable indicator leaves the pump as it is. ([Blueprint source](blueprints/automation/viega_fonterra_modbus/circulation_pump.yaml))
+
+If you prefer a plain automation without run-on time:
 
 ```yaml
 automation:

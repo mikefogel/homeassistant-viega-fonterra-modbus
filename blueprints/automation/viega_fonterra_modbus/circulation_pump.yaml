@@ -1,0 +1,85 @@
+blueprint:
+  name: Viega Fonterra – circulation pump
+  description: >-
+    Switches a separately wired circulation pump from the Viega Fonterra
+    circulation-pump indicator: on as soon as any actuator of the module
+    opens, off once all actuators have been closed for the run-on time. If an
+    actuator opens again during the run-on time, the pump simply stays on.
+    Unavailable or unknown indicator states leave the pump as it is.
+  domain: automation
+  source_url: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/blob/main/blueprints/automation/viega_fonterra_modbus/circulation_pump.yaml
+  homeassistant:
+    min_version: "2024.6.0"
+  input:
+    pump_indicator:
+      name: Circulation-pump indicator
+      description: The "Circulation pump" binary sensor of your Viega Fonterra module.
+      selector:
+        entity:
+          filter:
+            - integration: viega_fonterra_modbus
+              domain: binary_sensor
+    pump_switch:
+      name: Pump switch
+      description: The switch (e.g. a smart relay) that powers the circulation pump.
+      selector:
+        entity:
+          filter:
+            - domain:
+                - switch
+                - light
+                - input_boolean
+    run_on_time:
+      name: Run-on time
+      description: >-
+        How long the pump keeps running after the last actuator has closed.
+        Set to 0 to switch it off immediately.
+      default:
+        minutes: 5
+      selector:
+        duration: {}
+
+mode: queued
+
+trigger:
+  - platform: state
+    entity_id: !input pump_indicator
+    to: "on"
+    id: pump_on
+  # Only fires once the indicator has stayed "off" for the whole run-on time;
+  # turning "on" again in between cancels it.
+  - platform: state
+    entity_id: !input pump_indicator
+    to: "off"
+    for: !input run_on_time
+    id: pump_off
+  # Catch up after a Home Assistant restart while actuators are open.
+  - platform: homeassistant
+    event: start
+    id: started
+
+action:
+  - choose:
+      - conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: pump_on
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id: started
+                  - condition: state
+                    entity_id: !input pump_indicator
+                    state: "on"
+        sequence:
+          - service: homeassistant.turn_on
+            target:
+              entity_id: !input pump_switch
+      - conditions:
+          - condition: trigger
+            id: pump_off
+        sequence:
+          - service: homeassistant.turn_off
+            target:
+              entity_id: !input pump_switch
