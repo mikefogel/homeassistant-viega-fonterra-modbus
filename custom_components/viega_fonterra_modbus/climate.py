@@ -5,7 +5,11 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 
-from homeassistant.components.climate import ClimateEntity, ClimateEntityFeature
+from homeassistant.components.climate import (
+    ClimateEntity,
+    ClimateEntityFeature,
+    HVACAction,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTemperature
 from homeassistant.core import HomeAssistant
@@ -63,6 +67,8 @@ class ViegaRoomClimateEntity(ClimateEntity, RestoreEntity):
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_hvac_modes = ["off", "heat", "cool"]
     _attr_translation_key = "room"
+    # TURN_ON/TURN_OFF are declared explicitly below (spec.md 5a.1b).
+    _enable_turn_on_off_backwards_compatibility = False
 
     def __init__(
         self,
@@ -114,6 +120,30 @@ class ViegaRoomClimateEntity(ClimateEntity, RestoreEntity):
                 "error_code_register", BASE_UNIT_REGISTERS["error_code"]
             ),
         }
+        # Position register of every actuator of the room, not only the
+        # primary one: hvac_action reports heating/cooling as soon as any of
+        # them is open (spec.md 5a.2). Read through the same shared poll as
+        # every other register; the primary one is also `self._registers`'
+        # "actuator_position".
+        self._actuator_position_registers: dict[int, int] = {}
+        for actor_number in actor_numbers:
+            try:
+                address = actor_registers(int(actor_number)).get("position")
+            except (TypeError, ValueError):
+                continue
+            if address is not None:
+                self._actuator_position_registers[int(actor_number)] = address
+        if self._registers["actuator_position"] is not None:
+            # The primary actuator (or, without any actuator, the room's own
+            # override) uses the resolved register, so a per-room
+            # `actuator_position_register` override wins over the default.
+            primary = int(actor_numbers[0]) if actor_numbers else 0
+            self._actuator_position_registers[primary] = int(
+                self._registers["actuator_position"]
+            )
+        self._actuator_positions: dict[int, int | None] = {
+            actor_number: None for actor_number in self._actuator_position_registers
+        }
         self.room_number = room_number or room_config.get("room_id", room_id)
         self._power_level: int | None = None
         self._flow_temperature: float | None = None
@@ -121,6 +151,9 @@ class ViegaRoomClimateEntity(ClimateEntity, RestoreEntity):
         self._actuator_position: int | None = None
         self._base_error_code: int | None = None
         self._operating_mode = 1
+        # Mode `turn_on` restores (spec.md 5a.1b): the last non-off operating
+        # mode read from or written to the device.
+        self._last_active_hvac_mode = "heat"
         self._profile_mode = 0
         self.last_error_message = ""
         # Read-after-write verification (spec.md 16c): after a successful
@@ -135,8 +168,14 @@ class ViegaRoomClimateEntity(ClimateEntity, RestoreEntity):
         supported_features = ClimateEntityFeature(0)
         if self._registers["target_temperature"] is not None:
             supported_features |= ClimateEntityFeature.TARGET_TEMPERATURE
+        if self._registers["operating_mode"] is not None:
+            supported_features |= (
+                ClimateEntityFeature.TURN_ON | ClimateEntityFeature.TURN_OFF
+            )
         if self._registers["profile_mode"] is not None:
             supported_features |= ClimateEntityFeature.PRESET_MODE
+        # Everything the registers allow; `supported_features` additionally
+        # hides the preset control outside heating mode (spec.md 5a.1a).
         self._attr_supported_features = supported_features
 
     async def async_added_to_hass(self) -> None:
@@ -160,6 +199,10 @@ class ViegaRoomClimateEntity(ClimateEntity, RestoreEntity):
             self._operating_mode = {"off": 0, "heat": 1, "cool": 2}[last_state.state]
 
         attributes = last_state.attributes
+        if attributes.get("last_active_hvac_mode") in {"heat", "cool"}:
+            self._last_active_hvac_mode = attributes["last_active_hvac_mode"]
+        elif last_state.state in {"heat", "cool"}:
+            self._last_active_hvac_mode = last_state.state
         if attributes.get("current_temperature") is not None:
             self._attr_current_temperature = float(attributes["current_temperature"])
         if attributes.get("temperature") is not None:
@@ -174,12 +217,59 @@ class ViegaRoomClimateEntity(ClimateEntity, RestoreEntity):
             self._return_temperature = float(attributes["return_temperature"])
         if attributes.get("actuator_position") is not None:
             self._actuator_position = attributes["actuator_position"]
+        restored_positions = attributes.get("actuator_positions")
+        if isinstance(restored_positions, dict):
+            # State attributes round-trip through JSON, so the keys are strings.
+            for actor_key, position in restored_positions.items():
+                try:
+                    actor_number = int(actor_key)
+                except (TypeError, ValueError):
+                    continue
+                if actor_number in self._actuator_positions and position is not None:
+                    self._actuator_positions[actor_number] = position
+        primary = next(iter(self._actuator_positions), None)
+        if (
+            primary is not None
+            and self._actuator_positions[primary] is None
+            and self._actuator_position is not None
+        ):
+            self._actuator_positions[primary] = self._actuator_position
         if attributes.get("base_unit_error_code") is not None:
             self._base_error_code = attributes["base_unit_error_code"]
 
     @property
     def hvac_mode(self) -> str:
         return {0: "off", 1: "heat", 2: "cool"}.get(self._operating_mode, "off")
+
+    @property
+    def hvac_action(self) -> HVACAction | None:
+        """What the room is doing right now (spec.md 5a.2).
+
+        Derived from the module's operating mode and the positions of all
+        of the room's actuators; `None` while the operating mode is unknown
+        or no actuator position has been read yet.
+        """
+        if self._operating_mode == 0:
+            return HVACAction.OFF
+        if self._operating_mode not in (1, 2):
+            return None
+        positions = [
+            position for position in self._actuator_positions.values() if position is not None
+        ]
+        if not positions:
+            return None
+        if any(position == 1 for position in positions):
+            return HVACAction.HEATING if self._operating_mode == 1 else HVACAction.COOLING
+        return HVACAction.IDLE
+
+    @property
+    def supported_features(self) -> ClimateEntityFeature:
+        """Hide the preset control outside heating mode: the device only
+        offers profile mode while heating (spec.md 5a.1a)."""
+        features = self._attr_supported_features
+        if self.hvac_mode != "heat":
+            features &= ~ClimateEntityFeature.PRESET_MODE
+        return features
 
     @property
     def min_temp(self) -> float:
@@ -212,7 +302,12 @@ class ViegaRoomClimateEntity(ClimateEntity, RestoreEntity):
             "flow_temperature": self._flow_temperature,
             "return_temperature": self._return_temperature,
             "actuator_position": self._actuator_position,
+            "actuator_positions": {
+                str(actor_number): position
+                for actor_number, position in self._actuator_positions.items()
+            },
             "base_unit_error_code": self._base_error_code,
+            "last_active_hvac_mode": self._last_active_hvac_mode,
         }
 
     async def async_update(self) -> None:
@@ -249,16 +344,29 @@ class ViegaRoomClimateEntity(ClimateEntity, RestoreEntity):
             values.get("actuator_position"), self._actuator_position
         )
         self._base_error_code = self._valid(values.get("error_code"), self._base_error_code)
+        for actor_number in self._actuator_positions:
+            self._actuator_positions[actor_number] = self._valid(
+                values.get(f"actuator_position_{actor_number}"),
+                self._actuator_positions[actor_number],
+            )
         operating_mode = self._valid(values.get("operating_mode"), None)
         if operating_mode is not None:
             self._operating_mode = operating_mode
+            self._remember_active_mode()
         profile_mode = self._valid(values.get("profile_mode"), None)
         if profile_mode is not None:
             self._profile_mode = profile_mode
 
     async def _read_values(self, client) -> dict[str, int | None]:
         values: dict[str, int | None] = {}
-        for name, address in self._registers.items():
+        registers = {
+            **self._registers,
+            **{
+                f"actuator_position_{actor_number}": address
+                for actor_number, address in self._actuator_position_registers.items()
+            },
+        }
+        for name, address in registers.items():
             if address is None:
                 continue
             try:
@@ -373,12 +481,33 @@ class ViegaRoomClimateEntity(ClimateEntity, RestoreEntity):
         address = int(self._registers["operating_mode"])
         await async_write_register(self.hass, self._entry_id, address, register_value)
         self._operating_mode = register_value
+        self._remember_active_mode()
         self._record_pending_write("operating_mode", address, register_value)
+
+    def _remember_active_mode(self) -> None:
+        if self.hvac_mode in ("heat", "cool"):
+            self._last_active_hvac_mode = self.hvac_mode
+
+    async def async_turn_off(self) -> None:
+        """Put the module into standby (spec.md 5a.1b); frost protection
+        stays active. Like every operating-mode change, this affects every
+        room of the module."""
+        if self.hvac_mode == "off":
+            return
+        await self.async_set_hvac_mode("off")
+
+    async def async_turn_on(self) -> None:
+        """Restore the last active operating mode (heat or cool)."""
+        if self.hvac_mode != "off":
+            return
+        await self.async_set_hvac_mode(self._last_active_hvac_mode)
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
         """Write the profile mode to holding register 40002."""
         if preset_mode not in self.preset_modes:
             raise invalid_request("unsupported_preset_mode", mode=preset_mode)
+        if self.hvac_mode != "heat":
+            raise invalid_request("preset_requires_heating", mode=preset_mode)
         value = self.preset_modes.index(preset_mode)
         address = int(self._registers["profile_mode"])
         await async_write_register(self.hass, self._entry_id, address, value)

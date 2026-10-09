@@ -184,6 +184,9 @@
     },
     "rediscover_failed": {
       "message": "Die Neuerkennung des Viega-Moduls {device} ist fehlgeschlagen: {error}. Die bisherige Raumkonfiguration bleibt erhalten."
+    },
+    "preset_requires_heating": {
+      "message": "Der Profilmodus „{mode}“ kann nur im Heizbetrieb des Viega-Moduls gewählt werden."
     }
   }
 }

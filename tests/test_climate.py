@@ -316,7 +316,9 @@ def test_extra_state_attributes_exposes_room_and_controller_values():
         "flow_temperature": 35.2,
         "return_temperature": 28.1,
         "actuator_position": 60,
+        "actuator_positions": {},
         "base_unit_error_code": 0,
+        "last_active_hvac_mode": "heat",
     }
 
 
@@ -385,7 +387,9 @@ def test_restores_hvac_mode_preset_mode_and_extra_attributes_on_add():
         "flow_temperature": 35.2,
         "return_temperature": 28.1,
         "actuator_position": 1,
+        "actuator_positions": {},
         "base_unit_error_code": 0,
+        "last_active_hvac_mode": "heat",
     }
 
 

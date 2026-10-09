@@ -184,6 +184,9 @@
     },
     "rediscover_failed": {
       "message": "Rediscovery of Viega module {device} failed: {error}. The previous room configuration is kept."
+    },
+    "preset_requires_heating": {
+      "message": "Profile mode \"{mode}\" can only be selected while the Viega module is in heating mode."
     }
   }
 }

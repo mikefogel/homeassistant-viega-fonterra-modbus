@@ -24,13 +24,15 @@ This custom integration connects one or more Viega Fonterra Smart Control system
 - Editable module and room names
 - Room climate entities with current and target temperature
 - Target-temperature writes through documented holding registers, with read-after-write verification against the device's own next reading
-- Operating mode and profile mode controls
+- Operating mode and profile mode controls, plus on/off (standby with frost protection)
+- What each room is doing right now — heating, cooling, idle, or off — shown on the built-in thermostat and tile cards and as colored bands in the history graph
 - Room power-level Number entities
 - Flow temperature (one shared entity per module), per-actuator return temperature, and per-actuator position (open/closed)
 - Derived, debounced circulation-pump indicator for driving your own pump automation, plus derived actuator statistics (open count, transition count, cumulative open time)
 - WLAN module and base-unit identity diagnostics
 - Base-unit error code and error status
-- Connection-health diagnostics and an on-demand rediscovery action for an already-running module
+- Automatic reconnection after a lost connection, with connection-health diagnostics and an on-demand rediscovery action for an already-running module
+- Clear, translated error messages when a change can't be applied
 - A multi-module overview for installations with more than one Viega module
 - Localized (German/English) entity names and thermostat preset labels
 - Downloadable configuration diagnostics (JSON) for checking an installation against the device
@@ -124,7 +126,7 @@ Depending on the discovered rooms/actuators and available registers, the integra
 
 | Platform | Example entity ID | What it shows |
 | --- | --- | --- |
-| Climate | `climate.fonterra_wohnzimmer` | Current/target temperature, heating/cooling mode, profile mode |
+| Climate | `climate.fonterra_wohnzimmer` | Current/target temperature, heating/cooling mode, on/off, profile mode, current activity (heating/cooling/idle/off) |
 | Number | `number.fonterra_wohnzimmer_power_level` | Room actuator power level (`0`–`10`) |
 | Sensor | `sensor.fonterra_flow_temperature` | Base-unit flow temperature (one entity per module) |
 | Sensor | `sensor.fonterra_wohnzimmer_actuator_1_return_temperature` | One actuator's return temperature |
@@ -134,14 +136,26 @@ Depending on the discovered rooms/actuators and available registers, the integra
 | Binary sensor | `binary_sensor.fonterra_base_unit_error` | On when the base-unit error code is non-zero |
 | Sensor | `sensor.fonterra_wohnzimmer_diagnostic` | Textual communication status for that room |
 | Binary sensor | `binary_sensor.fonterra_circulation_pump` | Derived circulation-pump indicator (see below) |
-| Sensor | `sensor.fonterra_last_successful_modbus_response` and five more `..._health_*` sensors | Connection health metrics (see below) |
+| Sensor | `sensor.fonterra_last_successful_modbus_response` and seven more `..._health_*` sensors | Connection health metrics (see below) |
 | Sensor | `sensor.fonterra_currently_open_actuators` and three more `..._actuator_stats_*` sensors | Derived actuator statistics (see below) |
 
 Operating mode and profile mode are set on the base unit itself, not per
 room — changing them from any one room's thermostat card changes them for
 every room at once. This matches the physical device (there is only one
 Betriebsmodus/Profilmodus register for the whole installation) and is not a
-bug.
+bug. The same applies to the thermostat card's on/off control: turning one
+room off puts the whole module into standby (frost protection stays active),
+and turning it on restores the last active mode (heating or cooling).
+
+The profile mode (Manual/Profile/Setback) only exists in heating mode on the
+device, so the preset control is shown only while the module is heating.
+
+Each room's climate entity also reports what the room is doing right now:
+**Heating**/**Cooling** while at least one of the room's actuators is open,
+**Idle** while all of them are closed, and **Off** in standby. Home
+Assistant's built-in thermostat and tile cards show this as text and color,
+and the climate entity's history graph shows colored bands for the periods in
+which the room was actually heating or cooling.
 
 The Fonterra register map uses signed 16-bit input values. Temperatures are scaled according to the manual: room and target temperatures use tenths of a degree Celsius, as do flow and return temperatures. The integration converts these values before exposing them to Home Assistant.
 
@@ -417,6 +431,20 @@ views:
 Remember that `hvac_mode` and `preset_mode` are shared across every room of
 the same module (see "Entities" above): the thermostat card's mode buttons
 change them for the whole module, whichever room's card you use.
+
+For a more compact view with many rooms, the built-in **tile** card works
+just as well — it shows the room's current activity (heating/idle/...) and
+puts the controls directly on the tile:
+
+```yaml
+type: tile
+entity: climate.fonterra_living_room
+features:
+  - type: target-temperature
+  - type: climate-preset-modes
+    style: icons
+    preset_modes: [manual, profile, setback]
+```
 
 ## Verifying your configuration
 
