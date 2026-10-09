@@ -1,1459 +1,857 @@
 # Viega Fonterra Smart Control – system specification
 
+This document is binding for the integration: every behaviour described with
+"must" is a requirement, and changes to the integration are specified here
+before they are implemented. Section numbers are stable references used by
+code comments, tests, and commit messages ("spec.md 16c"); a section that is
+dropped keeps its number unused (§8, §14) instead of being reassigned.
+
 ## 1. Purpose
 
-This repository defines a Home Assistant custom integration for Viega Fonterra Smart Control installations. It must support local Modbus TCP communication, room-level discovery, multiple device installation, and a thermostat model for basic automation.
+A Home Assistant custom integration for Viega Fonterra Smart Control
+underfloor-heating installations. It talks to one or more Fonterra base units
+locally over Modbus TCP, discovers rooms and actuators from the device itself,
+and exposes each room as a native thermostat plus linked sensors, controls,
+and diagnostics, configured entirely through the Home Assistant UI.
 
 ## 2. Core objectives
 
-- Connect to one or more Viega Fonterra Smart Control devices over Modbus TCP.
-- Discover room-to-actor and room-to-sensor mappings when the first read is performed.
-- Represent room thermostats as entities.
-- Support multi-device configuration in a single installation.
-- Keep a modular register model aligned with the device documentation.
+- Connect to one or more Fonterra Smart Control modules over local Modbus TCP,
+  each configured, polled, and removed independently.
+- Discover the room/actuator topology and room names from the device's own
+  registers; no hand-typed mapping is needed.
+- Expose each room as a Climate entity (current/target temperature, operating
+  mode, profile mode, current activity) with linked entities for everything
+  Climate cannot show.
+- Keep the last valid value through invalid readings and outages, recover
+  from connection loss on its own, and report problems in the user's language.
+- Use only registers documented in the Viega manual or confirmed on real
+  hardware.
 
 ## 3. Device model
 
-Each device represents one Fonterra Smart Control controller and is identified by:
+A **module** is one Fonterra Smart Control base unit with its WLAN module, set
+up as one config entry and represented by one Home Assistant device (§7). It
+is configured by host, port, display name (`device_name`), polling interval,
+and Modbus timeout (§6b), and carries the identity values of §3a.
 
-- device_id
-- device_name (human-readable name, configurable by user)
-- wlan_module_serial_number
-- base_unit_serial_number
-- base_unit_name (human-readable name reported by the base unit)
-- base_unit_error_code
-- host
-- port
-- polling_interval (in seconds, default 30)
-- modbus_timeout (in seconds, default 5)
-- rooms
-- actors
-- sensors
+A module has up to 12 **rooms** and up to 12 **actuators** (heating circuits).
+A room has a room number (`1`-`12`), a display name read from the device
+(§4a), a measured temperature, a target temperature, a power level, an error
+register (§3b), and one or more actuators. Each actuator has a position
+(open/closed), a return temperature, and a "Raum-ID" register naming the room
+it serves.
 
-A room can map to:
+### 3a. Module and base-unit identity
 
-- room_id
-- room_name (human-readable name from device configuration)
-- actor_id
-- sensor_id
-- thermostat settings
-- target temperature
-- current temperature
+The integration reads and keeps the identity and status of the WLAN module and
+the base unit. These belong to the module's device and are independent of the
+user-editable `device_name`:
 
-## 3a. Module and base-unit identity
-
-The integration must read and retain the identity and status information of both
-the WLAN module and the Fonterra base unit. These values belong to the module's
-Home Assistant device and must not be confused with the user-editable device
-name:
-
-- WLAN module serial number
+- WLAN-module serial number
 - base-unit serial number
-- base-unit designation/name
-- base-unit error code
+- base-unit designation (name)
+- base-unit error code (§3b)
 
-The serial numbers and base-unit designation must be exposed as diagnostic
-read-only entities and as device diagnostics where Home Assistant supports
-those metadata fields. The base-unit error code must be exposed as a diagnostic
-sensor using the raw code and, when available, its human-readable description.
-The existing base-unit error indicator must derive its state from this code:
-an active non-zero code indicates an error, while the documented no-error value
-indicates normal operation.
+Serial numbers and the designation are exposed as read-only diagnostic sensors
+(and as device metadata where Home Assistant supports it). The error code is
+exposed as a diagnostic sensor with the raw code and a translated description
+(§5d), and drives the base-unit error binary sensor (`on` for any non-zero
+code).
 
-Identity values must be discovered during the first successful device read and
-refreshed according to the configured polling interval. The last valid value
-must be retained when a read returns `-99`, times out, or otherwise fails. A
-missing identity register must not prevent room, sensor, or thermostat entities
-from being created; it must instead be reported by the diagnostic status.
+Identity values are read at setup and refreshed by the regular polling cycle
+(§16i); no diagnostic entity polls on its own. A failed, timed-out, or `-99`
+read keeps the last valid value. A missing identity register never prevents
+room, sensor, or thermostat entities from being created.
 
-Diagnostic entities (identity, base-unit error, per-room diagnosis) must update
-through the same polling cycle as the room and Climate entities — no diagnostic
-entity may perform an additional, independent Modbus poll of its own. A
-successful poll distributes the newly read error code, identity values, and
-textual status to every entity of the config entry that needs them.
-
-The register map must define the address, encoding, and length for each serial
-number and text field. Serial numbers and names may span multiple registers.
-
-Text fields (serial numbers, base-unit name) are decoded as two ASCII
-characters per register using Big-Endian byte order within each register,
-with trailing NUL and space characters stripped. This encoding is confirmed
-against real hardware: decoding with the previously documented
-Little-Endian order scrambled every string by swapping the two characters
-within each register (e.g. "Bad" came back as "aBd" and "Dachgeschoss" as
-"aDhcegcsohss"). This encoding is normative and must be covered by fixtures
-containing normal text and padding. The same decoder must be used
-consistently by `ViegaBaseUnitIdentitySensor` and all future text-register
-entities.
+Text fields span several registers and are decoded as two ASCII characters per
+register in **big-endian** byte order within each register, with trailing NUL
+and space characters stripped (confirmed on hardware; little-endian swaps every
+character pair, e.g. "aBd" for "Bad"). The same decoder is used for every text
+register and is covered by fixtures with normal text and padding.
 
 ### 3b. Base-unit and room error codes
 
-The base-unit error code register (`error_code`, manual address `30024`) and
-each room's own error register (manual `30051`/`30053`/`...`/`30073`, one per
-room, §5b) are `0` when no error/warning is active (see §3a); any other value
-is active. A single code-to-description table (`BASE_UNIT_ERROR_CODES` in
-`registers.py`) maps known codes to human-readable text, since the two
-registers share one code space per the device manual's "Fehlercodes" table
-(page 94): codes `3`, `4`, `5`, `6`, `7`, `9`, `10` are base-unit-scoped
-faults/warnings, and codes `21`, `22`, `24` are room-scoped (thermostat
-connectivity/battery). A room's diagnostic text entity (§10) must read that
-room's own error register, not the shared base-unit one, so two different
-rooms' diagnostics do not always show identical text. Every code not in the
-table must render as `"Unknown error (code N)"` in logs and the diagnostics
-export. New codes must be appended to the table rather than guessed inline
-in the entity layer.
+The base-unit error register (manual `30024`) and each room's own error
+register (manual `30051`/`30053`/.../`30073`) share one code space (manual
+page 94, "Fehlercodes"): `0` means no error; `3`, `4`, `5`, `6`, `7`, `9`, `10`
+are base-unit faults/warnings; `21`, `22`, `24` are room-scoped (thermostat
+connection/battery). One table, `BASE_UNIT_ERROR_CODES` in `registers.py`, maps
+codes to English descriptions; `ERROR_CODE_WARNINGS` (`10`, `22`, `24`) marks the
+codes the manual describes as warnings. New codes are added to the table, never
+guessed in the entity layer. A room's diagnostic reads that room's own error
+register, not the base unit's.
 
-What the user sees for a code is translated (§5d): entities expose a stable
-key per code - `no_error` for `0`, `error_<code>` for every documented
-code, `unknown_error` for any other code (with the numeric code as an
-attribute), and `sensor_invalid` before a valid value has been read - and
-the text for each key lives in `translations/*.json`. The English table text
-is never shown as an entity state.
+The English descriptions are used only in logs and the diagnostics export (an
+unknown code renders as `"Unknown error (code N)"`). Entities expose a stable
+key instead, translated per §5d: `no_error` for `0`, `error_<code>` for every
+documented code, `unknown_error` for any other code (with the numeric code as
+an attribute), and `sensor_invalid` before a valid value has been read.
 
-## 4. Initial discovery requirement
+## 4. Room discovery
 
-On the first successful connection to a device, the system must resolve the
-room-to-actor association before sensor and thermostat entities are created.
-§4a defines the only supported discovery mechanism: reading the association
-directly from the device's own registers. An earlier version of this
-requirement instead described resolving an already-assembled, manually typed
-`{"rooms": {...}}` mapping dictionary — matching how rooms were once
-collected at setup time (§6b) before that was replaced by automatic
-discovery. That code path has been removed and must not be reintroduced as
-the primary discovery mechanism; a manually typed mapping remains only as
-the fallback §4a itself describes.
-
-The mapping must support non-1:1 relationships. One room may map to multiple actors and sensors. One actor may also participate in more than one room configuration, depending on the actual device topology.
-
-When a room maps to a list of actors, its Climate entity (§5) uses only the
-first actor as the primary control surface, matching "the primary control
-surface is the room's Climate entity" in §5a. Every additional actor in the
-list must still be exposed, as linked position and return-temperature
-sensors carrying that actor's own registers — it must not be silently
-dropped.
+On every setup, after connecting and before any room entity is created, the
+integration resolves the module's room/actuator topology from the device
+(§4a). The topology may be non-1:1: a room can be fed by several actuators.
+Every actuator of a room is exposed with its own position and
+return-temperature entities; none is dropped. The Climate entity uses the
+first actuator for its single-value attributes and all of them for
+`hvac_action` (§5a.2).
 
 ### 4a. Automatic discovery via the actuator Raum-ID register
 
-The device itself is the source of truth for the room mapping above; it must
-not be left to guesswork in a manually typed configuration field. Each of the
-up to 12 actuators reports its own current room assignment in a dedicated
-input register (manual `30252`/`30255`/`...`/`30285`, i.e. actuator base
-address `+2`, PDU per §5b): an `int16` in range `1`-`12` naming the room that
-actuator serves (device manual page 91, "Aktor N Raum ID"). Each room's
-display name is likewise stored on the device as a 24-character string
-register (manual `30074`/`30086`/`...`/`30206`, one set of 12 registers per
-room, spaced 12 registers apart — device manual page 90).
+The device is the source of truth for the topology:
 
-On every `async_setup_entry`, after connecting, the integration must read all
-12 actuators' position/return-temperature/Raum-ID registers (one 3-register
-read per actuator) and every reporting actuator's room's name register, and
-build the room mapping from that — actor-to-room association and room names
-both come from the device, not from user input. A manually configured room
-mapping (§6b) is used only as a fallback when the device can't be read for a
-given setup cycle (e.g. actuators temporarily unreachable); it must not
-silently override a successful live discovery, since a manual mapping can
-drift from the physical installation (an actuator moved to a different room,
-a room renamed on the base unit) with nothing to catch the mismatch.
+- Each of the 12 actuators reports the room it serves in its Raum-ID input
+  register (manual `30252`/`30255`/.../`30285`, actuator base address `+2`):
+  an `int16` in `1`-`12` (manual page 91).
+- Each room's display name is a 24-character text field of 12 registers
+  (manual `30074`/`30086`/.../`30206`, manual page 90), decoded per §3a.
 
-## 5. Room thermostat specification
+Discovery reads all 12 actuators' position/return-temperature/Raum-ID
+registers (one 3-register read each) and the name of every room that an
+actuator reports. A room no actuator reports is omitted; a room whose name
+cannot be read gets a generic `room_<n>` name; a failed read for one actuator
+or name does not abort discovery.
 
-Each room thermostat entity must expose:
+The discovered topology is stored in the config entry's options. A previously
+stored or manually edited mapping (§6a) is used **only** when live discovery
+returns nothing for this setup (e.g. actuators unreachable); it never
+overrides a successful discovery, because a stored mapping can drift from the
+physical installation unnoticed. Persisting the discovered topology must not
+trigger a reload of the entry it was written by (§12a).
 
- room_id
- current_temperature
- target_temperature
- device_class = "temperature"
+## 5. Room thermostat
 
-### 5a. Room thermostat capability matrix
+Each room is represented by one Climate entity – the room's primary control
+surface – plus linked entities on the same device for values Climate cannot
+show. Unique IDs are built from the config entry ID and the `room_id`, never
+from display names, so renaming a module or room never creates duplicate
+entities; this applies to every platform. All of a module's entities belong to
+that module's device (§7).
 
-The integration must expose the following room and controller information. The
-primary control surface is the room's Climate entity wherever Home Assistant's
-Climate model supports the value. Values that do not have a native Climate
-property must be exposed as linked entities belonging to the same Home
-Assistant device and carrying the same `room_id`.
+### 5a. Room capability matrix
 
-The room thermostat must use Home Assistant's native `ClimateEntity` presentation
-so it appears as a thermostat rather than as separate temperature sensors. The
-visual and behavioral model should follow the Daikin Onecta climate integration
-([reference implementation](https://github.com/jwillemsen/daikin_onecta/blob/master/custom_components/daikin_onecta/climate.py)):
-
-- The Climate entity is the single primary control surface for the room. Its
-  state must provide both `current_temperature` (Ist-Temperatur) and
-  `target_temperature` (Soll-Temperatur), in degrees Celsius.
-- The entity must set `temperature_unit`, `target_temperature_step`, `min_temp`,
-  and `max_temp` to the manual's documented values for a room setpoint (page 91):
-  `°C`, a `0.5`°C step, and a range of `5`-`30`°C in `heat`/`off` mode or
-  `16`-`30`°C in `cool` mode. These allow the standard Home Assistant thermostat
-  card to render the temperature control with the correct range and increment.
-  Unlike `target_temperature_register`/`power_level_register`/etc. (§5b), this
-  range/step/unit is not itself a per-room register value the device reports -
-  the manual documents one fixed setpoint range and step for every room, not a
-  separate one per room - so it is implemented as fixed, mode-dependent
-  constants directly on the Climate entity (`climate.py`'s `min_temp`/
-  `max_temp`/`target_temperature_step` properties and `_attr_temperature_unit`),
-  not as an additional field in `registers.py`'s per-room register mapping.
-  `async_set_temperature` validates a write against this same range (§5b).
-- `ClimateEntityFeature.TARGET_TEMPERATURE` must be advertised only when a
-  writable target-temperature holding register is configured and supported.
-  Read-only rooms must still expose the current and target values when available,
-  but must not show a non-functional temperature control.
-- `async_set_temperature` must accept the Home Assistant `temperature` service
-  field, convert Celsius to the register's declared scale, validate the declared
-  range, write the holding register, and update `target_temperature` only after
-  the Modbus write is acknowledged. A failed write must leave the previous target
-  value unchanged and be reported through the integration's normal diagnostics.
-- After a successful write, the entity may update the displayed target
-  optimistically, but the next read cycle must reconcile it with the device value.
-  The current temperature must always come from the room sensor and must never be
-  replaced with the requested target.
-- The entity must expose the normal Climate state (`hvac_mode`) and only advertise
-  additional features such as presets when their registers are actually
-  readable and writable. Unsupported controls must not be rendered as available
-  controls.
-- Use a stable unique ID based on the config entry and `room_id`; use the
-  configured room name as the display name and the module's configured device
-  information for device association. Renaming must not create a second
-  thermostat entity.
-
-| Requirement | Home Assistant representation | Behavior |
+| Requirement | Home Assistant representation | Behaviour |
 | --- | --- | --- |
-| Show current room temperature | Climate `current_temperature` | Read from the room sensor |
-| Show target temperature | Climate `target_temperature` | Read from the target register |
-| Change target temperature | Climate `climate.set_temperature` | Write to the target holding register |
-| Show output power level | Linked sensor, with optional Climate attribute | Read the actuator power-level register |
-| Change output power level | Linked Number entity | Write the actuator power-level holding register |
-| Show manifold flow temperature | Linked temperature sensor | Read the manifold flow register |
-| Show actuator return temperature | Linked temperature sensor | Read the actuator return register |
-| Show room name | Climate and linked entity names | Use the configured room name |
-| Show room number | Diagnostic/entity attribute and unique room metadata | Preserve the configured `room_id` or room number |
-| Show actuator position | Linked binary sensor (`open`/`closed`) | Read the actuator-position register |
-| Show whether the base unit has an error | Linked binary sensor or diagnostic sensor | `on`/error when any base-unit error is active |
-| Show which base-unit error exists | Linked diagnostic text sensor | Expose the error code and human-readable message |
-| Show operating mode | Climate `hvac_mode` where applicable | Read the active operating mode |
-| Change operating mode | Climate `set_hvac_mode` | Write the operating-mode holding register |
-| Show profile mode | Climate preset or linked Select entity | Read the active profile mode |
-| Change profile mode | Climate `set_preset_mode` or linked Select entity | Write the profile-mode holding register |
-| Show what the room is currently doing (heating/cooling/idle/off) | Climate `hvac_action` (§5a.2) | Derived from operating mode and actuator positions; read-only |
+| Current room temperature | Climate `current_temperature` | Read from the room's measured-value register |
+| Target temperature | Climate `target_temperature` | Read from the target holding register |
+| Change target temperature | `climate.set_temperature` | Write the target holding register |
+| Operating mode (heat/cool/standby) | Climate `hvac_mode` (§5a.1) | Shared base-unit holding register `40001` |
+| On/off | `climate.turn_on`/`turn_off` (§5a.1b) | Writes the operating mode |
+| Profile mode (manual/profile/setback) | Climate `preset_mode` (§5a.1a) | Shared base-unit holding register `40002` |
+| What the room is doing now | Climate `hvac_action` (§5a.2) | Derived, read-only |
+| Power level (Leistungsstufe, `0`-`10`) | Number entity, also a Climate attribute | Room holding register |
+| Flow temperature | One sensor per module, also a Climate attribute | Base-unit input register `30025` |
+| Actuator return temperature | One sensor per actuator | Actuator input register |
+| Actuator position | One binary sensor per actuator, device class `opening` | `0` = closed, `1` = open (not a percentage) |
+| Base-unit error active | Diagnostic binary sensor, device class `problem` | `on` for a non-zero code |
+| Which base-unit error | Diagnostic sensor: raw code + translated description | §3b |
+| Room error/warning | Room diagnostic enum sensor (§5d) | Room's own error register |
+| Room number | Climate attribute `room_id` | From the topology |
 
-The actuator-position register (manual `30250`/`30253`/`...`/`30283`, one per
-actuator, page 91) is `int16` with exactly two documented values - `0 =
-geschlossen` (closed) and `1 = offen` (open) - not a percentage; a prior
-version of this table incorrectly described it as one and must not be
-reintroduced. It is exposed as a binary sensor with device class `opening`
-(`on` = open), one per actuator.
+The Climate entity:
 
-The manifold flow-temperature register (manual `30025`, page 89) is measured
-once for the whole base unit, not per room. It must be exposed as a single
-linked sensor on the module's Home Assistant device, not duplicated as a
-separate per-room entity, even though every room's Climate entity may read
-the same register for its own `flow_temperature` attribute for convenience.
+- sets `°C`, a `0.5` °C step, and a range of `5`-`30` °C in `heat`/`off` or
+  `16`-`30` °C in `cool` mode (manual page 91). These are fixed, mode-dependent
+  properties of the entity, not per-room registers;
+- advertises `TARGET_TEMPERATURE` only when a writable target register exists.
+  A room without one still shows its current and target values, but no
+  control;
+- validates a requested temperature against that range before writing (an
+  invalid one raises a translated `ServiceValidationError`, §10a), writes the
+  value ×10, and updates `target_temperature` only after the write is
+  acknowledged; the next cycle reconciles it with the device (§16c);
+- never replaces `current_temperature` with the requested target;
+- advertises a feature only when its register is configured and writable; a
+  value that is readable but not writable is shown without a control;
+- exposes as attributes: `room_id`, `power_level`, `flow_temperature`,
+  `return_temperature` and `actuator_position` (first actuator),
+  `actuator_positions` (all actuators), `base_unit_error_code`, and
+  `last_active_hvac_mode` (§5a.1b).
+
+The flow temperature is measured once per base unit and has exactly one sensor
+per module, even though every Climate entity mirrors it as an attribute.
 
 ### 5a.1. Heating and cooling operation
 
-The thermostat must also model the room's heating/cooling operating function,
-not only display two temperature values. The standard Home Assistant Climate
-card must be able to show the current operating mode and, where the controller
-supports it, let the user switch between:
+Holding register `40001` (manual page 91) has exactly three values:
 
-- `HVACMode.HEAT` for heating,
-- `HVACMode.COOL` for cooling, and
-- `HVACMode.OFF` for standby/frost protection.
+| Climate mode | Raw value | Meaning |
+| --- | --- | --- |
+| `off` | `0` | Standby; frost protection stays active |
+| `heat` | `1` | Regulation in heating mode |
+| `cool` | `2` | Regulation in cooling mode |
 
-The Viega manual confirms exactly these three modes in holding register `40001`
-(manual page 91): raw `0` = standby, raw `1` = heating, and raw `2` = cooling.
-Therefore `heat_cool`/automatic mode must not be advertised. The manual
-describes automatic changeover only as an external installation function using
-the optional relay box and its Change-over contact (manual pages 11 and 21);
-it is not a fourth Modbus operating-mode value.
+`heat_cool`/automatic changeover is not advertised: the manual describes it
+only as an external relay-box function (Change-over contact, manual pages 11
+and 21), not as a Modbus value. An unknown raw value is reported
+diagnostically and never mapped to another mode.
 
-`hvac_mode` must reflect the value read from the device, and
-`async_set_hvac_mode` must validate the requested mode, translate it to the
-documented register value, perform the write, and update the entity state only
-after an acknowledged response. Selecting a new mode must not change
-`current_temperature` or `target_temperature`; those remain the measured
-Ist-Temperatur and configured Soll-Temperatur. The target-temperature control
-must remain available in every operating mode in which the device reports a
-writable target setpoint.
+`hvac_mode` reflects the device value. `set_hvac_mode` validates the mode,
+writes the documented value, and updates the state after the acknowledged
+write; it never changes `current_temperature` or `target_temperature`. The
+target control stays available in every mode with a writable setpoint.
 
-The register mapping must document the following operating-mode values:
+Operating mode (`40001`) and profile mode (`40002`) exist once per **base
+unit**, not per room (manual page 92). Every room's Climate entity reads and
+writes the same registers, so changing the mode or preset from any room
+changes it for all rooms of that module – this matches the device.
 
-| Climate mode | Register | Raw value | Meaning |
-| --- | --- | --- | --- |
-| `off` | holding `40001` (PDU `0`) | `0` | Standby; frost protection remains active |
-| `heat` | holding `40001` (PDU `0`) | `1` | Regulation in heating mode |
-| `cool` | holding `40001` (PDU `0`) | `2` | Regulation in cooling mode |
-
-All three values are readable through function `0x03` and writable through
-Modbus function `0x10` (Write Multiple Registers, quantity `1`) — see §5b
-for the confirmed wire example this is based on. Unknown raw values must be
-reported diagnostically and must not be silently mapped to a different
-mode. Automatic changeover must not be modelled as `HVACMode.HEAT_COOL`
-unless a future Viega manual defines such a Modbus value.
-
-All linked entities must use stable unique IDs based on the module entry ID and
-`room_id`, not on the editable room name. Renaming a room must therefore change
-display names without creating duplicate entities. This applies to every
-platform. The Climate entity and all
-linked entities must reference the same Home Assistant device registry entry,
-using the module's configured `device_name` (§6a) as the device's display
-name — never a fixed string, so multiple modules remain distinguishable in
-the device registry.
-
-The operating-mode and profile-mode registers (holding `40001`/`40002`) are
-defined on the "Basiseinheit" (base unit), not per room (manual page 92):
-there is exactly one of each for the whole installation. Every room's Climate
-entity reads and writes the same shared registers, so changing `hvac_mode` or
-`preset_mode` from any one room's thermostat card changes it for every room
-at once; this matches the physical device, which has no per-room heating/
-cooling or profile-mode control, and is not a bug in the integration.
-
-The operating-mode and profile-mode value sets are based on the Viega manual.
-The operating-mode mapping is `0 = standby`, `1 = heating`, and `2 = cooling`;
-there is no documented automatic heating/cooling value. Profile mode uses
-`0 = manual` ("Manuell"), `1 = profile` ("Profil"), and `2 = setback`
-("Absenkbetrieb" — an automatic reduced-temperature mode), and is available
-only in heating mode (manual page 91). The `preset_mode` values returned by
-the Climate entity (`manual`/`profile`/`setback`) are stable, untranslated
-identifiers; their user-facing labels must be localized through Home
-Assistant's entity translation mechanism (`translation_key` plus
-`entity.climate.<key>.state_attributes.preset_mode.state` in
-`translations/*.json`), not hardcoded to English.
-
-The base-unit error indicator ("Show whether the base unit has an error") and
-the error code/description sensor ("Show which base-unit error exists") are
-two distinct entities: a binary sensor that is `on` when the error code (§3b)
-is non-zero, and a separate diagnostic sensor exposing the raw code plus its
-description from the error-code table.
-
-If a requested value is not supported by a particular firmware version or its
-register address is not configured, the entity must not advertise a write
-feature that cannot work. Readable values must remain available where possible,
-and unavailable register values must be reported through the diagnostic status
-without overwriting the last valid value.
+Profile mode values are `0` = `manual` ("Manuell"), `1` = `profile`
+("Profil"), `2` = `setback` ("Absenkbetrieb"). The `preset_mode` identifiers
+are stable and untranslated; their labels come from
+`entity.climate.room.state_attributes.preset_mode.state` in
+`translations/*.json`.
 
 ### 5a.1a. Profile mode only in heating mode
 
-The manual makes profile mode (holding `40002`) available only in heating
-mode (manual page 91). The Climate entity must therefore advertise
-`ClimateEntityFeature.PRESET_MODE` only while `hvac_mode` is `heat` (and the
-profile-mode register is configured, §5a); in `cool` and `off` mode the
-preset control must not be rendered. `async_set_preset_mode` must reject a
-call outside heating mode with a translated `ServiceValidationError` (§10a)
-instead of writing the register. The last profile mode read from the device
-is kept while the preset control is hidden and is shown again when the
-installation returns to heating mode; switching the operating mode must not
-write the profile-mode register.
+Profile mode exists only in heating mode (manual page 91). `PRESET_MODE` is
+therefore advertised only while `hvac_mode` is `heat` (and the profile-mode
+register is configured); in `cool` and `off` the preset control is hidden.
+`set_preset_mode` outside heating mode raises a translated
+`ServiceValidationError` (§10a) without writing. The last profile mode read
+from the device is kept while hidden and shown again in heating mode;
+changing the operating mode never writes the profile-mode register.
 
 ### 5a.1b. Turning the installation on and off
 
-Since the Climate entity supports `off`, it must also advertise
-`ClimateEntityFeature.TURN_OFF` and `ClimateEntityFeature.TURN_ON`, so that
-Home Assistant's `climate.turn_off`/`climate.turn_on` services and the on/off
-control of the built-in cards work:
+The Climate entity advertises `TURN_ON` and `TURN_OFF`:
 
-- `turn_off` writes operating mode `0` (standby; frost protection remains
-  active), exactly like `set_hvac_mode(off)`.
-- `turn_on` restores the last operating mode other than `off` that was read
-  from or written to the device (`heat` or `cool`), defaulting to `heat` if
-  none is known. This last non-off mode must survive a restart (§15).
-- `turn_on` while the installation is already on, and `turn_off` while it is
-  already off, must not write anything.
+- `turn_off` writes operating mode `0` (standby, frost protection stays
+  active), like `set_hvac_mode(off)`.
+- `turn_on` restores the last non-off mode read from or written to the device
+  (`heat` or `cool`, default `heat`). This mode is kept as the
+  `last_active_hvac_mode` attribute and survives a restart (§15).
+- Neither writes anything when the module is already in the requested state.
 
-Like `hvac_mode` (§5a.1), the operating mode is shared by the whole base unit:
-turning one room's thermostat off or on turns every room of that module off
-or on.
+Like the operating mode itself, this affects every room of the module.
 
 ### 5a.2. Current HVAC action
 
-`hvac_mode` (§5a.1) only states what the installation is *set* to. The Climate
-entity must additionally expose `hvac_action`, stating what the room is
-*currently doing*, so that Home Assistant's built-in cards can show it without
-any extra entity, template, or frontend card:
+`hvac_mode` says what the module is *set* to; `hvac_action` says what the room
+is *doing*. Home Assistant's built-in thermostat and tile cards show it as text
+and colour ("Heizt"/"Kühlt"/"Leerlauf"/"Aus"), and the Climate entity's history
+graph shows coloured bands while the room actually heats or cools. Labels and
+colours come from Home Assistant itself.
 
-- the thermostat and tile cards show the action as text ("Heizt"/"Kühlt"/
-  "Leerlauf"/"Aus" in German, "Heating"/"Cooling"/"Idle"/"Off" in English) and
-  color the control accordingly;
-- the history graph of the Climate entity shows colored bands for the periods
-  in which the room was actually heating or cooling.
-
-These labels and colors come from Home Assistant core's own `hvac_action`
-translations and styling; the integration must not define its own labels for
-them.
-
-There is no Viega register for a per-room heating/cooling state, so the value
-is derived from registers the entity already reads (operating mode, holding
-`40001`, §5a.1; actuator position, one per actuator, §5a):
+There is no per-room heating register, so the value is derived:
 
 | Operating mode | Actuators of the room | `hvac_action` |
 | --- | --- | --- |
-| `0` (standby) | any | `HVACAction.OFF` |
-| `1` (heating) | at least one open | `HVACAction.HEATING` |
-| `1` (heating) | all closed | `HVACAction.IDLE` |
-| `2` (cooling) | at least one open | `HVACAction.COOLING` |
-| `2` (cooling) | all closed | `HVACAction.IDLE` |
-| unknown / never read | any | `None` |
-| `1` or `2` | no actuator position read yet | `None` |
+| `0` (standby) | any | `off` |
+| `1` (heating) | at least one open | `heating` |
+| `1` (heating) | all closed | `idle` |
+| `2` (cooling) | at least one open | `cooling` |
+| `2` (cooling) | all closed | `idle` |
+| unknown | any | `None` |
+| `1` or `2` | no position read yet | `None` |
 
-Rules:
-
-- **All actuators of the room count**, not only the first one: a room fed by
-  several heating circuits (non-1:1 topology, §4) is heating as soon as any of
-  its actuators is open. The Climate entity must therefore read the position
-  register of every actuator assigned to the room, not only `actor_numbers[0]`.
-- A failed or `-99` read of an actuator position keeps that actuator's last
-  valid position (§10); it must not turn the action into `IDLE` or `None`.
-  `None` is only returned while no valid position has ever been read for any of
-  the room's actuators.
-- The action reflects the device directly on every poll and is **not**
-  debounced; the 3-read debounce of the circulation-pump indicator (§5c) is
-  specific to driving a pump and does not apply here.
-- `hvac_action` is purely derived and read-only: it adds no register, no write,
-  and no Climate feature flag.
-- After a restart, the action is derived from the restored operating mode and
-  actuator positions (§15), so the cards and history show the same action as
-  before the restart instead of a gap or `None`.
+- **All** actuators of the room count; the position register of every
+  actuator assigned to the room is read.
+- A failed or `-99` position read keeps that actuator's last position (§10).
+- The value follows the device on every cycle and is not debounced (the pump
+  debounce of §5c does not apply). Whether to smooth it is an open item (§17).
+- It is read-only and adds no register, write, or feature flag.
+- After a restart it is derived from the restored mode and positions (§15).
 
 ### 5a.3. Dashboard presentation without frontend add-ons
 
-Everything the integration exposes must be fully usable with Home Assistant's
-built-in Lovelace cards (`thermostat`, `tile` with its built-in features,
-`entities`, `glance`, `history-graph`, `area`, `markdown`, ...). No feature may
-depend on a HACS or other custom frontend card, and the README's example
-dashboard must use built-in cards only.
+Everything the integration exposes must be usable with Home Assistant's
+built-in cards (`thermostat`, `tile` with its built-in features, `entities`,
+`glance`, `history-graph`, `statistics-graph`, `area`, `markdown`, ...). No
+feature may depend on a HACS or other custom frontend card, and every
+dashboard example in the README uses built-in cards only.
 
-### 5b. Required room register mapping
+### 5b. Register addressing and writes
 
-The room mapping must be able to define the registers needed by the capability
-matrix. Register addresses and scaling are device-specific and must not be
-guessed by the entity layer. The mapping may contain at least:
+Register addresses and scaling come from `registers.py`, never from the
+entity layer. A room mapping can be minimal (`name`, `actor`, `sensor`); room
+numbers resolve from the `room_id`'s trailing digits (`"room_1"` → `1`) when
+no `room_number` is given, and the default registers follow from it. Optional
+per-room overrides exist for the target-temperature, power-level,
+actuator-position, flow-temperature, return-temperature, operating-mode,
+profile-mode, and error-code registers. Room and actuator numbers `1`-`12`
+are supported.
 
-```python
-"room_1": {
-    "name": "Wohnzimmer",
-    "room_number": 1,
-    "actor": 1,
-    "sensor": 10,
-    "target_temperature_register": 50,
-    "power_level_register": 49,
-    "actuator_position_register": 249,
-    "flow_temperature_register": 24,
-    "return_temperature_register": 250,
-}
-```
+Manual addresses convert to Modbus PDU addresses as
+`pdu = manual - 40000` for holding registers (`4xxxx`) and
+`pdu = manual - 30000` for input registers (`3xxxx`): the last four digits
+*are* the PDU address. This is confirmed by the manual's wire examples
+(pages 94-95: manual `40001` → PDU `0x0001`, `40053` → `0x0035`, `30250` →
+`0x00FA`) and real hardware. The common Modicon convention
+(`manual - 40001`) is off by one for this device and must never be used.
 
-    The values above are Modbus PDU addresses derived from the manual's one-based
-    addresses: room 1 uses holding registers `40050`/`40051` for power and target
-    temperature, input registers `30050`/`30051` for room value and error, and
-    actuator 1 uses input registers `30250`/`30251` for position and return
-    temperature (plus `30252` for its Raum-ID register, §4a). The base-unit
-    operating and profile modes use holding registers `40001` and `40002`.
+Default layout per room *n* and actuator *m* (manual addresses):
 
-    The conversion from a manual (Modicon-style) address to a PDU address is:
-    `pdu = manual_address - 40000` for holding registers (`4xxxx`) and
-    `pdu = manual_address - 30000` for input registers (`3xxxx`) — i.e. the
-    last four digits of the manual address *are* the PDU address, unchanged.
-    This is confirmed by the device manual's own worked wire examples
-    (`Fonterra Smart Control-de-DE.pdf`, "Beispiele", pages 94-95): manual
-    `40001` is sent on the wire as PDU `0001`, manual `40053` as PDU `0035`
-    (53), and manual `30250` as PDU `00FA` (250). A formula that instead
-    treats `x0001` as PDU `0` (`pdu = manual_address - 40001` /
-    `manual_address - 30001`, the more common Modicon convention, and a
-    formula this document previously specified) does not match the manual's
-    examples or real hardware and makes every register in `registers.py` off
-    by exactly one from the device's actual map; it must never be
-    reintroduced. Every address in this section and in `registers.py` must
-    satisfy the `-40000`/`-30000` formula.
+| Register | Address |
+| --- | --- |
+| Room power level / target temperature (holding) | `40048+2n` / `40049+2n` (room 1: `40050`/`40051`) |
+| Room measured value / error (input) | `30048+2n` / `30049+2n` (room 1: `30050`/`30051`) |
+| Room name (input, 12 registers) | `30074+12(n-1)` |
+| Actuator position / return temperature / Raum-ID (input) | `30250+3(m-1)` / `+1` / `+2` |
+| Operating mode / profile mode (holding, base unit) | `40001` / `40002` |
+| Error code / flow temperature (input, base unit) | `30024` / `30025` |
+| WLAN-module serial / base-unit serial / base-unit name (input, text) | `30001` (5 registers) / `30006` (5) / `30011` (12) |
 
-    A room mapping without an explicit `room_number` resolves it from the
-    trailing digits of its `room_id` (e.g. `"room_1"` → `1`), so the minimal
-    room example in §4/§6b (`name`/`actor`/`sensor` only) still gets working
-    default registers via `room_registers()`. Room numbers 1 through 12 are
-    supported, matching the register spacing above; a topology with more
-    rooms or actuators is out of scope for this register map.
+Temperatures are `int16` in tenths of a degree. Every write – target
+temperature, power level, operating mode, profile mode – uses function `0x10`
+(Write Multiple Registers, quantity `1`, byte count `2`), as in the manual's
+own example ("Beispiel 2", page 95: `... 01 10 00 35 00 01 02 00 D2`); `0x06`
+is never used. Each writable register has a defined range (target temperature
+§5a, power level `0`-`10`, modes §5a.1), and the entity state changes only
+after the write is acknowledged.
 
-Each writable register must define its data type, valid range, and scaling. A
-temperature register using tenths of a degree, for example, must declare a
-scale of `10`; a percentage register must declare a range of `0` to `100`.
-Writes must be acknowledged by the Modbus response before the entity state is
-updated.
-This entity represents a room-level thermostat and is the primary control surface for a room in Home Assistant.
+### 5c. Circulation pump indicator
 
-The target temperature must be writable through the room's Modbus holding
-register. Each room mapping may define:
+The device has no pump register. One binary sensor per module (device class
+`running`) is derived from the position registers of the module's **used**
+actuators (those assigned to a room by discovery):
 
-```python
-"target_temperature_register": 1200
-```
+- `on` while at least one used actuator is confirmed open, `off` once all are
+  confirmed closed, `None` (unknown) until at least one actuator has settled.
+- Each actuator's reading is debounced: its contribution changes only after the
+  same raw value has been read in **3 consecutive polling cycles**
+  (`PUMP_DEBOUNCE_READS`); a different value restarts that actuator's count at
+  `1`; a failed or `-99` read neither advances nor resets it. Debouncing is per
+  actuator; the aggregate turns `on` as soon as any actuator is confirmed open.
+  Each polling cycle counts once, even if the entity is updated more often.
+- It is read-only, writes nothing, and controls nothing on the device. It is
+  meant to drive the user's own automation for a separately wired pump
+  (§16k); it must not be modelled as a switch.
 
-When the user calls `climate.set_temperature`, the integration must write the
-requested Celsius value multiplied by `10` as an unsigned 16-bit value using
-Modbus function code `0x10` (Write Multiple Registers, quantity `1`, byte
-count `2`) - confirmed by the manual's own worked wire example ("Beispiel 2
-- Soll-Temperatur für Raum 2 setzen", `Fonterra Smart Control-de-DE.pdf`
-page 95: `... 01 10 00 35 00 01 02 00 D2`) - then update the entity's target
-temperature only after a successful write response. Every write this
-integration performs (target temperature, power level, operating mode,
-profile mode) must use function `0x10`, not `0x06`; no confirmed wire
-example in the manual ever uses `0x06`. A room without a configured target
-register must remain readable but must not advertise target-temperature
-write support.
+### 5d. Translated states, units, names, and icons
 
-## 5c. Circulation pump indicator
+Everything an entity shows follows Home Assistant's language setting
+(`translations/de.json` and `translations/en.json`, always with the same keys):
 
-The device manual defines no dedicated circulation-pump register — this
-capability is entirely derived from the actuator-position registers already
-defined in §4a/§5b, not a new register. It must be exposed as a single
-binary sensor per config entry (device class `running`), one per module,
-not one per room, since a module's circulation pump serves every room's
-actuator together.
-
-- The indicator is `on` when at least one of the module's *used* actuators
-  (an actuator with a room association from discovery, §4a — not merely one
-  of the device's up to 12 physical actuator slots) is confirmed open, and
-  `off` once every used actuator is confirmed closed. These two conditions
-  are exhaustive: there is no third state once at least one actuator has
-  been read, only "unknown" before any actuator has been read at all.
-- Each actuator's own raw position reading must be debounced before it may
-  affect the aggregate: an actuator's contribution only updates once its
-  position register has returned the **same** raw value on **3 consecutive
-  reads** (`PUMP_DEBOUNCE_READS` in `binary_sensor.py`). A read that differs
-  from the actuator's current in-progress candidate value resets that
-  actuator's counter to `1` rather than incrementing it; a failed read or
-  the `-99` error sentinel (§10) must be skipped entirely — it must neither
-  advance nor reset that actuator's counter, and must never affect the
-  aggregate. This debouncing is per actuator, independent of every other
-  actuator's own debounce progress: the aggregate must switch to `on` as
-  soon as any single actuator's debounced state is confirmed open, without
-  waiting for other actuators to finish debouncing.
-- Before any actuator has completed its first debounce cycle, the indicator
-  must report an unknown/unavailable state (`is_on = None`), not `off` —
-  reporting `off` before any real data has settled would misrepresent an
-  unread pump as confirmed idle.
-- This entity performs no Modbus write and controls nothing on the Viega
-  device — it is a read-only aggregate meant to drive the user's own
-  automation for a circulation pump that is wired and controlled outside
-  the Fonterra system (e.g. a smart relay). It must not be modeled as a
-  switch (§8): a write-capable entity with no real device-side effect is
-  misleading and must not be reintroduced.
-
-## 5d. Translated states, units, and icons
-
-Everything an entity shows in the user interface must follow Home
-Assistant's language setting, like entity names already do:
-
-- **States and attribute values** that are text are exposed as stable keys
-  and translated through `translations/*.json`: the room diagnostic sensor
-  is an `enum` sensor whose state is one of the keys of §3b
-  (`entity.sensor.room_diagnostic.state.<key>`), and the base-unit error-code
-  sensor's `description` attribute uses the same keys
+- **Names:** every entity name comes from `translation_key` (with
+  `translation_placeholders` such as room and actuator), never from a
+  hardcoded `_attr_name`.
+- **States and attribute values** that are text are stable keys: the room
+  diagnostic is an `enum` sensor whose state is one of the keys of §3b
+  (`entity.sensor.room_diagnostic.state.<key>`, raw code as `error_code`
+  attribute), and the base-unit error-code sensor's `description` attribute
+  uses the same keys
   (`entity.sensor.base_unit_error_code.state_attributes.description.state.<key>`).
-  States restored from an older version that still hold the English text are
-  mapped to the matching key.
-- **Units** that are words, not physical units, are translated
+  States restored from versions that stored the English text are mapped to the
+  matching key.
+- **Units** that are words are translated
   (`entity.<platform>.<key>.unit_of_measurement`): the power level's unit is
-  "Stufe"/"level", not a hardcoded English "level".
-- **Icons** that express the meaning better than the device-class default
-  are defined per entity and state in `icons.json`, not in code: the actuator
-  position shows a valve (`mdi:valve-open`/`mdi:valve-closed`) instead of the
-  generic opening square, the circulation-pump indicator a pump
-  (`mdi:pump`/`mdi:pump-off`), and the room diagnostic a check mark for
-  `no_error` and a warning symbol otherwise. The device class itself stays
-  unchanged, so state labels ("Geöffnet"/"Geschlossen", "Läuft"/"Aus") keep
-  coming from Home Assistant.
+  "Stufe"/"level".
+- **Icons** are defined per entity and state in `icons.json`: the actuator
+  position shows a valve (`mdi:valve-open`/`mdi:valve-closed`), the pump
+  indicator a pump (`mdi:pump`/`mdi:pump-off`), the room diagnostic a check
+  mark for `no_error` and a warning symbol otherwise; services have icons too.
+  Device classes stay unchanged, so state labels ("Geöffnet"/"Geschlossen",
+  "Läuft"/"Aus") keep coming from Home Assistant.
+- Preset labels follow §5a.1, action errors §10a, repairs §16j, and
+  configuration-dialog texts §6a.
 
-## 6. Multi-device support
+## 6. Multiple modules
 
-The integration must allow multiple devices to be configured and stored independently. Each entry must remain separate and should not overwrite the others.
+Any number of modules can be configured in one Home Assistant installation.
+Each has its own config entry, device, connection, polling cycle, entities,
+and repairs; a failure, reload, or removal of one never affects another.
 
-## 6a. Home Assistant UI configuration
+### 6a. Home Assistant UI configuration
 
-The integration must provide a native Home Assistant configuration flow. Users
-must be able to configure Viega modules through the Home Assistant UI without
-editing YAML or JSON files manually.
+Modules are set up, edited, and removed entirely in the Home Assistant UI; no
+YAML or JSON editing is needed or supported (the integration declares
+`CONFIG_SCHEMA = cv.config_entry_only_config_schema`).
 
-### Adding a module
+**Adding a module.** The setup form asks for the parameters of §6b – and
+nothing else; in particular no room mapping, since rooms are discovered from
+the device (§4a). `host` accepts IPv4 addresses and resolvable hostnames. The
+connection is tested before the entry is created; invalid values and a failed
+connection are shown in the form as translated messages. Form error texts
+live under `config.error` and `options.error` in the translation files (not
+per step), as Home Assistant requires. `host:port` is the entry's unique ID: a
+second entry for the same device is rejected (`already_configured`).
 
-The setup form for each Viega module must provide these fields:
+**Editing a module.** The options flow edits display name, host, port,
+polling interval, Modbus timeout, and, for every room already reported by the
+device, its name, actuator(s), sensor, and target-temperature register. A room
+with several actuators keeps all of them when the form is saved. The
+connection is tested before saving; afterwards the module reloads with the new
+settings (which re-runs discovery, §4a). The options flow obtains
+`config_entry` from Home Assistant's `OptionsFlow` base class, not through its
+own constructor (deprecated since Home Assistant 2024.12).
 
-- `host`: IP address or DNS hostname of the Modbus TCP device, default
-    `192.168.0.188`
-- `port`: Modbus TCP port, default `502` (per the device manual: port `502`
-    for a normal/DHCP network connection; `192.168.1.1` is only used in
-    point-to-point mode)
-- `device_name`: editable display name for the module
-- `polling_interval`: polling interval in seconds
-- `modbus_timeout`: Modbus response timeout in seconds
+**Removing a module.** Deleting the integration entry – or the module's
+device from its own device page (`async_remove_config_entry_device`) – removes
+the module's connection, entities, device, and repairs. Removal always
+succeeds, also when the device is offline or its socket is broken: every
+blocking step of the disconnect is bounded by the Modbus timeout (a hung close
+never raises, so a `try`/`except` alone is not enough), and a failure is
+logged, never blocking.
 
-The `host` field must accept IPv4 addresses such as `192.168.1.10` and
-resolvable hostnames such as `fonterra-01.local`. The connection must be
-validated before the config entry is created. Invalid host, port, polling, or
-timeout values must be reported in the form, and every error message the
-form can show (a validation error or a failed connection) must be localized
-in every language `translations/*.json` supports, not only English.
+**Setup failures.** If the module cannot be reached at setup, the integration
+raises `ConfigEntryNotReady` (any connection error, including a refused
+connection), so Home Assistant retries with back-off instead of leaving the
+entry broken.
 
-The combination of `host` and `port` must be unique across config entries:
-attempting to add a module with a host/port already used by an existing
-entry must be rejected (Home Assistant's standard unique-ID/
-`already_configured` abort mechanism) rather than creating a second,
-uncoordinated set of entities and Modbus connections against the same
-physical device.
+### 6b. Configuration parameters
 
-This form must not ask for a room mapping. Rooms are discovered
-automatically from the device itself once it connects (§4a) and require no
-user input to create a working module; requiring one here would make setup
-depend on the user already knowing the installation's actor/sensor topology,
-which is exactly what discovery exists to avoid guessing.
+| Parameter | Meaning | Default | Range |
+| --- | --- | --- | --- |
+| `host` | IP address or hostname of the module | `192.168.0.188` | – |
+| `port` | Modbus TCP port | `502` | `1`-`65535` |
+| `device_name` | Display name of the module and its device | – | – |
+| `polling_interval` | Seconds between two polling cycles (§16i) | `30` | `5`-`300` |
+| `modbus_timeout` | Seconds to wait for a Modbus response | `5` | `1`-`30` |
 
-### Multiple modules
+Port `502` is the manual's port for normal/DHCP networks; `192.168.1.1` is the
+device's address only in point-to-point mode.
 
-The UI must allow more than one Viega module to be configured in the same Home
-Assistant installation. Every module must have its own config entry, device
-registry entry, connection, polling schedule, and entities. A failure or reload
-of one module must not overwrite or disable another module.
-
-### Editing an existing module
-
-An options flow must be available from each integration entry so users can edit
-the following values after setup:
-
-- module display name
-- IP address or hostname
-- Modbus TCP port
-- polling interval
-- Modbus timeout
-- room names and room-to-actor/sensor assignments
-
-After saving, the integration must reconnect using the new host or port and
-apply the new settings without manual file edits. Entity unique IDs must remain
-stable when only the display name changes. The configured module name must be
-used as the Home Assistant device name, while configured room names remain the
-entity names for the corresponding thermostats, sensors, and diagnostics.
-
-A room's actor assignment can be a single actuator or a list of several (§4).
-The options flow's room-editing fields must be able to represent and save
-either shape; saving the form for any reason (even one unrelated to that
-room) must never collapse a multi-actuator room's assignment down to a
-single actuator.
-
-The options flow must resolve `self.config_entry` through Home Assistant's
-own `OptionsFlow` base class (via the flow's `handler`), not by accepting a
-`config_entry` argument in its own `__init__` and assigning it directly -
-that pattern is deprecated as of Home Assistant 2024.12 and is scheduled for
-removal in 2025.12. `async_get_options_flow` may still receive `config_entry`
-as a parameter (Home Assistant's calling convention), but must not pass it
-into the options flow's constructor.
-
-### Removing a module
-
-Each Viega module's Home Assistant device must be deletable through the
-standard Home Assistant UI (removing the integration entry from Settings →
-Devices & Services), without editing YAML/JSON or restarting Home Assistant.
-Removal must:
-
-- disconnect that module's Modbus connection and remove all of its entities
-  and its device registry entry
-- succeed even when the device is offline, unreachable, or its socket
-  connection is already broken — a failed *or hung* disconnect attempt must
-  be logged and must not block the removal; every blocking call in the
-  disconnect path must be bounded by the configured `modbus_timeout`. An
-  unbounded `await` on a socket close is not "handled" by wrapping it in
-  `try`/`except` alone — a hang never raises, so it never reaches the
-  `except` clause; it must be wrapped in a timeout too.
-- be reachable from the device's own page as well as from the integration
-  entry, per Home Assistant's `async_remove_config_entry_device` mechanism —
-  each module maps to exactly one device, so removing that device is always
-  safe
-- affect only that module; every other configured module's connection,
-  polling, and entities must keep working unchanged (see "Multiple modules"
-  above)
-
-## 6b. Configuration parameters
-
-When setting up a Viega Fonterra device, the user must configure:
-
-- `host`: IP address of the Modbus TCP device (default `192.168.0.188`)
-- `port`: Modbus TCP port (default `502`)
-- `device_name`: Human-readable name for the device (e.g., "Heizung Wohnzimmer")
-- `polling_interval`: How often to update sensor values, in seconds (default 30, minimum 5)
-- `modbus_timeout`: Maximum time to wait for a Modbus response, in seconds (default 5, minimum 1)
-
-Room mapping is deliberately **not** collected at setup time. Earlier
-versions of this spec required a `rooms` JSON field on the setup form (shown
-pre-filled with an example mapping), which made every new module's creation
-form look like it needed a hand-typed, correct room/actor/sensor topology
-before the module could be added at all — misleading, since §4a's automatic
-discovery from the device's own actuator Raum-ID and room-name registers is
-the actual source of truth and runs on every setup regardless of what (if
-anything) was typed manually. The setup form therefore only asks for the
-five fields above; rooms populate themselves once the module successfully
-connects. A manually typed room mapping remains available, but only as an
-edit made afterward through the options flow ("Editing an existing module",
-§6a) — used purely as a fallback for a setup cycle where the device can't be
-read (§4a), never as a precondition for creating the module in the first
-place.
+A room mapping is never a setup parameter. The stored mapping (discovered or
+edited in the options flow) has this shape and serves only as the fallback of
+§4a; each room's `name` is the display name of its entities:
 
 ```python
 rooms = {
-    "room_1": {"name": "Wohnzimmer", "actor": 1, "sensor": 10},
-    "room_2": {"name": "Schlafzimmer", "actor": 2, "sensor": 11},
+    "room_1": {"name": "Wohnzimmer", "room_number": 1, "actor": 1, "sensor": 1},
+    "room_2": {"name": "Bad", "room_number": 2, "actor": [2, 3], "sensor": 2},
 }
 ```
 
-Each room's `name` field is used as the display name for the thermostat
-entity in Home Assistant, whether the mapping came from automatic discovery
-or a manual options-flow edit.
-
 ### 6c. Polling model
 
-Each config entry has one polling coordinator (§16i) that reads all of the
-module's registers once per `polling_interval` (minimum 5 seconds) and then
-updates every entity of that module. Entities are not polled by Home
-Assistant individually and never read the device themselves.
-
-If the initial Modbus TCP connection cannot be established when a config
-entry is set up, the integration must signal Home Assistant to retry with
-backoff (rather than leaving the entry in a hard error state that requires
-a manual reload). A connection failure or reload of one module must not
-affect any other module's connection, polling, or entities.
+Each module has one polling cycle (§16i) per `polling_interval` that reads all
+of its registers and then updates all of its entities. Entities are not polled
+by Home Assistant individually and never read the device themselves.
 
 ## 7. Distinguishable devices
 
-Every module's Home Assistant device (`device_info`, built by
-`device.py::build_device_info`) must be identified by that module's own
-config entry and use that module's configured `device_name` as its display
-name (§6a) — never a fixed string shared across modules. Two modules must
-therefore always be distinguishable in the device registry, entity picker,
-and dashboards, purely from their own configuration, with no manual
-disambiguation step required from the user.
+Each module's device is identified by its own config entry and named with its
+own `device_name` – never a fixed string – so several modules are always
+distinguishable in the device registry, entity picker, and dashboards.
 
-## 8. (Removed) Simple switch support
+## 8. (Not used)
 
-This section previously required a minimal per-room switch entity with a
-local `is_on`/`turn_on()`/`turn_off()` state flow. That switch never read or
-wrote any Modbus register — the device manual documents no discrete,
-writable per-room on/off holding register (the closest control is the
-Leistungsstufe/power-level register, §5b, already exposed as a Number
-entity). The switch was scaffolding from before the real register map
-(§3a-§5b) was confirmed against the manual, and it shipped unchanged: every
-room got an entity that toggled a value in Home Assistant's memory with no
-effect on the installation. It has been removed rather than kept as a
-misleading control. The section number is kept unused rather than
-reassigned, so old issue/commit references to §8 are not silently repointed
-at unrelated content.
+## 9. Register map
 
-## 9. Register mapping
+`registers.py` is the single source of register addresses, scaling, and the
+topology helpers (`room_registers`, `actor_registers`,
+`known_addresses_for_topology`, ...). Only addresses documented in the manual
+or confirmed with logged frames on real hardware may be used (§16h); the real
+map spans roughly PDU `0`-`285`. `REGISTER_DEFINITIONS` in `registers.py`
+illustrates the schema with placeholder addresses (`1000`+) that are not
+Viega registers; it must not be instantiated as live entities.
 
-The register map is a flexible, modular schema. `REGISTER_DEFINITIONS` in
-`registers.py` illustrates the schema's shape with a placeholder example set:
-
-- temperature_flow: address 1000, unit °C
-- temperature_return: address 1001, unit °C
-- temperature_room: address 1002, unit °C
-- system_pressure: address 1010, unit bar
-- pump_state: address 1020, unit None
-
-These addresses are illustrative only, not confirmed Viega register
-addresses — the real device map (§3a-§5b, confirmed against `Fonterra Smart
-Control-de-DE.pdf`) only spans roughly PDU 0-285, nowhere near 1000. The
-sensor platform must not instantiate `REGISTER_DEFINITIONS` as live entities
-against real hardware; a placeholder register address is not a substitute
-for one confirmed against the manual or logged frame data, the same mistake
-an earlier, unrelated draft of the automatic room discovery in §4a once
-made by treating illustrative example data as if it were real device
-output. `REGISTER_DEFINITIONS` remains available as a mechanism for
-genuinely mapped registers to be added later, each with its real address
-confirmed first.
-
-## 9a. int16 read compatibility
-
-This integration uses its own raw Modbus/TCP client (`modbus_handler.py`),
-not Home Assistant's YAML Modbus platform — so the YAML platform's `count`
-option (which some Home Assistant/base-unit firmware combinations reject for
-`data_type: int16`, causing cyclic connection failures — see the reported
+All register values are decoded as signed 16-bit integers (§10). The
+integration uses its own Modbus TCP client, not Home Assistant's YAML Modbus
+platform, so that platform's `count` problem with `int16` on some firmware
+(see the reported
 [Fonterra Smart Control update issue](https://community.simon42.com/t/modbus-problem-nach-update-fonterra-smart-control-viega/29014))
-does not apply here. It must not be confused with the Modbus *protocol*
-quantity field, which every function-code `0x03`/`0x04` request must still
-carry on the wire regardless of client implementation — `1` for a single
-register. If a YAML Modbus configuration is ever offered as an alternative
-to this client, its `int16` entities must omit `count`, matching the
-upstream issue above.
+does not apply; the protocol quantity field is always sent (`1` for a single
+register). A YAML Modbus alternative, if ever offered, must omit `count` for
+`int16`.
 
-## 10. Error handling and data validity
+## 10. Data validity
 
-The Modbus communication layer must treat the device error sentinel value `-99` as a failed read, not as a valid measurement.
+The device reports `-99` for a value it considers invalid (e.g. no thermostat
+paired). `-99`, a failed read, and a value missing from a polling cycle are all
+treated the same way:
 
-When a read returns `-99`:
+- the entity keeps its last valid value – for every register-backed value,
+  including Climate attributes, modes, and presets, and across any number of
+  consecutive failures;
+- the sentinel is detected on the raw value **before** scaling (a raw `-99`
+  temperature must never become `-9.9` °C);
+- no exception escapes the update;
+- the room's diagnostic sensor shows the room's state (§5d), and the entity
+  keeps its latest internal error text in `last_error_message` for logs.
 
-- the entity must not replace the last known valid value
-- the previous value remains active
-- the update cycle continues without throwing an exception
-- a diagnostic text entity must be created for the affected unit and show the textual error state
+Holding and input registers are both decoded as signed `int16`, so `-99`
+(`0xFF9D`) is recognisable on every read path; writes are unsigned 16-bit
+values on the wire. Ordinary values (temperatures, levels, modes) are far below
+`32768`.
 
-This behavior must also apply to any read where a Modbus communication issue is detected.
+### 10a. User-facing errors for actions
 
-A diagnosis entity is a textual entity that exposes the last device error message or status string, for example:
-
-- `error: sensor invalid`
-- `error: communication timeout`
-- `error: unit unavailable`
-
-These entities are not numeric; they are intended for diagnostics and troubleshooting.
-
-The sensor layer must also record the last error message on each sensor entity itself. When a device value is invalid or a communication error occurs, the sensor keeps the last valid value but stores the latest textual error string in `last_error_message` for downstream diagnosis entities or logs.
-
-Register values (both holding and input registers) must be decoded as signed
-16-bit integers. Decoding holding registers as unsigned would make the `-99`
-sentinel unrepresentable on that read path (`-99` two's-complement is
-`0xFF9D`/`65437` unsigned), silently defeating this section's requirement for
-any register read through function code `0x03`. Ordinary holding-register
-values used by this integration (temperatures, power levels, mode codes) stay
-well under `32768` and are unaffected by signed interpretation; writes remain
-unsigned 16-bit values on the wire as specified in §5b.
-
-This "keep the previous value" rule applies to every register-backed value an
-entity holds, not only the ones an entity's own read directly produces: the
-Climate entity's `-99`/failed-read handling must cover the raw value on the
-wire *before* scaling (e.g. a raw `-99` current/target temperature divided by
-10 into a fabricated `-9.9`, rather than being recognized as the error
-sentinel first, is the same bug this section forbids) and every one of its
-other register-backed attributes (power level, flow/return temperature,
-actuator position, base-unit error code, operating mode, profile mode) -
-none of them may be overwritten with `None`/`-99` on a failed or sentinel
-read, including across any number of consecutive failed reads (at least 3
-consecutive `-99` reads must be tolerated without the value being lost or
-the entity's reported mode/preset changing), matching the debounce guarantee
-§5c already gives the circulation-pump indicator.
-
-## 10a. User-facing errors for actions
-
-§10 covers background polling, where failures stay silent and the last
-valid value is kept. Actions a user triggers - changing the target
-temperature, operating mode, profile mode, or power level, turning on/off,
-and the `rediscover` action (§16a) - must instead report a failure to the
-user in a clear, translated message, never as a raw Python exception
-(`ValueError`, `ModbusClientError`, `OSError`, ...) with a traceback.
-
-Two kinds of failure must be distinguished, using Home Assistant's own
-exception classes:
+Background polling never raises (§10). Actions a user triggers – target
+temperature, operating mode, preset, power level, on/off, rediscovery – report
+failures as translated messages, never as a raw Python exception with a
+traceback:
 
 | Failure | Exception | Examples |
 | --- | --- | --- |
-| The request itself is invalid | `ServiceValidationError` | target temperature outside the mode's range (§5a); power level outside `0`-`10`; unsupported HVAC or preset mode; preset change outside heating mode (§5a.1a); setting a value whose register is not configured for this room |
-| The request is valid but could not be carried out | `HomeAssistantError` | module not reachable or reconnecting (§11c); response timeout; Modbus exception response from the device; rediscovery failed |
+| The request itself is invalid | `ServiceValidationError` | temperature outside the mode's range; power level outside `0`-`10`; unsupported mode or preset; preset outside heating mode; register not configured for this room; unknown device; module not loaded |
+| A valid request could not be carried out | `HomeAssistantError` | module unreachable or reconnecting; timeout; Modbus exception response; rediscovery failed |
 
-Rules:
-
-- Every such exception must be raised with `translation_domain` set to the
-  integration's domain, a `translation_key`, and `translation_placeholders`
-  for the relevant values (requested value, allowed range, mode, module
-  name, underlying error). The message for every key must exist in the
-  `exceptions` section of every `translations/*.json` file, in each
-  language the integration supports; no user-facing error text may be
-  hardcoded.
-- A transport error must be chained (`raise ... from err`) so the
-  underlying cause remains available in the log at DEBUG level, but it must
-  not be logged with a traceback at ERROR level for an ordinary
-  communication failure.
-- Validation happens before anything is sent to the device; an invalid
-  request must never cause a Modbus write.
-- A failed write leaves the entity's displayed value unchanged (§5a); the
-  value is only updated after the write has been acknowledged.
-- This section does not change §10: errors during background polling still
-  keep the last valid value and are reported only through the diagnostic
-  entities, not raised.
+- Every exception carries `translation_domain`, `translation_key`, and
+  `translation_placeholders`; every key has a message in the `exceptions`
+  section of every translation file.
+- Transport errors are chained (`raise ... from err`) and logged at DEBUG, not
+  as an ERROR traceback.
+- Validation happens before anything is sent; an invalid request never causes
+  a write.
+- A failed write leaves the displayed value unchanged.
 
 ## 11. Modbus transaction validation
 
-If a Modbus/TCP response contains a transaction ID, the client must validate it before accepting the payload as valid.
+Every response must pass all of these checks before its values are used:
 
-Required behavior:
+- the transaction ID matches the request (a mismatch raises `ValueError`);
+- the function code echoes the request's; a code with the high bit set (e.g.
+  `0x83`) is a Modbus exception response and is reported with the device's
+  exception code, never passed to the decoder;
+- a read returns exactly as many registers as requested.
 
-- compare the response transaction ID with the expected request transaction ID
-- reject mismatches with a `ValueError`
-- ignore any payload whose transaction ID does not match the outstanding request
-- validate that the response's function code echoes the function code that
-  was sent; a function code with the high bit set (e.g. `0x03` -> `0x83`)
-  is a Modbus exception response and must be rejected as such (surfacing
-  the device's exception code) rather than being handed to the register
-  decoder, which cannot tell an exception response apart from a
-  short/garbled payload
-- validate that a read response decodes to exactly as many registers as the
-  request asked for; a response with a different register count must be
-  rejected rather than silently handed to the caller at the wrong list index
+TCP is a byte stream: the client first reads the 6-byte MBAP header and then
+exactly as many bytes as its length field states, reassembling a response
+split across several TCP segments, instead of assuming one read returns the
+whole frame.
 
-These checks (transaction ID, function code, register count) are all
-transport-level integrity checks on the same response and must all pass
-before a read's decoded values are treated as valid.
+### 11a. Frame-level logging
 
-TCP is a byte stream, not message-framed: a single read from the socket can
-legitimately return fewer bytes than a complete response even without EOF,
-if the response is delivered split across more than one TCP segment. The
-client must reassemble a complete frame before any of the checks above run,
-by reading the 6-byte MBAP header first and then reading exactly as many
-further bytes as that header's length field states follow it — not by
-issuing one fixed-size read and assuming it returned the whole frame.
+With the integration's logger at DEBUG (Home Assistant's `logger.logs`), every
+TX and RX frame is logged with direction, host, port, length, transaction ID,
+unit ID, function code, and the complete frame in hex. This is the only switch
+(no separate option), it is off by default, and it never changes protocol
+behaviour. Logs contain no credentials or unrelated Home Assistant state; a
+malformed or truncated frame is logged safely. Response validation (§11) runs
+after the RX frame is logged.
 
-## 11a. Frame-level logging and diagnostics
+### 11b. Request serialization
 
-The Modbus transport must provide optional frame-level debug logging for
-diagnosing connection and protocol problems. When enabled, each transmitted
-(`TX`) and received (`RX`) frame must be logged at DEBUG level with:
+All of a module's traffic shares one connection. At most one request is in
+flight; its response is read before the next request is sent, so frames can
+never interleave or be attributed to the wrong request.
 
-- direction (`TX` or `RX`)
-- target host and port
-- frame length
-- transaction ID
-- unit ID
-- function code
-- complete frame bytes in hexadecimal form
+### 11c. Connection loss and automatic reconnection
 
-Frame logging must be disabled by default and must be controllable without
-changing the protocol behavior. Logs must not contain passwords, credentials,
-or unrelated Home Assistant state. A malformed or truncated frame must still
-be safe to log and must not cause a secondary logging exception.
+A connection that breaks during operation (base unit or WLAN module restart,
+Wi-Fi or router outage, peer closing the connection) must never require a
+manual reload; the integration resumes on its own once the module is reachable.
 
-Frame logging must be gated purely on Home Assistant's standard
-`logger.logs` mechanism for this integration's logger
-(`isEnabledFor(logging.DEBUG)`) — there must be no separate per-client or
-per-config-entry toggle to keep in sync with it. One control surface means
-raising the logger to DEBUG is always sufficient to turn frame logging on,
-and dropping back below DEBUG is always sufficient to turn it off.
+- **Discarding:** a socket error/EOF, a response timeout, or any integrity
+  failure of §11 (transaction ID, function code, register count, malformed
+  frame) discards the connection – closing the socket (bounded by the
+  timeout) and dropping all buffered bytes – because the byte stream can no
+  longer be trusted to line up with the requests. A well-formed Modbus
+  exception response does **not** discard the connection.
+- **Reconnecting:** the next request reconnects lazily, inside the
+  serialization lock (§11b). After a failed attempt, further attempts back off
+  from `5` s, doubling up to the module's `polling_interval`; requests during
+  the back-off fail immediately. A successful connection resets the back-off.
+- **Retrying:** a read that hit a broken connection is retried at most once on
+  the new connection; a write is never retried automatically.
+- **During an outage** entities keep their last valid values (§10); nothing
+  raises out of an entity update, blocks the event loop beyond the timeout, or
+  affects another module.
+- **Logging:** the loss is logged once at WARNING, the restoration once at
+  INFO. The number of reconnections and the time of the last one are
+  connection-health metrics (§16b).
+- **Unload:** after `disconnect()` the client never reconnects, even for a
+  request that was already queued.
 
-The same response transaction-ID validation used by normal operation must run
-after an RX frame is logged. This ensures that debug output can be correlated
-with the request while mismatched responses are still rejected.
+## 12. Implementation, packaging, and release
 
-## 11b. Request serialization
+- Type-annotated Python; tested on Python 3.12 (pinned test environment) and
+  the Python version of the newest Home Assistant (§12a). The minimum Home
+  Assistant version is the one in `hacs.json`.
+- Clear separation of register map (`registers.py`), transport
+  (`modbus_handler.py`), polling (`coordinator.py`), and entity platforms; no
+  placeholder-only code paths.
+- `manifest.json` declares `config_flow: true` and `@mikefogel` as code owner;
+  `hacs.json` keeps `content_in_root: false` and contains only keys the
+  current HACS schema accepts (domain and IoT class come from
+  `manifest.json`).
+- Development-only files (`tests/`, `requirements-test.txt`, `pytest.ini`,
+  `.github/`, `.gitattributes`, `.gitignore`) are versioned but marked
+  `export-ignore` in `.gitattributes`, so release archives do not contain
+  them; HACS installs only `custom_components/viega_fonterra_modbus/`.
+  Personal tooling (`.claude/`, private scripts) is not versioned at all
+  (`.gitignore`). Files are never deleted to keep them out of a release.
+- `CHANGELOG.md` (Keep a Changelog, emoji headings: ⚠️ for anything users
+  must check after updating, ✨ Added, 🔄 Changed, 🐛 Fixed) lists every
+  user-visible change under `[Unreleased]` as it is committed.
+- A release: renames `[Unreleased]` to the new version and date; sets the same
+  version in `manifest.json` (`1.2.0`) and the tag (`v1.2.0`); is tagged only
+  from a commit whose CI passed (§12a); checks the tagged manifest and
+  `git archive <tag>` for development files; never replaces an existing remote
+  tag; uses the changelog section as GitHub release notes; and is complete only
+  once branch and tag are on the remote.
 
-A single Modbus/TCP connection is shared by every entity belonging to a
-config entry (one room's Climate entity alone can perform several reads per
-cycle, plus separate sensor, number, and binary sensor entities). Home
-Assistant may invoke these entities' update methods concurrently, so the
-transport must serialize requests on a given connection — at most one
-request may be in flight, and its response must be read before the next
-request is sent — so that TX/RX frames from different entities can never
-interleave on the wire and be misattributed to the wrong request.
+### 12a. Tests, continuous integration, and diagnostics export
 
-## 11c. Connection loss and automatic reconnection
+**Tests** use `pytest-homeassistant-custom-component` (pinned in
+`requirements-test.txt`) with a real Home Assistant instance for everything a
+stand-in cannot verify: config and options flows (success, cannot-connect,
+duplicate host/port, multi-actuator round trip), the setup lifecycle (setup,
+reload with stable unique IDs, connection retry, removal also when
+`disconnect()` fails, one module's reload leaving another untouched, entities
+fed by the polling cycle), repairs, and the blueprint. Unit tests cover
+protocol framing, registers, discovery, and entity behaviour.
 
-The Modbus/TCP connection opened during setup (§6a) will break during normal
-operation, for example when the base unit or WLAN module restarts, the Wi-Fi
-link drops, a router restarts, or the device closes an idle connection. Such
-an outage must never require the user to reload the integration: once the
-device is reachable again, the integration must resume reading and writing on
-its own.
+The update listener reloads an entry only for a change that differs from the
+configuration its running setup applied; persisting the discovered topology
+during setup (§4a) must not cause a second setup, discovery, and connection.
 
-**Detecting a broken connection.** The client must treat its connection as
-broken and discard it when a request fails with any of:
+**Continuous integration** (GitHub Actions, `.github/workflows/`) runs on
+every push to `main` and every pull request: the test suite with the pinned
+environment (`tests.yml`), and hassfest plus the HACS validation
+(`validate.yml`, also weekly). A weekly run (`latest-home-assistant.yml`, also
+on demand) tests against the newest test harness and thus the newest Home
+Assistant; a failure there means "update the pinned version", not a release
+blocker.
 
-- end of stream, connection reset, or any other socket error (`OSError`);
-- a response timeout;
-- a transport integrity failure (§11): transaction-ID mismatch, unexpected
-  function code (other than a valid Modbus exception response), wrong register
-  count, or an incomplete/malformed frame.
-
-Discarding the connection after a timeout or an integrity failure is
-mandatory, not only after a socket error: once one response has been missed
-or misread, the byte stream can no longer be trusted to be aligned with the
-requests. Keeping it would let a late response to an earlier request be
-accepted as, or rejected in place of, the answer to a later one, so every
-subsequent request could fail or be misattributed. A Modbus exception
-response (e.g. `0x83` with a valid exception code) is a well-formed answer
-from a healthy connection and must *not* discard the connection.
-
-**Discarding a connection** means closing the socket (bounded by the
-configured timeout, as for unload), clearing any partially received data, and
-marking the client as disconnected, so that no stale byte of the old
-connection can be read in response to a later request.
-
-**Reconnecting.** A disconnected client must reconnect lazily before the next
-request it is asked to send, inside the same serialization lock as that
-request (§11b), so that a reconnect can never interleave with another
-request. Reconnection attempts must be rate-limited: after a failed attempt,
-further attempts must wait for a back-off that starts at `5` seconds and
-doubles up to the module's `polling_interval` (§6b), and requests arriving
-during the back-off must fail immediately with `ModbusClientError` instead of
-each waiting for its own connection timeout. A successful connection resets
-the back-off.
-
-**Retrying the failed request.** A *read* that failed because the connection
-was broken may be retried at most once, immediately, on a newly established
-connection, so that the first poll after an outage does not lose a whole
-cycle. A *write* must never be retried automatically; it fails, the error is
-surfaced to the caller (as for any failed write, §5a), and the next write
-uses a new connection.
-
-**Behaviour during an outage.** All entities keep their last valid values
-while the connection is down (§10); a lost connection must not reset any
-value, mode, or preset. A failed reconnection attempt must not raise out of an
-entity update, block Home Assistant's event loop beyond the configured
-timeout, or affect any other configured module (§6a).
-
-**Logging and diagnostics.** The loss of a connection must be logged once at
-`WARNING` level and its restoration once at `INFO` level - not once per
-failed request or per poll cycle. The connection-health diagnostics (§16b)
-must additionally count the number of reconnections and record the time of
-the last successful reconnection.
-
-**Unload.** After `disconnect()` has been called for unloading or removing
-the module, the client must not reconnect again, even if a request that was
-already queued runs afterwards.
-
-## 12. Technical implementation requirements
-
-- Python 3.12 compatible code
-- type-annotated modules
-- clear separation between registry, device registry, sensor layer, and Modbus transport
-- no placeholder-only final state
-- tests must cover protocol framing, register definitions, room discovery, multi-device support, and thermostat behavior
-
-Packaging and release:
-
-- `manifest.json` must declare `config_flow: true` and contain a
-  `config_flow.py` using the same domain as the manifest — a UI config flow
-  implemented without the manifest flag makes Home Assistant report the
-  integration as YAML-only.
-- `hacs.json`'s `content_in_root` must stay `false` for this repository's
-  layout (the integration lives under
-  `custom_components/viega_fonterra_modbus/`). `hacs.json` must contain only
-  keys the current HACS schema allows: HACS takes the domain and IoT class
-  from `manifest.json`, and its validation rejects `domains` and
-  `iot_class` in `hacs.json` (found by the CI HACS check, §12a).
-- A release must use the same version number in `manifest.json` and its Git
-  tag (e.g. manifest `0.1.5` with tag `v0.1.5`); verify the manifest content
-  actually committed at that tag, not only the working tree, before
-  publishing. Existing remote tags must not be silently replaced.
-- A release is only complete once both the branch and the tag are confirmed
-  on the remote (a working, authenticated Git remote — SSH key or HTTPS
-  credentials); a local commit or tag alone is not a release.
-- Development-only files stay in the repository and are versioned with the
-  code, but must not be part of a release download. HACS installs only
-  `custom_components/viega_fonterra_modbus/` from a release tag; GitHub's
-  automatic "Source code" archives are built with `git archive`, so every
-  development-only path (`tests/`, `requirements-test.txt`, `pytest.ini`,
-  `.github/`, `.gitattributes`, `.gitignore`) must be marked
-  `export-ignore` in `.gitattributes`. Local, personal tooling (the
-  `.claude/` folder, personal release scripts) is not versioned at all and
-  belongs in `.gitignore` instead. Files must not be deleted from the
-  repository before a release to keep them out of it. Before publishing,
-  check the archive of the release commit (`git archive <tag> | tar -t`)
-  for development files; any new development-only path must be added to
-  `.gitattributes`.
-- The test suite must pass before a release is tagged.
-- `CHANGELOG.md` (Keep a Changelog format, with emoji section headings:
-  ⚠️ for anything users must check after updating, ✨ Added, 🔄 Changed,
-  🐛 Fixed) lists every user-visible change under `[Unreleased]` as it is
-  committed; a release renames that section to
-  the new version and date, and its text is used as the GitHub release
-  notes.
-
-## 12a. Test coverage and diagnostics export
-
-Two implementation requirements that do not fit naturally under a single
-register or entity section above:
-
-### Full configuration-flow tests
-
-The test suite must use the official
-`pytest-homeassistant-custom-component` test harness with a real Home Assistant
-fixture for setup, reconfiguration, reload, connection retry, and removal
-flows. Pure parsing tests remain appropriate for isolated input validation, but
-they do not replace end-to-end flow tests. The harness and its pinned compatible
-dependencies must be declared in `requirements-test.txt`.
-
-The harness is set up (`tests/conftest.py`) and covers the setup flow's
-successful-connection, cannot-connect, and duplicate-host/port-rejection
-paths, and the options flow's save/cannot-connect paths, including a
-multi-actuator room round trip (`tests/test_config_flow_flows.py`). Setup,
-reload, connection retry, and removal are covered through the harness in
-`tests/test_setup_lifecycle.py`: entry states, stable entity unique IDs
-across a reload, every opened connection being closed again, removal while
-`disconnect()` fails, and one module's reload leaving another untouched.
-
-Setting up an entry persists the discovered rooms and identity into its
-options, which also fires the entry's update listener. That listener must
-not reload the entry for this self-made change - only for a change that
-differs from the configuration the running setup applied - otherwise every
-first setup (and every topology change) immediately runs a second setup
-with a second discovery and a second connection.
-
-### Continuous integration
-
-Every push and pull request to the GitHub repository must run, as GitHub
-Actions workflows under `.github/workflows/`:
-
-- the full test suite with the pinned `requirements-test.txt` on Python 3.12;
-- **hassfest**, Home Assistant's own validator for `manifest.json`,
-  `translations/*.json`, `services.yaml`, and the integration's structure;
-- the **HACS validation** action for the repository layout and `hacs.json`.
-
-In addition, a scheduled run (weekly, and on demand) must run the test suite
-against the latest `pytest-homeassistant-custom-component` release, so
-breaking changes in new Home Assistant versions are noticed before users
-report them. That run reports a failure but does not block anything; it is a
-signal to update the pinned version, not a release gate. A release may only
-be tagged from a commit whose regular CI run passed (§12).
-
-### Configuration diagnostics export
-
-The integration must implement Home Assistant's built-in diagnostics
-platform (`diagnostics.py::async_get_config_entry_diagnostics`) so a user
-can download a JSON snapshot of a module's resolved configuration from the
-standard "Download diagnostics" action, without reading debug logs. The
-export must contain:
-
-- the unit: configured `device_name`, `host` (redacted), `port`,
-  `polling_interval`, `modbus_timeout`, and the discovered WLAN-module and
-  base-unit serial numbers and base-unit name (§3a)
-- every room: `room_id`, resolved `room_number`, `name`, and its resolved
-  current-temperature/target-temperature/power-level/error-code register
-  addresses (§5b)
-- every actuator of every room (not only the primary one, §4): its
-  actuator id and its resolved position/return-temperature/Raum-ID register
-  addresses (§4a)
-
-This must be built entirely from data already held in `hass.data[DOMAIN]`
-`[entry_id]` and the pure register-resolution helpers in `registers.py`; it
-must not perform additional Modbus reads. `host` is redacted via
-`async_redact_data` since diagnostics dumps are routinely pasted into public
-issue trackers.
+**Diagnostics export.** "Download diagnostics" returns, without any extra
+Modbus read: the module's configuration (`host` redacted) and identity; every
+room with its number, name, and resolved register addresses; every actuator
+of every room with its registers; and a bounded extended snapshot (§16e).
 
 ## 13. Acceptance criteria
 
-The integration is considered ready for the next phase when:
+### Setup and modules
 
-- multiple devices can be configured and kept separate
-- WLAN module serial number is discovered and exposed as a read-only diagnostic value
-- base-unit serial number is discovered and exposed as a read-only diagnostic value
-- base-unit designation is discovered and exposed independently from the user-defined device name
-- base-unit error code and human-readable error status are exposed diagnostically
-- a non-zero base-unit error code activates the base-unit error indicator
-- Viega modules can be added through the Home Assistant UI without YAML or JSON
-    editing
-- each module accepts an IP address or hostname and a configurable Modbus TCP port
-- each module has an editable display name in the setup and options flows
-- changing a module's name, host, or port through the UI is persisted and applied
-    to that module only
-- a module (its device, entities, and connection) can be deleted through the
-    Home Assistant UI, including while the device is offline, without
-    affecting any other configured module
-- initial room discovery reveals actor/sensor mappings including non-1:1 topologies
-- a module can be added through the setup form without typing any room mapping
-- room thermostats exist as entities with target and current temperature
-- room thermostats expose the measured Ist-Temperatur and writable Soll-Temperatur
-  through one native Climate entity
-- supported heating, cooling, and off modes are represented by the Climate
-  `hvac_mode`; automatic heating/cooling is not exposed because Viega
-  documents it as an external Change-over relay function
-- changing the heating/cooling mode writes the documented operating-mode value
-  and does not overwrite either temperature value
-- the Climate entity exposes `hvac_action` (`heating`/`cooling`/`idle`/`off`)
-  derived from the operating mode and the positions of *all* of the room's
-  actuators, so the built-in thermostat/tile cards show the current action and
-  the history graph shows colored heating/cooling bands (§5a.2)
-- every exposed value and control is usable with Home Assistant's built-in
-  cards alone, without HACS frontend cards (§5a.3)
-- the preset (profile-mode) control is offered only in heating mode, and a
-  preset change outside heating mode is rejected without a write (§5a.1a)
-- the Climate entity supports `climate.turn_on`/`climate.turn_off`;
-  `turn_on` restores the last non-off operating mode, also after a restart
-  (§5a.1b)
-- invalid user requests raise a translated `ServiceValidationError` and
-  failed device writes raise a translated `HomeAssistantError`; no raw
-  `ValueError`/`ModbusClientError` reaches the user, and every exception key
-  exists in every `translations/*.json` (§10a)
-- no entity shows a hardcoded English state, attribute text, or unit; the
-  actuator position, circulation pump, and room diagnostic use the icons of
-  §5d (§3b, §5d)
-- tests and other development-only files are versioned in the repository but
-  excluded from release archives via `.gitattributes` `export-ignore` (§12)
-- manifold flow temperature, per-actuator return temperature, and per-actuator
-  position are each exposed as their own linked entity (not only as Climate
-  attributes)
-- register definitions are externally defined and not hardcoded in the sensor layer
-- Modbus request/response handling is covered by tests
-- an error sentinel of `-99` keeps the previous valid value instead of overwriting it
-- Modbus TCP transaction IDs are validated before payload acceptance
-- optional DEBUG logging records every Modbus TX/RX frame with protocol metadata
-- frame logging is disabled by default and does not alter normal communication
-- failed unit values are exposed via diagnosis text entities that show the textual error state
-- each config entry's `polling_interval` governs how often its entities perform actual Modbus reads
-- a connection failure during setup lets Home Assistant retry instead of leaving the entry broken
-- concurrent entity updates on one config entry never interleave requests on the shared connection
-- every linked entity's unique ID is based on entry ID and `room_id`, not the display name
-- the configured `device_name` is used as the Home Assistant device name everywhere, not a fixed string
-- a room mapping without an explicit `room_number` still resolves working default registers from its `room_id`
-- the Climate entity's `preset_mode` labels ("manual"/"profile"/"setback") are localized through Home Assistant's entity translation mechanism, not shown as raw English identifiers
-- every linked entity's display name (identity/diagnostic sensors, flow/return-temperature sensors, actuator position, power level, room diagnostics) is localized through `translation_key`/`translation_placeholders` and `translations/en.json`+`translations/de.json`, not a hardcoded English string set on `_attr_name`
-- additional actuators in a multi-actor room are exposed as their own linked sensors, not dropped
-- a module's "Download diagnostics" export lists the unit identity and every room's name, id, and actuator(s) with their resolved register addresses, with `host` redacted
-- one circulation-pump binary sensor per module is `on` when any used actuator is confirmed open and `off` once all are confirmed closed, `None` before any actuator has settled, with each actuator's contribution debounced to 3 consecutive identical reads and unaffected by failed/`-99` reads
-- adding a module whose host/port already belongs to an existing config entry is rejected instead of creating a duplicate, uncoordinated set of entities and connections
-- every entity on every platform (climate, sensor, binary_sensor, number, diagnostic) restores its last known value after a restart via `RestoreEntity`, including the Climate entity's `hvac_mode`, `preset_mode`, and every `extra_state_attributes` value, not only current/target temperature (§15)
-- every config/options flow validation and connection error is shown as a translated message in every language `translations/*.json` supports, not a raw error key
-- a Modbus response split across more than one TCP segment is still reassembled and decoded correctly, not rejected as truncated
-- after the connection to a module is lost (device restart, Wi-Fi outage, socket closed by the peer), the integration reconnects on its own once the device is reachable again, without a manual reload; entities keep their last valid values during the outage (§11c)
-- a response timeout or transport integrity failure discards the connection, so a late or misaligned response can never be accepted for a later request (§11c)
-- reconnection attempts are rate-limited with back-off, a failed read is retried at most once on the new connection, writes are never retried automatically, and no reconnection happens after the module is unloaded (§11c)
+- Modules are added, edited, and removed in the UI only, with host or
+  hostname, port, display name, polling interval, and timeout; no room mapping
+  is typed at setup.
+- A duplicate host/port is rejected; every form error is a translated message.
+- Several modules stay fully independent; each device carries its own
+  `device_name`.
+- A module can be removed also while offline; an unreachable module at setup
+  is retried by Home Assistant.
+- Setup connects and discovers once; it does not reload itself.
 
-## 14. (Merged) Session lessons and resolved errors
+### Discovery
 
-This section used to be a standalone, append-only log of implementation and
-release lessons. Each entry's substance has been folded into the normative
-section it actually concerns (register addressing → §5b; write function
-code → §5b; write-serialization/packaging/release process → §12; state
-restoration scope → §15; multi-actuator room editing → §6a; Modbus TCP
-frame reassembly → §11; config-flow error translation → §6a; duplicate
-device prevention → §6a; frame-logging's single control surface → §11a),
-so the same information is visible next to the requirement it clarifies
-instead of only in a separate history. The section number is kept unused
-rather than reassigned, matching §8's convention, so existing references to
-§14 are not silently repointed at unrelated content.
+- Rooms, names, and actuator assignments (including several actuators per
+  room) come from the device; a stored mapping is only a fallback.
+- Every actuator of a room has its own position and return-temperature
+  entities.
+- Rediscovery updates entities in place with stable unique IDs (§16a).
+
+### Climate
+
+- One Climate entity per room with current and target temperature, correct
+  range and step per mode, and a target control only when writable.
+- Heat, cool, and off map to the documented operating-mode values; no
+  automatic mode; mode changes never touch the temperatures.
+- Presets only in heating mode; on/off restores the last active mode, also
+  after a restart.
+- `hvac_action` reflects all of the room's actuators and is usable by the
+  built-in cards and history graph.
+
+### Other entities
+
+- Flow temperature (one per module), return temperature and position (per
+  actuator), power level (Number), base-unit identity and error sensors, room
+  diagnostics, circulation-pump indicator with per-actuator 3-cycle debounce,
+  connection-health and actuator-statistics sensors.
+- Every name, text state, text attribute, and word unit is translated; icons
+  per §5d.
+- Every entity restores its last value after a restart (§15).
+
+### Data, transport, and polling
+
+- `-99`, failed reads, and outages keep the last valid value; nothing is
+  scaled before the sentinel check.
+- Transaction ID, function code, and register count are validated; split TCP
+  frames are reassembled; requests never interleave; frame logging is
+  DEBUG-only.
+- One polling cycle per module reads adjacent registers in blocks without
+  bridging gaps and updates all entities; writes trigger an early cycle and
+  are verified.
+- After a connection loss the integration reconnects on its own with
+  back-off; a late or misaligned response is never accepted; writes are never
+  retried; no reconnect after unload.
+
+### Errors and diagnostics
+
+- Invalid requests raise translated `ServiceValidationError`s, failed actions
+  translated `HomeAssistantError`s; no raw exception reaches the user.
+- An unreachable module and base-unit errors appear under Settings → Repairs
+  and clear themselves.
+- The diagnostics export contains configuration, identity, topology, and
+  register addresses with the host redacted.
+
+### Project
+
+- Everything is usable with built-in dashboard cards; the pump blueprint and
+  the heating-time guide work with built-in features.
+- Tests pass on the pinned and the newest Home Assistant; hassfest and HACS
+  validation pass; release archives contain no development files.
+
+## 14. (Not used)
 
 ## 15. State restoration after a restart
 
-After a restart of Home Assistant or of this integration, once setup has
-completed successfully, every register-based entity on every platform
-(`climate`, `sensor`, `binary_sensor`, `number`, and the diagnostic text
-entities) must restore and display the last value that was valid before the
-restart, via Home Assistant's `RestoreEntity` mechanism. Neither a
-hardcoded default, nor `unavailable`, nor `unknown` may be shown while
-waiting for the first post-restart poll to complete — a restart must not be
-visible in the displayed values at all.
+After a restart of Home Assistant or a reload, every entity on every platform
+shows its last valid state immediately (`RestoreEntity`) – never a default,
+`unknown`, or `unavailable` while waiting for the first polling cycle. This
+covers an entity's entire displayed state; for the Climate entity that is
+`hvac_mode`, `preset_mode`, current and target temperature, and every
+attribute of §5a (including `actuator_positions` and `last_active_hvac_mode`,
+so `hvac_action` and `turn_on` work right away). Exceptions, by design: the
+connection-health sensors (they describe the new connection) and the
+open-actuator count of §16f (only meaningful after a fresh debounce).
 
-This applies to an entity's *entire* displayed state, not only to whichever
-attribute a first pass at implementing this happened to cover. For the
-Climate entity in particular, that means restoring `hvac_mode` (the
-entity's `state`) and `preset_mode` (a `last_state.attributes` key) in
-addition to `current_temperature`/`target_temperature`, and every value in
-`extra_state_attributes` (`power_level`, `flow_temperature`,
-`return_temperature`, `actuator_position`, `base_unit_error_code`) — an
-entity that only restores two of its eight displayed values still violates
-this section for the other six. A commit or release note claiming this
-requirement is met is not a substitute for checking it against every entity
-class it names.
+## 16. Operational features
 
-## 16. Future operational improvements
-
-The following improvements are approved as future integration capabilities.
-They must not introduce undocumented register addresses or change the
-documented register map. The manual room/actor mapping fallback described by
-older versions of this specification is explicitly **not** part of this
-section and must not be reintroduced.
+Each feature below must not introduce undocumented registers or change the
+register map (§9).
 
 ### 16a. Explicit rediscovery
 
-The integration should provide a user-triggered `Rediscover device` action
-for an already configured entry. It must re-read documented actuator room-ID
-and room-name registers, compare the topology with the cached topology, update
-entities without recreating the config entry, preserve stable unique IDs, and
-report added, removed, renamed, or reassigned rooms and actuators. It must
-never replace successful live discovery with user-entered mapping data. The
-action must reuse the existing connection and polling lock.
+The `viega_fonterra_modbus.rediscover` service (target: the module's device)
+re-reads the Raum-ID and room-name registers, compares the result with the
+current topology, and adds, removes, or rebuilds only the affected entities –
+without reloading the entry, keeping unique IDs stable – and rebuilds the pump
+indicator if the set of used actuators changed. Changes are logged and fired
+as a `viega_fonterra_modbus_rediscovery` event. It runs on the existing
+connection without interleaving with a polling cycle, never replaces the
+topology with an empty result, requests an early polling cycle after a change,
+and reports an unknown device, an unloaded module, or a failed read as a
+translated error (§10a).
 
 ### 16b. Connection health metrics
 
-Each configured module should expose diagnostic metrics derived from existing
-Modbus activity without an additional polling request:
-
-- last successful response timestamp;
-- last failed request timestamp;
-- consecutive communication-failure count;
-- invalid-value count, including the `-99` sentinel;
-- last Modbus exception code, when available;
-- duration of the most recent successful request.
-
-These metrics are diagnostic only. Communication failures must not overwrite
-last valid device values, and network-identifying data must not be exposed as
-state or attributes.
+Diagnostic sensors per module, derived from the client's own bookkeeping
+without extra requests: last successful response, last failed request,
+consecutive failures, invalid-value count (including `-99`), last Modbus
+exception code, duration of the last successful request, number of
+reconnections, and time of the last reconnection. They never overwrite device
+values and expose no network-identifying data.
 
 ### 16c. Read-after-write verification
 
-Acknowledged writes to documented holding registers should be verified on the
-next suitable read cycle. The device value remains authoritative: if it differs
-from the requested value, the entity must reconcile to the device value and
-report a diagnostic warning. Failed writes or failed verification must not be
-treated as successful state changes. Verification must use the existing polling
-cycle and must not create a second independent poll.
+After an acknowledged write the integration requests an early polling cycle
+(§16i) and compares the device's next valid value from a **newer** cycle than
+the write with the written value. The device value is authoritative: on a
+mismatch the entity shows the device value and a warning is logged. A failed
+write is never treated as a state change.
 
 ### 16d. Contiguous register-block reads
 
-The polling layer should combine compatible adjacent reads when this reduces
-Modbus traffic. Input and holding registers must never be combined. Values may
-only be assigned to their declared addresses; response length and
-transaction/function-code validation remain mandatory; partial or invalid
-blocks must not corrupt unrelated cached values; and undocumented gaps must
-not be interpreted as real registers. This optimization must not alter polling
-intervals, availability semantics, scaling, or the public register map.
+Within a polling cycle, adjacent registers are read with one request (at most
+`125` registers). Input and holding registers are never combined, undocumented
+gaps are never bridged, and values are only assigned to their declared
+addresses. A failed block only drops its own registers from that cycle.
 
 ### 16e. Extended downloadable diagnostics
 
-The diagnostics download should optionally include a bounded, privacy-safe
-snapshot containing resolved documented addresses, last valid raw and converted
-values, read/write counters, recent Modbus exception codes, and discovery
-changes. Firmware or software versions may be included only when reported by a
-documented device source. Hostnames, IP addresses, credentials, and other
-network-identifying data must be redacted. The snapshot must have a fixed
-maximum size and must not contain unbounded frames or arbitrary memory data.
+The diagnostics export additionally contains a bounded snapshot: the
+connection-health metrics, a fixed-size history of recent Modbus exception
+codes, the documented addresses a polling cycle reads for the topology, and the
+last rediscovery's changes. No frames, no unbounded data, no firmware version
+(the device documents no such register), no network identifiers.
 
 ### 16f. Derived actuator statistics
 
-Optional diagnostic statistics may be derived from already read, debounced
-actuator-position registers: confirmed open time, confirmed open-transition
-count, time since the last confirmed transition, and the number of currently
-open actuators. These are derived values, not device registers. They must be
-unavailable until a valid debounced reading exists, use state restoration where
-practical, and must not be presented as pump-status registers.
+Diagnostic sensors derived from the pump indicator's debounced actuator values
+(no extra reads): number of open actuators, open-transition count, time of the
+last transition, and cumulative open time. The open count stays unavailable
+until a debounced value exists and is not restored; the other three are
+restored. They are not presented as device registers.
 
 ### 16g. Multi-module overview
 
-For multiple configured modules, an optional aggregate diagnostic view may show
-reachable modules, modules with base-unit errors, stale/failed communication,
-and room/actuator counts per module. Rooms with equal display names from
-different modules must not be merged. Every value must retain its source
-config entry and device identity, and one module's failure must not make
-another module unavailable.
+The `viega_fonterra_modbus.overview` service returns, per module and without
+extra reads: reachability, active base-unit error, stale/failed communication,
+and room/actuator counts. Same-named rooms of different modules are never
+merged; every value keeps its config entry ID; one module's failure never
+affects another's entry.
 
 ### 16h. Explicitly excluded capabilities
 
-The following remain excluded until Viega documents or independent hardware
-tests reproduce them: manual room mapping as a replacement for automatic
-discovery; undocumented outdoor-temperature or pump-status registers; time
-schedules, holiday programs, humidity, dew point, or firmware-version
-registers without a confirmed source; and automatic probing or writing of
-unknown or reserved addresses.
+Excluded until Viega documents them or hardware tests confirm them: manual room
+mapping as a replacement for discovery; outdoor-temperature or pump-status
+registers; time schedules, holiday programs, humidity, dew point, and
+firmware-version registers; probing or writing unknown or reserved addresses.
 
 ### 16i. Central update coordinator
 
-Implemented in `coordinator.py` (`ViegaDataCoordinator`, one
-`DataUpdateCoordinator` per config entry, stored as the entry's `polling`
-object) and `entity.py` (`ViegaCoordinatedEntity`). It replaced the former
-per-entity polling, in which every entity was polled every `5` seconds and a
-per-entity `PollingGate` with a shared cache skipped reads until
-`polling_interval` had elapsed.
+One `DataUpdateCoordinator` per module (`ViegaDataCoordinator` in
+`coordinator.py`, stored as the entry's `polling` object) runs the polling
+cycle:
 
-- One polling cycle per module at its configured `polling_interval` reads
-  every register the topology needs (`known_addresses_for_topology`) plus
-  any other register an entity has asked for in the last
-  `REQUEST_TTL_CYCLES` cycles, using the contiguous block reads of §16d, and
-  then notifies all of the module's entities together.
-- Entities set `should_poll = False` and, after each cycle, run their own
-  value handling against that cycle's data through the coordinator's
-  `read()`, which never touches the device; a register missing from the
-  cycle behaves like a failed read. They deliberately do not use Home
-  Assistant's `CoordinatorEntity`, whose availability follows the cycle's
-  success: here entities must stay available and keep their last valid
-  values during an outage, and their proven per-entity value handling
-  (`-99`, last valid value, verification) is kept as is.
-- A failed block read only drops that block's registers from the cycle; a
-  cycle never raises `UpdateFailed`.
-- A successful write (§10a) and a rediscovery that changed the topology
-  request an early cycle, which also serves read-after-write verification
-  (§16c). The cycle counter (`generation`) is what verification and the
-  circulation-pump debounce (§5c, counted once per cycle) rely on.
-- Connection loss and reconnection (§11c) stay in the transport; rediscovery
-  runs through `run_exclusive()` so it never interleaves with a cycle.
+- Once per `polling_interval` it reads every register of the topology
+  (`known_addresses_for_topology`) plus any other register an entity asked for
+  in the last `REQUEST_TTL_CYCLES` cycles, in blocks (§16d), and then notifies
+  all of the module's entities.
+- Entities (`ViegaCoordinatedEntity` in `entity.py`) set `should_poll = False`
+  and, after each cycle, run their own value handling on that cycle's data via
+  the coordinator's `read()`, which never touches the device; a register
+  missing from the cycle behaves like a failed read. They deliberately do not
+  use `CoordinatorEntity`, whose availability follows the cycle's success:
+  entities must stay available on their last values during an outage.
+- A cycle never raises `UpdateFailed`; a failed block only drops its own
+  registers.
+- A successful write and a topology-changing rediscovery request an early
+  cycle. The cycle counter (`generation`) drives write verification (§16c) and
+  the once-per-cycle pump debounce (§5c).
+- Reconnection stays in the transport (§11c); rediscovery runs through
+  `run_exclusive()` so it never interleaves with a cycle.
 
-The existing guarantees must be kept unchanged: last valid value on failed or
-`-99` reads (§10), entities stay available and keep their values during an
-outage, state restoration (§15), request serialization (§11b), and the
-diagnostics of §16b/§16e. Because this restructures every platform, it must
-be done as a separate change with the full test suite passing before and
-after, not combined with feature work. It is scheduled after §12a's
-continuous integration and §16j-§16l, so CI already guards the refactoring.
+### 16j. Repair issues
 
-### 16j. Repair issues for problems that need attention
+Problems that need attention and do not fix themselves are raised under
+**Settings → Repairs**, so they are noticed without watching a dashboard or
+having access to the installation:
 
-Problems that need the user's attention and do not fix themselves within a
-few poll cycles must be raised in Home Assistant's built-in **Settings →
-Repairs** list (issue registry), not only in diagnostic entities, so a user
-who is not watching the dashboard - or has no physical access to the
-installation - still notices them:
+- **Module unreachable:** no successful response for `30` minutes (from the
+  last success, or from setup if there was none), checked every minute.
+  Severity `error`; placeholders: module name and time of the last success.
+- **Base-unit error:** the base-unit error code is non-zero. Severity
+  `warning` for `ERROR_CODE_WARNINGS`, `error` otherwise. Each documented code
+  has its own translation key (fully translated text); unknown codes share a
+  generic key with the code as placeholder. A new code replaces the issue.
 
-- **Module unreachable:** a module's connection has had no successful
-  response for `30` minutes (counted from the last successful response, or
-  from setup if there has never been one). Severity `error`. Placeholders:
-  module name and the time of the last successful response.
-- **Base-unit error:** the base-unit error code (§3b) is non-zero. Severity
-  `warning` for the codes the manual's table describes as warnings (`10`,
-  `22`, `24`, kept as `ERROR_CODE_WARNINGS` next to `BASE_UNIT_ERROR_CODES` in
-  `registers.py`), `error` for every other code including unknown ones. Each
-  known code has its own translation key, so the issue text is fully
-  translated (the English `BASE_UNIT_ERROR_CODES` descriptions are not
-  inserted into a translated sentence); unknown codes use one generic key
-  with the code as placeholder. A change from one non-zero code to another
-  replaces the issue.
-
-Rules:
-
-- One issue per module and problem type, with an issue ID built from the
-  config entry ID, so several modules never overwrite each other's issues.
-- Issues are not fixable through a repair flow (`is_fixable=False`); they
-  clear themselves: the unreachable issue on the next successful response,
-  the error issue when the code returns to `0`.
-- Title and description are translated through the `issues` section of every
-  `translations/*.json`; no hardcoded text.
-- Unloading or removing a module deletes its issues; a reload re-evaluates
-  them from scratch.
-- Only values the integration already reads are used - no extra Modbus
-  request. A `-99`/failed read of the error code neither raises nor clears
-  the error issue (§10).
-- A module that cannot be reached at setup is not loaded at all
-  (`ConfigEntryNotReady`, §6a) and is already shown by Home Assistant as
-  "retrying setup"; no repair issue is raised for that case.
+Rules: one issue per module and type (issue ID from the config entry ID); not
+fixable through a flow – each clears itself (next successful response; code
+back to `0`); titles and descriptions come from the `issues` section of every
+translation file; unload and removal delete a module's issues; only values the
+integration already reads are used, and a failed or `-99` error-code read
+neither raises nor clears the issue. A module that cannot be reached at setup
+is already shown by Home Assistant as "retrying setup" and gets no issue.
 
 ### 16k. Circulation-pump blueprint
 
-The repository must ship an automation blueprint (`blueprints/automation/
-viega_fonterra_modbus/circulation_pump.yaml`) that switches a separately
-wired circulation pump from the derived circulation-pump indicator (§5c), so
-users can import it with one click instead of copying YAML:
+The repository ships an automation blueprint
+(`blueprints/automation/viega_fonterra_modbus/circulation_pump.yaml`) that
+switches a separately wired pump from the pump indicator(s) of §5c:
 
-- Inputs: one or more circulation-pump indicators (`binary_sensor` of this
-  integration, one per module), the pump switch (`switch`, `light`, or
-  `input_boolean`), and a run-on time after the last actuator closes
-  (default `5` minutes, `0` allowed). Several indicators cover a pump shared
-  by several modules (e.g. one pump for three floors, each with its own
-  Fonterra base unit); separately wired pumps per module use one automation
-  each. An automation created with a single indicator keeps working.
-- Turns the pump on as soon as any selected indicator turns `on`; turns it
-  off only when every selected indicator is `off` and the one that turned
-  off last has stayed `off` for the run-on time. If any indicator turns `on`
-  again during the run-on time, the pump stays on.
-- Ignores `unavailable`/`unknown` indicator states: while any selected
-  indicator is in such a state, the pump is not switched off (it is still
-  switched on when another indicator turns `on`).
-- Uses only automation syntax supported by the minimum Home Assistant
-  version in `hacs.json`.
-- The README links an import button
-  (`my.home-assistant.io/redirect/blueprint_import`) to the blueprint's raw
-  URL on the `main` branch and explains step by step how to create the
-  automation, for one shared pump and for one pump per module. The blueprint is part of release archives.
-- A test validates the blueprint against Home Assistant's blueprint schema.
+- Inputs: one or more pump indicators (one per module that the pump supplies
+  – e.g. all three floors for one shared pump, or one floor for its own pump),
+  the pump switch (`switch`, `light`, or `input_boolean`), and a run-on time
+  (default `5` minutes, `0` allowed). Automations created with a single
+  indicator keep working.
+- The pump turns on as soon as any indicator turns `on`, and off only when all
+  indicators are `off` and the last one has stayed `off` for the run-on time;
+  an indicator turning `on` during the run-on time keeps the pump running.
+  After a Home Assistant start with an indicator `on`, the pump is switched on.
+- While any indicator is `unavailable`/`unknown`, the pump is not switched off.
+- Only automation syntax supported by the minimum Home Assistant version is
+  used; the blueprint is part of release archives.
+- The README has a one-click import button (pointing to `main`) and a
+  step-by-step guide for one shared pump and for one pump per module.
+- Tests validate the blueprint against Home Assistant's schema and run real
+  automations from it, including the three-floor case.
 
 ### 16l. Heating time per room (documentation)
 
-The README must show how to get each room's heating time per day from the
-Climate entity's `hvac_action` (§5a.2) with Home Assistant's built-in
-helpers (UI and YAML), and how to show it on a dashboard with built-in cards
-(§5a.3). This needs no code in the integration. Because the **History
-stats** helper counts an entity's state, not an attribute, the guide first
-derives a template binary sensor ("room is heating") from `hvac_action` and
-then applies History stats to that sensor; the README snippet must be kept
-working against the Home Assistant versions the CI tests (§12a).
+The README shows how to get each room's daily heating time from `hvac_action`
+with built-in helpers (UI and YAML): a template binary sensor ("room is
+heating"), because the History stats helper counts states, not attributes,
+then a History stats sensor on it, and a `statistics-graph` bar chart of the
+daily totals. No integration code is involved; the snippet must keep working
+on the Home Assistant versions CI tests.
 
-## 17. Open items (to do, not yet scheduled)
+## 17. Open items (not yet scheduled)
 
-Approved ideas that are deliberately postponed. They are not requirements
-yet; each one must be specified in its own section before it is implemented.
+Approved ideas, deliberately postponed. Each must be specified in its own
+section before it is implemented.
 
-- **Submit the brand icons** in `brands/custom_integrations/
-  viega_fonterra_modbus/` to the `home-assistant/brands` repository, so Home
-  Assistant shows the integration's icon under Settings → Devices &
-  services. Check first whether Home Assistant's current handling of custom
-  integration brands still requires that route.
+- **Submit the brand icons** in `brands/custom_integrations/viega_fonterra_modbus/`
+  to `home-assistant/brands`, so Home Assistant shows the integration's icon
+  under Settings → Devices & services. First check whether Home Assistant's
+  current handling of custom-integration brands still requires that route.
 - **Decide whether to smooth `hvac_action`** (§5a.2). The actuators toggle
-  every few minutes, so heating bands in the history graph look striped.
-  Decide after observing real data from v1.1.0 whether to keep the
-  unsmoothed device state or require e.g. a minimum continuous duration
-  before reporting heating/cooling.
+  every few minutes, so the heating bands look striped (confirmed on the real
+  installation with v1.1.0). Decide whether to keep the unsmoothed device state
+  or require e.g. a minimum continuous duration before reporting heating or
+  cooling.
