@@ -25,6 +25,16 @@ from homeassistant.exceptions import (
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _no_issue_timer(monkeypatch):
+    """The stand-in `hass` objects here have no event loop for the repairs
+    check timer (spec.md 16j); that timer is covered in test_issues.py."""
+    monkeypatch.setattr(
+        "custom_components.viega_fonterra_modbus.issues.ModuleIssues.async_start",
+        lambda self: (lambda: None),
+    )
+
+
 class _FakeConfigEntriesForSetup:
     """Minimal stand-in for hass.config_entries during async_setup_entry.
 

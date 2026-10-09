@@ -201,6 +201,12 @@ BASE_UNIT_ERROR_CODES: dict[int, str] = {
     22: "Room warning: room thermostat battery is weak",
     24: "Room warning: connection to the room thermostat is weak",
 }
+#: Codes the manual's table describes as warnings rather than faults; they
+#: are reported with "warning" severity in Home Assistant's repairs list
+#: (spec.md 16j). Every other non-zero code is treated as a fault.
+ERROR_CODE_WARNINGS: frozenset[int] = frozenset({10, 22, 24})
+
+
 def describe_error_code(code: int | None) -> str:
     """Return a human-readable description for a base-unit error code."""
     if code is None:

@@ -6,6 +6,15 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Entries under Settings → Repairs when a module has not responded for
+  30 minutes and when the base unit reports an error code, with the
+  meaning of each code translated; they clear themselves.
+- Automatic checks on GitHub for every change (tests, Home Assistant's
+  hassfest validator, HACS validation) and a weekly test against the
+  newest Home Assistant version.
+
 ### Fixed
 
 - Error messages in the setup and options dialogs (e.g. "Unable to connect

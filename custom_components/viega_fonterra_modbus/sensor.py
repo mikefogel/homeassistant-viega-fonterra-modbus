@@ -355,6 +355,9 @@ class ViegaBaseUnitIdentitySensor(SensorEntity, RestoreEntity):
                 self._attr_extra_state_attributes = {
                     "description": describe_error_code(values[0])
                 }
+                issues = self.hass.data[DOMAIN][self._entry_id].get("issues")
+                if issues is not None:
+                    issues.async_update_base_unit_error(values[0])
 
         self.last_error_message = ""
 

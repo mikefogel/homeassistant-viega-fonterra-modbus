@@ -13,6 +13,7 @@ from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN, PLATFORMS
 from .errors import action_failed, invalid_request
+from .issues import ModuleIssues
 from .modbus_handler import ModbusClientError, ViegaModbusClient
 from .overview import async_multi_module_overview
 from .polling import SharedPolling
@@ -162,6 +163,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "polling": SharedPolling(),
         "identity": identity,
     }
+    # Repairs entries for an unreachable module or a base-unit error (spec.md 16j).
+    issues = ModuleIssues(hass, entry.entry_id, hass.data[DOMAIN][entry.entry_id]["device_name"])
+    hass.data[DOMAIN][entry.entry_id]["issues"] = issues
+    entry.async_on_unload(issues.async_start())
 
     # Remember the configuration this setup applies, so the update listener
     # can tell the persisting of discovered rooms below apart from a change
@@ -267,6 +272,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         entry_data = hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+        issues = entry_data.get("issues") if entry_data else None
+        if issues is not None:
+            issues.async_remove_all()
         client = entry_data.get("client") if entry_data else None
         if client is not None:
             try:

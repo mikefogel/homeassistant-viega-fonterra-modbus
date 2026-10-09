@@ -188,5 +188,55 @@
     "preset_requires_heating": {
       "message": "Der Profilmodus „{mode}“ kann nur im Heizbetrieb des Viega-Moduls gewählt werden."
     }
+  },
+  "issues": {
+    "module_unreachable": {
+      "title": "Viega-Modul {device} ist nicht erreichbar",
+      "description": "Home Assistant hat seit {since} keine Antwort vom Viega-Fonterra-Modul **{device}** erhalten. Die Raumwerte bleiben auf dem zuletzt bekannten Stand, bis es wieder antwortet.\n\nBitte prüfen, ob das Modul Strom hat und mit dem Netzwerk verbunden ist. Die Integration verbindet sich selbstständig neu; diese Meldung verschwindet automatisch, sobald das Modul wieder antwortet."
+    },
+    "base_unit_error_3": {
+      "title": "Viega-Modul {device}: Mindestens ein Raumthermostat ist nicht mehr verbunden",
+      "description": "Die Basiseinheit von **{device}** meldet Fehlercode {code}: Mindestens ein Raumthermostat ist nicht mehr mit der Basiseinheit verbunden.\n\nDiese Meldung verschwindet automatisch, sobald die Basiseinheit den Fehler nicht mehr meldet."
+    },
+    "base_unit_error_4": {
+      "title": "Viega-Modul {device}: Störung am Stellantriebs-Bus",
+      "description": "Die Basiseinheit von **{device}** meldet Fehlercode {code}: Am Bus der Stellantriebe liegt eine Störung vor.\n\nDiese Meldung verschwindet automatisch, sobald die Basiseinheit den Fehler nicht mehr meldet."
+    },
+    "base_unit_error_5": {
+      "title": "Viega-Modul {device}: Störung am Vorlauftemperaturfühler",
+      "description": "Die Basiseinheit von **{device}** meldet Fehlercode {code}: Der Vorlauftemperaturfühler meldet eine Störung.\n\nDiese Meldung verschwindet automatisch, sobald die Basiseinheit den Fehler nicht mehr meldet."
+    },
+    "base_unit_error_6": {
+      "title": "Viega-Modul {device}: Störung am Rücklauftemperaturfühler",
+      "description": "Die Basiseinheit von **{device}** meldet Fehlercode {code}: Der Rücklauftemperaturfühler meldet eine Störung.\n\nDiese Meldung verschwindet automatisch, sobald die Basiseinheit den Fehler nicht mehr meldet."
+    },
+    "base_unit_error_7": {
+      "title": "Viega-Modul {device}: Keine weiteren Raumthermostate anmeldbar",
+      "description": "Die Basiseinheit von **{device}** meldet Fehlercode {code}: An der Basiseinheit können keine weiteren Raumthermostate angemeldet werden.\n\nDiese Meldung verschwindet automatisch, sobald die Basiseinheit den Fehler nicht mehr meldet."
+    },
+    "base_unit_error_9": {
+      "title": "Viega-Modul {device}: Pufferbatterie ersetzen",
+      "description": "Die Basiseinheit von **{device}** meldet Fehlercode {code}: Die Pufferbatterie der Basiseinheit muss ersetzt werden.\n\nDiese Meldung verschwindet automatisch, sobald die Basiseinheit den Fehler nicht mehr meldet."
+    },
+    "base_unit_error_10": {
+      "title": "Viega-Modul {device}: Kondensationsgefahr",
+      "description": "Die Basiseinheit von **{device}** meldet Fehlercode {code}: Warnung: Kondensationsgefahr, weil die Vorlauftemperatur zu niedrig ist.\n\nDiese Meldung verschwindet automatisch, sobald die Basiseinheit den Fehler nicht mehr meldet."
+    },
+    "base_unit_error_21": {
+      "title": "Viega-Modul {device}: Keine Verbindung zu einem Raumthermostat",
+      "description": "Die Basiseinheit von **{device}** meldet Fehlercode {code}: Es besteht keine Verbindung zu einem Raumthermostat.\n\nDiese Meldung verschwindet automatisch, sobald die Basiseinheit den Fehler nicht mehr meldet."
+    },
+    "base_unit_error_22": {
+      "title": "Viega-Modul {device}: Batterie eines Raumthermostats schwach",
+      "description": "Die Basiseinheit von **{device}** meldet Fehlercode {code}: Warnung: Die Batterie eines Raumthermostats ist schwach.\n\nDiese Meldung verschwindet automatisch, sobald die Basiseinheit den Fehler nicht mehr meldet."
+    },
+    "base_unit_error_24": {
+      "title": "Viega-Modul {device}: Schwache Verbindung zu einem Raumthermostat",
+      "description": "Die Basiseinheit von **{device}** meldet Fehlercode {code}: Warnung: Die Verbindung zu einem Raumthermostat ist schwach.\n\nDiese Meldung verschwindet automatisch, sobald die Basiseinheit den Fehler nicht mehr meldet."
+    },
+    "base_unit_error_unknown": {
+      "title": "Viega-Modul {device}: Fehlercode {code}",
+      "description": "Die Basiseinheit von **{device}** meldet Fehlercode {code}, der in der dieser Integration bekannten Viega-Anleitung nicht beschrieben ist.\n\nDiese Meldung verschwindet automatisch, sobald die Basiseinheit den Fehler nicht mehr meldet."
+    }
   }
 }

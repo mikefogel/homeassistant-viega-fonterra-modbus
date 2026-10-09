@@ -188,5 +188,55 @@
     "preset_requires_heating": {
       "message": "Profile mode \"{mode}\" can only be selected while the Viega module is in heating mode."
     }
+  },
+  "issues": {
+    "module_unreachable": {
+      "title": "Viega module {device} is not reachable",
+      "description": "Home Assistant has received no response from the Viega Fonterra module **{device}** since {since}. Room values stay at their last known state until it responds again.\n\nCheck that the module is powered and connected to the network. The integration keeps reconnecting on its own, and this message disappears automatically once the module responds again."
+    },
+    "base_unit_error_3": {
+      "title": "Viega module {device}: A room thermostat is no longer connected",
+      "description": "The base unit of **{device}** reports error code {code}: At least one room thermostat is no longer connected to the base unit.\n\nThis message disappears automatically once the base unit no longer reports the error."
+    },
+    "base_unit_error_4": {
+      "title": "Viega module {device}: Fault on the actuator bus",
+      "description": "The base unit of **{device}** reports error code {code}: There is a fault on the actuator bus.\n\nThis message disappears automatically once the base unit no longer reports the error."
+    },
+    "base_unit_error_5": {
+      "title": "Viega module {device}: Flow-temperature sensor fault",
+      "description": "The base unit of **{device}** reports error code {code}: The flow-temperature sensor reports a fault.\n\nThis message disappears automatically once the base unit no longer reports the error."
+    },
+    "base_unit_error_6": {
+      "title": "Viega module {device}: Return-temperature sensor fault",
+      "description": "The base unit of **{device}** reports error code {code}: The return-temperature sensor reports a fault.\n\nThis message disappears automatically once the base unit no longer reports the error."
+    },
+    "base_unit_error_7": {
+      "title": "Viega module {device}: No more room thermostats can be registered",
+      "description": "The base unit of **{device}** reports error code {code}: No further room thermostats can be registered at the base unit.\n\nThis message disappears automatically once the base unit no longer reports the error."
+    },
+    "base_unit_error_9": {
+      "title": "Viega module {device}: Replace the backup battery",
+      "description": "The base unit of **{device}** reports error code {code}: The backup battery of the base unit needs to be replaced.\n\nThis message disappears automatically once the base unit no longer reports the error."
+    },
+    "base_unit_error_10": {
+      "title": "Viega module {device}: Risk of condensation",
+      "description": "The base unit of **{device}** reports error code {code}: Warning: risk of condensation because the flow temperature is too low.\n\nThis message disappears automatically once the base unit no longer reports the error."
+    },
+    "base_unit_error_21": {
+      "title": "Viega module {device}: No connection to a room thermostat",
+      "description": "The base unit of **{device}** reports error code {code}: There is no connection to a room thermostat.\n\nThis message disappears automatically once the base unit no longer reports the error."
+    },
+    "base_unit_error_22": {
+      "title": "Viega module {device}: Room thermostat battery is weak",
+      "description": "The base unit of **{device}** reports error code {code}: Warning: the battery of a room thermostat is weak.\n\nThis message disappears automatically once the base unit no longer reports the error."
+    },
+    "base_unit_error_24": {
+      "title": "Viega module {device}: Weak connection to a room thermostat",
+      "description": "The base unit of **{device}** reports error code {code}: Warning: the connection to a room thermostat is weak.\n\nThis message disappears automatically once the base unit no longer reports the error."
+    },
+    "base_unit_error_unknown": {
+      "title": "Viega module {device}: error code {code}",
+      "description": "The base unit of **{device}** reports error code {code}, which is not described in the Viega manual known to this integration.\n\nThis message disappears automatically once the base unit no longer reports the error."
+    }
   }
 }

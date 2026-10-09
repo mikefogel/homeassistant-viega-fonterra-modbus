@@ -200,6 +200,15 @@ Each module also exposes eight diagnostic sensors derived entirely from the shar
 
 These are diagnostic only: a communication failure never overwrites a room's last valid value, and no host/port/network information is exposed through them.
 
+### Repairs notifications
+
+Problems that need your attention show up under **Settings → Repairs**, so you notice them even without looking at the dashboard:
+
+- **Module not reachable** — no response from a module for 30 minutes.
+- **Base-unit error** — the base unit reports an error code, with the code's meaning from the Viega manual (e.g. "Replace the backup battery"). Warnings such as a weak thermostat battery are shown as warnings, faults as errors.
+
+Both disappear on their own once the problem is gone. They use only values the integration already reads.
+
 ### Automatic reconnection
 
 If the connection to a module drops — the base unit or WLAN module restarts, the Wi-Fi or router goes down, or the device closes the connection — the integration reconnects on its own as soon as the module is reachable again; no reload is needed. While the module is unreachable, every entity keeps its last valid value. Reconnection attempts back off from 5 seconds up to the module's polling interval, a read that hit a broken connection is retried once on the new connection, and writes are never repeated automatically. The log shows one warning when the connection is lost and one info message when it is restored.
