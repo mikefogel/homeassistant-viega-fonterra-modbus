@@ -225,6 +225,7 @@ visual and behavioral model should follow the Daikin Onecta climate integration
 | Change operating mode | Climate `set_hvac_mode` | Write the operating-mode holding register |
 | Show profile mode | Climate preset or linked Select entity | Read the active profile mode |
 | Change profile mode | Climate `set_preset_mode` or linked Select entity | Write the profile-mode holding register |
+| Show what the room is currently doing (heating/cooling/idle/off) | Climate `hvac_action` (§5a.2) | Derived from operating mode and actuator positions; read-only |
 
 The actuator-position register (manual `30250`/`30253`/`...`/`30283`, one per
 actuator, page 91) is `int16` with exactly two documented values - `0 =
@@ -321,6 +322,96 @@ register address is not configured, the entity must not advertise a write
 feature that cannot work. Readable values must remain available where possible,
 and unavailable register values must be reported through the diagnostic status
 without overwriting the last valid value.
+
+### 5a.1a. Profile mode only in heating mode
+
+The manual makes profile mode (holding `40002`) available only in heating
+mode (manual page 91). The Climate entity must therefore advertise
+`ClimateEntityFeature.PRESET_MODE` only while `hvac_mode` is `heat` (and the
+profile-mode register is configured, §5a); in `cool` and `off` mode the
+preset control must not be rendered. `async_set_preset_mode` must reject a
+call outside heating mode with a translated `ServiceValidationError` (§10a)
+instead of writing the register. The last profile mode read from the device
+is kept while the preset control is hidden and is shown again when the
+installation returns to heating mode; switching the operating mode must not
+write the profile-mode register.
+
+### 5a.1b. Turning the installation on and off
+
+Since the Climate entity supports `off`, it must also advertise
+`ClimateEntityFeature.TURN_OFF` and `ClimateEntityFeature.TURN_ON`, so that
+Home Assistant's `climate.turn_off`/`climate.turn_on` services and the on/off
+control of the built-in cards work:
+
+- `turn_off` writes operating mode `0` (standby; frost protection remains
+  active), exactly like `set_hvac_mode(off)`.
+- `turn_on` restores the last operating mode other than `off` that was read
+  from or written to the device (`heat` or `cool`), defaulting to `heat` if
+  none is known. This last non-off mode must survive a restart (§15).
+- `turn_on` while the installation is already on, and `turn_off` while it is
+  already off, must not write anything.
+
+Like `hvac_mode` (§5a.1), the operating mode is shared by the whole base unit:
+turning one room's thermostat off or on turns every room of that module off
+or on.
+
+### 5a.2. Current HVAC action
+
+`hvac_mode` (§5a.1) only states what the installation is *set* to. The Climate
+entity must additionally expose `hvac_action`, stating what the room is
+*currently doing*, so that Home Assistant's built-in cards can show it without
+any extra entity, template, or frontend card:
+
+- the thermostat and tile cards show the action as text ("Heizt"/"Kühlt"/
+  "Leerlauf"/"Aus" in German, "Heating"/"Cooling"/"Idle"/"Off" in English) and
+  color the control accordingly;
+- the history graph of the Climate entity shows colored bands for the periods
+  in which the room was actually heating or cooling.
+
+These labels and colors come from Home Assistant core's own `hvac_action`
+translations and styling; the integration must not define its own labels for
+them.
+
+There is no Viega register for a per-room heating/cooling state, so the value
+is derived from registers the entity already reads (operating mode, holding
+`40001`, §5a.1; actuator position, one per actuator, §5a):
+
+| Operating mode | Actuators of the room | `hvac_action` |
+| --- | --- | --- |
+| `0` (standby) | any | `HVACAction.OFF` |
+| `1` (heating) | at least one open | `HVACAction.HEATING` |
+| `1` (heating) | all closed | `HVACAction.IDLE` |
+| `2` (cooling) | at least one open | `HVACAction.COOLING` |
+| `2` (cooling) | all closed | `HVACAction.IDLE` |
+| unknown / never read | any | `None` |
+| `1` or `2` | no actuator position read yet | `None` |
+
+Rules:
+
+- **All actuators of the room count**, not only the first one: a room fed by
+  several heating circuits (non-1:1 topology, §4) is heating as soon as any of
+  its actuators is open. The Climate entity must therefore read the position
+  register of every actuator assigned to the room, not only `actor_numbers[0]`.
+- A failed or `-99` read of an actuator position keeps that actuator's last
+  valid position (§10); it must not turn the action into `IDLE` or `None`.
+  `None` is only returned while no valid position has ever been read for any of
+  the room's actuators.
+- The action reflects the device directly on every poll and is **not**
+  debounced; the 3-read debounce of the circulation-pump indicator (§5c) is
+  specific to driving a pump and does not apply here.
+- `hvac_action` is purely derived and read-only: it adds no register, no write,
+  and no Climate feature flag.
+- After a restart, the action is derived from the restored operating mode and
+  actuator positions (§15), so the cards and history show the same action as
+  before the restart instead of a gap or `None`.
+
+### 5a.3. Dashboard presentation without frontend add-ons
+
+Everything the integration exposes must be fully usable with Home Assistant's
+built-in Lovelace cards (`thermostat`, `tile` with its built-in features,
+`entities`, `glance`, `history-graph`, `area`, `markdown`, ...). No feature may
+depend on a HACS or other custom frontend card, and the README's example
+dashboard must use built-in cards only.
 
 ### 5b. Required room register mapping
 
@@ -705,6 +796,44 @@ consecutive `-99` reads must be tolerated without the value being lost or
 the entity's reported mode/preset changing), matching the debounce guarantee
 §5c already gives the circulation-pump indicator.
 
+## 10a. User-facing errors for actions
+
+§10 covers background polling, where failures stay silent and the last
+valid value is kept. Actions a user triggers - changing the target
+temperature, operating mode, profile mode, or power level, turning on/off,
+and the `rediscover` action (§16a) - must instead report a failure to the
+user in a clear, translated message, never as a raw Python exception
+(`ValueError`, `ModbusClientError`, `OSError`, ...) with a traceback.
+
+Two kinds of failure must be distinguished, using Home Assistant's own
+exception classes:
+
+| Failure | Exception | Examples |
+| --- | --- | --- |
+| The request itself is invalid | `ServiceValidationError` | target temperature outside the mode's range (§5a); power level outside `0`-`10`; unsupported HVAC or preset mode; preset change outside heating mode (§5a.1a); setting a value whose register is not configured for this room |
+| The request is valid but could not be carried out | `HomeAssistantError` | module not reachable or reconnecting (§11c); response timeout; Modbus exception response from the device; rediscovery failed |
+
+Rules:
+
+- Every such exception must be raised with `translation_domain` set to the
+  integration's domain, a `translation_key`, and `translation_placeholders`
+  for the relevant values (requested value, allowed range, mode, module
+  name, underlying error). The message for every key must exist in the
+  `exceptions` section of every `translations/*.json` file, in each
+  language the integration supports; no user-facing error text may be
+  hardcoded.
+- A transport error must be chained (`raise ... from err`) so the
+  underlying cause remains available in the log at DEBUG level, but it must
+  not be logged with a traceback at ERROR level for an ordinary
+  communication failure.
+- Validation happens before anything is sent to the device; an invalid
+  request must never cause a Modbus write.
+- A failed write leaves the entity's displayed value unchanged (§5a); the
+  value is only updated after the write has been acknowledged.
+- This section does not change §10: errors during background polling still
+  keep the last valid value and are reported only through the diagnostic
+  entities, not raised.
+
 ## 11. Modbus transaction validation
 
 If a Modbus/TCP response contains a transaction ID, the client must validate it before accepting the payload as valid.
@@ -777,6 +906,71 @@ request may be in flight, and its response must be read before the next
 request is sent — so that TX/RX frames from different entities can never
 interleave on the wire and be misattributed to the wrong request.
 
+## 11c. Connection loss and automatic reconnection
+
+The Modbus/TCP connection opened during setup (§6a) will break during normal
+operation, for example when the base unit or WLAN module restarts, the Wi-Fi
+link drops, a router restarts, or the device closes an idle connection. Such
+an outage must never require the user to reload the integration: once the
+device is reachable again, the integration must resume reading and writing on
+its own.
+
+**Detecting a broken connection.** The client must treat its connection as
+broken and discard it when a request fails with any of:
+
+- end of stream, connection reset, or any other socket error (`OSError`);
+- a response timeout;
+- a transport integrity failure (§11): transaction-ID mismatch, unexpected
+  function code (other than a valid Modbus exception response), wrong register
+  count, or an incomplete/malformed frame.
+
+Discarding the connection after a timeout or an integrity failure is
+mandatory, not only after a socket error: once one response has been missed
+or misread, the byte stream can no longer be trusted to be aligned with the
+requests. Keeping it would let a late response to an earlier request be
+accepted as, or rejected in place of, the answer to a later one, so every
+subsequent request could fail or be misattributed. A Modbus exception
+response (e.g. `0x83` with a valid exception code) is a well-formed answer
+from a healthy connection and must *not* discard the connection.
+
+**Discarding a connection** means closing the socket (bounded by the
+configured timeout, as for unload), clearing any partially received data, and
+marking the client as disconnected, so that no stale byte of the old
+connection can be read in response to a later request.
+
+**Reconnecting.** A disconnected client must reconnect lazily before the next
+request it is asked to send, inside the same serialization lock as that
+request (§11b), so that a reconnect can never interleave with another
+request. Reconnection attempts must be rate-limited: after a failed attempt,
+further attempts must wait for a back-off that starts at `5` seconds and
+doubles up to the module's `polling_interval` (§6b), and requests arriving
+during the back-off must fail immediately with `ModbusClientError` instead of
+each waiting for its own connection timeout. A successful connection resets
+the back-off.
+
+**Retrying the failed request.** A *read* that failed because the connection
+was broken may be retried at most once, immediately, on a newly established
+connection, so that the first poll after an outage does not lose a whole
+cycle. A *write* must never be retried automatically; it fails, the error is
+surfaced to the caller (as for any failed write, §5a), and the next write
+uses a new connection.
+
+**Behaviour during an outage.** All entities keep their last valid values
+while the connection is down (§10); a lost connection must not reset any
+value, mode, or preset. A failed reconnection attempt must not raise out of an
+entity update, block Home Assistant's event loop beyond the configured
+timeout, or affect any other configured module (§6a).
+
+**Logging and diagnostics.** The loss of a connection must be logged once at
+`WARNING` level and its restoration once at `INFO` level - not once per
+failed request or per poll cycle. The connection-health diagnostics (§16b)
+must additionally count the number of reconnections and record the time of
+the last successful reconnection.
+
+**Unload.** After `disconnect()` has been called for unloading or removing
+the module, the client must not reconnect again, even if a request that was
+already queued runs afterwards.
+
 ## 12. Technical implementation requirements
 
 - Python 3.12 compatible code
@@ -803,6 +997,20 @@ Packaging and release:
 - A release is only complete once both the branch and the tag are confirmed
   on the remote (a working, authenticated Git remote — SSH key or HTTPS
   credentials); a local commit or tag alone is not a release.
+- Development-only files stay in the repository and are versioned with the
+  code, but must not be part of a release download. HACS installs only
+  `custom_components/viega_fonterra_modbus/` from a release tag; GitHub's
+  automatic "Source code" archives are built with `git archive`, so every
+  development-only path (`tests/`, `requirements-test.txt`, `pytest.ini`,
+  `.github/`, `.gitattributes`, `.gitignore`) must be marked
+  `export-ignore` in `.gitattributes`. Local, personal tooling (the
+  `.claude/` folder, personal release scripts) is not versioned at all and
+  belongs in `.gitignore` instead. Files must not be deleted from the
+  repository before a release to keep them out of it. Before publishing,
+  check the archive of the release commit (`git archive <tag> | tar -t`)
+  for development files; any new development-only path must be added to
+  `.gitattributes`.
+- The test suite must pass before a release is tagged.
 
 ## 12a. Test coverage and diagnostics export
 
@@ -879,6 +1087,23 @@ The integration is considered ready for the next phase when:
   documents it as an external Change-over relay function
 - changing the heating/cooling mode writes the documented operating-mode value
   and does not overwrite either temperature value
+- the Climate entity exposes `hvac_action` (`heating`/`cooling`/`idle`/`off`)
+  derived from the operating mode and the positions of *all* of the room's
+  actuators, so the built-in thermostat/tile cards show the current action and
+  the history graph shows colored heating/cooling bands (§5a.2)
+- every exposed value and control is usable with Home Assistant's built-in
+  cards alone, without HACS frontend cards (§5a.3)
+- the preset (profile-mode) control is offered only in heating mode, and a
+  preset change outside heating mode is rejected without a write (§5a.1a)
+- the Climate entity supports `climate.turn_on`/`climate.turn_off`;
+  `turn_on` restores the last non-off operating mode, also after a restart
+  (§5a.1b)
+- invalid user requests raise a translated `ServiceValidationError` and
+  failed device writes raise a translated `HomeAssistantError`; no raw
+  `ValueError`/`ModbusClientError` reaches the user, and every exception key
+  exists in every `translations/*.json` (§10a)
+- tests and other development-only files are versioned in the repository but
+  excluded from release archives via `.gitattributes` `export-ignore` (§12)
 - manifold flow temperature, per-actuator return temperature, and per-actuator
   position are each exposed as their own linked entity (not only as Climate
   attributes)
@@ -904,6 +1129,9 @@ The integration is considered ready for the next phase when:
 - every entity on every platform (climate, sensor, binary_sensor, number, diagnostic) restores its last known value after a restart via `RestoreEntity`, including the Climate entity's `hvac_mode`, `preset_mode`, and every `extra_state_attributes` value, not only current/target temperature (§15)
 - every config/options flow validation and connection error is shown as a translated message in every language `translations/*.json` supports, not a raw error key
 - a Modbus response split across more than one TCP segment is still reassembled and decoded correctly, not rejected as truncated
+- after the connection to a module is lost (device restart, Wi-Fi outage, socket closed by the peer), the integration reconnects on its own once the device is reachable again, without a manual reload; entities keep their last valid values during the outage (§11c)
+- a response timeout or transport integrity failure discards the connection, so a late or misaligned response can never be accepted for a later request (§11c)
+- reconnection attempts are rate-limited with back-off, a failed read is retried at most once on the new connection, writes are never retried automatically, and no reconnection happens after the module is unloaded (§11c)
 
 ## 14. (Merged) Session lessons and resolved errors
 
@@ -1031,3 +1259,27 @@ discovery; undocumented outdoor-temperature or pump-status registers; time
 schedules, holiday programs, humidity, dew point, or firmware-version
 registers without a confirmed source; and automatic probing or writing of
 unknown or reserved addresses.
+
+### 16i. Central update coordinator
+
+Today every entity polls on its own every `5` seconds (`SCAN_INTERVAL`) and
+a per-entity `PollingGate` plus the shared cache (`polling.py`, §6c) skip the
+actual Modbus read until the module's `polling_interval` has elapsed. This
+works, but it is not Home Assistant's usual model. A future version may
+replace it with one `DataUpdateCoordinator` per config entry:
+
+- one polling cycle per module at its configured `polling_interval`, reading
+  every register the topology needs (using the contiguous block reads of
+  §16d) and notifying all of the module's entities together;
+- entities become `CoordinatorEntity`s that only map the coordinator's data
+  to their state and no longer perform their own reads;
+- a write (§10a) triggers an early refresh, which also serves read-after-write
+  verification (§16c);
+- connection loss and reconnection (§11c) are handled in one place.
+
+The existing guarantees must be kept unchanged: last valid value on failed or
+`-99` reads (§10), entities stay available and keep their values during an
+outage, state restoration (§15), request serialization (§11b), and the
+diagnostics of §16b/§16e. Because this restructures every platform, it must
+be done as a separate change with the full test suite passing before and
+after, not combined with feature work.
