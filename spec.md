@@ -99,8 +99,16 @@ faults/warnings, and codes `21`, `22`, `24` are room-scoped (thermostat
 connectivity/battery). A room's diagnostic text entity (§10) must read that
 room's own error register, not the shared base-unit one, so two different
 rooms' diagnostics do not always show identical text. Every code not in the
-table must render as `"Unknown error (code N)"`. New codes must be appended
-to the table rather than guessed inline in the entity layer.
+table must render as `"Unknown error (code N)"` in logs and the diagnostics
+export. New codes must be appended to the table rather than guessed inline
+in the entity layer.
+
+What the user sees for a code is translated (§5d): entities expose a stable
+key per code - `no_error` for `0`, `error_<code>` for every documented
+code, `unknown_error` for any other code (with the numeric code as an
+attribute), and `sensor_invalid` before a valid value has been read - and
+the text for each key lives in `translations/*.json`. The English table text
+is never shown as an entity state.
 
 ## 4. Initial discovery requirement
 
@@ -527,6 +535,31 @@ actuator together.
   the Fonterra system (e.g. a smart relay). It must not be modeled as a
   switch (§8): a write-capable entity with no real device-side effect is
   misleading and must not be reintroduced.
+
+## 5d. Translated states, units, and icons
+
+Everything an entity shows in the user interface must follow Home
+Assistant's language setting, like entity names already do:
+
+- **States and attribute values** that are text are exposed as stable keys
+  and translated through `translations/*.json`: the room diagnostic sensor
+  is an `enum` sensor whose state is one of the keys of §3b
+  (`entity.sensor.room_diagnostic.state.<key>`), and the base-unit error-code
+  sensor's `description` attribute uses the same keys
+  (`entity.sensor.base_unit_error_code.state_attributes.description.state.<key>`).
+  States restored from an older version that still hold the English text are
+  mapped to the matching key.
+- **Units** that are words, not physical units, are translated
+  (`entity.<platform>.<key>.unit_of_measurement`): the power level's unit is
+  "Stufe"/"level", not a hardcoded English "level".
+- **Icons** that express the meaning better than the device-class default
+  are defined per entity and state in `icons.json`, not in code: the actuator
+  position shows a valve (`mdi:valve-open`/`mdi:valve-closed`) instead of the
+  generic opening square, the circulation-pump indicator a pump
+  (`mdi:pump`/`mdi:pump-off`), and the room diagnostic a check mark for
+  `no_error` and a warning symbol otherwise. The device class itself stays
+  unchanged, so state labels ("Geöffnet"/"Geschlossen", "Läuft"/"Aus") keep
+  coming from Home Assistant.
 
 ## 6. Multi-device support
 
@@ -1127,6 +1160,9 @@ The integration is considered ready for the next phase when:
   failed device writes raise a translated `HomeAssistantError`; no raw
   `ValueError`/`ModbusClientError` reaches the user, and every exception key
   exists in every `translations/*.json` (§10a)
+- no entity shows a hardcoded English state, attribute text, or unit; the
+  actuator position, circulation pump, and room diagnostic use the icons of
+  §5d (§3b, §5d)
 - tests and other development-only files are versioned in the repository but
   excluded from release archives via `.gitattributes` `export-ignore` (§12)
 - manifold flow temperature, per-actuator return temperature, and per-actuator
