@@ -1046,6 +1046,23 @@ differs from the configuration the running setup applied - otherwise every
 first setup (and every topology change) immediately runs a second setup
 with a second discovery and a second connection.
 
+### Continuous integration
+
+Every push and pull request to the GitHub repository must run, as GitHub
+Actions workflows under `.github/workflows/`:
+
+- the full test suite with the pinned `requirements-test.txt` on Python 3.12;
+- **hassfest**, Home Assistant's own validator for `manifest.json`,
+  `translations/*.json`, `services.yaml`, and the integration's structure;
+- the **HACS validation** action for the repository layout and `hacs.json`.
+
+In addition, a scheduled run (weekly, and on demand) must run the test suite
+against the latest `pytest-homeassistant-custom-component` release, so
+breaking changes in new Home Assistant versions are noticed before users
+report them. That run reports a failure but does not block anything; it is a
+signal to update the pinned version, not a release gate. A release may only
+be tagged from a commit whose regular CI run passed (§12).
+
 ### Configuration diagnostics export
 
 The integration must implement Home Assistant's built-in diagnostics
@@ -1294,4 +1311,91 @@ The existing guarantees must be kept unchanged: last valid value on failed or
 outage, state restoration (§15), request serialization (§11b), and the
 diagnostics of §16b/§16e. Because this restructures every platform, it must
 be done as a separate change with the full test suite passing before and
-after, not combined with feature work.
+after, not combined with feature work. It is scheduled after §12a's
+continuous integration and §16j-§16l, so CI already guards the refactoring.
+
+### 16j. Repair issues for problems that need attention
+
+Problems that need the user's attention and do not fix themselves within a
+few poll cycles must be raised in Home Assistant's built-in **Settings →
+Repairs** list (issue registry), not only in diagnostic entities, so a user
+who is not watching the dashboard - or has no physical access to the
+installation - still notices them:
+
+- **Module unreachable:** a module's connection has had no successful
+  response for `30` minutes (counted from the last successful response, or
+  from setup if there has never been one). Severity `error`. Placeholders:
+  module name and the time of the last successful response.
+- **Base-unit error:** the base-unit error code (§3b) is non-zero. Severity
+  `warning` for the codes the manual's table describes as warnings (`10`,
+  `22`, `24`, kept as `ERROR_CODE_WARNINGS` next to `BASE_UNIT_ERROR_CODES` in
+  `registers.py`), `error` for every other code including unknown ones. Each
+  known code has its own translation key, so the issue text is fully
+  translated (the English `BASE_UNIT_ERROR_CODES` descriptions are not
+  inserted into a translated sentence); unknown codes use one generic key
+  with the code as placeholder. A change from one non-zero code to another
+  replaces the issue.
+
+Rules:
+
+- One issue per module and problem type, with an issue ID built from the
+  config entry ID, so several modules never overwrite each other's issues.
+- Issues are not fixable through a repair flow (`is_fixable=False`); they
+  clear themselves: the unreachable issue on the next successful response,
+  the error issue when the code returns to `0`.
+- Title and description are translated through the `issues` section of every
+  `translations/*.json`; no hardcoded text.
+- Unloading or removing a module deletes its issues; a reload re-evaluates
+  them from scratch.
+- Only values the integration already reads are used - no extra Modbus
+  request. A `-99`/failed read of the error code neither raises nor clears
+  the error issue (§10).
+- A module that cannot be reached at setup is not loaded at all
+  (`ConfigEntryNotReady`, §6a) and is already shown by Home Assistant as
+  "retrying setup"; no repair issue is raised for that case.
+
+### 16k. Circulation-pump blueprint
+
+The repository must ship an automation blueprint (`blueprints/automation/
+viega_fonterra_modbus/circulation_pump.yaml`) that switches a separately
+wired circulation pump from the derived circulation-pump indicator (§5c), so
+users can import it with one click instead of copying YAML:
+
+- Inputs: the circulation-pump indicator (`binary_sensor` of this
+  integration), the pump switch (`switch`, `light`, or `input_boolean`), and a
+  run-on time after the last actuator closes (default `5` minutes, `0`
+  allowed).
+- Turns the pump on when the indicator turns `on`; turns it off when the
+  indicator has been `off` for the run-on time. If the indicator turns `on`
+  again during the run-on time, the pump stays on.
+- Ignores `unavailable`/`unknown` indicator states: the pump keeps its
+  current state.
+- Uses only automation syntax supported by the minimum Home Assistant
+  version in `hacs.json`.
+- The README links an import button
+  (`my.home-assistant.io/redirect/blueprint_import`) to the blueprint's raw
+  URL on the `main` branch. The blueprint is part of release archives.
+- A test validates the blueprint against Home Assistant's blueprint schema.
+
+### 16l. Heating time per room (documentation)
+
+The README must show how to get each room's heating time per day from the
+Climate entity's `hvac_action` (§5a.2) with Home Assistant's built-in
+**History stats** helper (UI and YAML), and how to show it on a dashboard
+with built-in cards (§5a.3). This needs no code in the integration.
+
+## 17. Open items (to do, not yet scheduled)
+
+Approved ideas that are deliberately postponed. They are not requirements
+yet; each one must be specified in its own section before it is implemented.
+
+- **Submit the brand icons** in `brands/custom_integrations/
+  viega_fonterra_modbus/` to the `home-assistant/brands` repository, so Home
+  Assistant shows the integration's icon under Settings → Devices &
+  services. Check first whether Home Assistant's current handling of custom
+  integration brands still requires that route.
+- **Decide whether to smooth `hvac_action`** (§5a.2). The actuators toggle
+  every few minutes, so heating bands in the history graph look striped.
+  Decide after observing real data from v1.1.0 whether to keep the
+  unsmoothed device state or require e.g. a minimum continuous duration
+  before reporting heating/cooling.
