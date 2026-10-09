@@ -1,0 +1,9 @@
+# Development-only files: kept in the repository, but excluded from
+# `git archive` and therefore from GitHub's "Source code" release downloads.
+# HACS itself only installs custom_components/viega_fonterra_modbus/.
+tests/                  export-ignore
+requirements-test.txt   export-ignore
+pytest.ini              export-ignore
+.github/                export-ignore
+.gitattributes          export-ignore
+.gitignore              export-ignore

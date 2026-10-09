@@ -1,0 +1,7 @@
+# Pulls in a pinned, compatible pytest + homeassistant + pytest-asyncio/
+# pytest-socket/etc. combination for both the plain unit tests and the real
+# Home Assistant config/options-flow tests (spec.md 12a,
+# tests/test_config_flow_flows.py). Installing this alone is enough; do not
+# pin pytest/homeassistant separately here, or pip's resolver can pick a
+# combination this package was never tested against.
+pytest-homeassistant-custom-component==0.13.205
