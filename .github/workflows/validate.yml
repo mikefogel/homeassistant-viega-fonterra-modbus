@@ -1,0 +1,27 @@
+# Home Assistant's and HACS's own validators (spec.md 12a).
+name: Validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+
+jobs:
+  hassfest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: hacs/action@main
+        with:
+          category: integration
+          # The icons are not submitted to home-assistant/brands yet
+          # (spec.md 17), so that check would always fail.
+          ignore: brands

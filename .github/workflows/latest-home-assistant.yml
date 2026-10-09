@@ -1,0 +1,25 @@
+# Weekly early warning (spec.md 12a): the test suite against the newest
+# pytest-homeassistant-custom-component, i.e. the newest Home Assistant.
+# A failure here means "update the pinned version", not a release blocker.
+name: Latest Home Assistant
+
+on:
+  schedule:
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+
+jobs:
+  pytest-latest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          # The newest harness follows Home Assistant's own Python requirement.
+          python-version: "3.14"
+      - name: Install the newest test harness
+        run: pip install --upgrade pytest-homeassistant-custom-component
+      - name: Show tested Home Assistant version
+        run: python -c "import homeassistant.const as c; print('Home Assistant', c.__version__)"
+      - name: Run tests
+        run: python -m pytest -q
