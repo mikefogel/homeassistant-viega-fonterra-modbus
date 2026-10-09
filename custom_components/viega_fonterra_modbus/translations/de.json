@@ -156,5 +156,34 @@
       "name": "Übersicht über alle Module",
       "description": "Liefert eine Zusammenfassung je konfiguriertem Viega-Fonterra-Modul: Erreichbarkeit, Basiseinheit-Fehler, veraltete/fehlgeschlagene Kommunikation sowie Raum-/Aktoranzahl."
     }
+  },
+  "exceptions": {
+    "temperature_out_of_range": {
+      "message": "Die Solltemperatur {value} °C liegt außerhalb des erlaubten Bereichs ({min}–{max} °C) für den aktuellen Modus."
+    },
+    "power_level_out_of_range": {
+      "message": "Die Leistungsstufe {value} liegt außerhalb des erlaubten Bereichs ({min}–{max})."
+    },
+    "unsupported_hvac_mode": {
+      "message": "Der Betriebsmodus „{mode}“ wird vom Viega-Modul nicht unterstützt."
+    },
+    "unsupported_preset_mode": {
+      "message": "Der Profilmodus „{mode}“ wird vom Viega-Modul nicht unterstützt."
+    },
+    "register_not_configured": {
+      "message": "Für den Raum {room} gibt es kein Register für diese Einstellung, sie kann daher nicht geändert werden."
+    },
+    "write_failed": {
+      "message": "Die Änderung konnte nicht an das Viega-Modul {device} gesendet werden: {error}"
+    },
+    "unknown_device": {
+      "message": "Das Gerät {device_id} wurde nicht gefunden."
+    },
+    "module_not_loaded": {
+      "message": "Das Viega-Modul {device} ist nicht geladen. Bitte prüfen, ob die Integration eingerichtet ist und läuft."
+    },
+    "rediscover_failed": {
+      "message": "Die Neuerkennung des Viega-Moduls {device} ist fehlgeschlagen: {error}. Die bisherige Raumkonfiguration bleibt erhalten."
+    }
   }
 }

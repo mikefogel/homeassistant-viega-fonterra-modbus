@@ -12,6 +12,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from .const import DOMAIN, MIN_SCAN_INTERVAL
 from .device import build_device_info
 from .entity_tracking import register_platform
+from .errors import async_write_register, invalid_request
 from .modbus_handler import ViegaModbusClient
 from .polling import PollingGate
 from .registers import resolve_room_number, room_registers
@@ -133,12 +134,13 @@ class ViegaPowerLevelNumber(NumberEntity, RestoreEntity):
     async def async_set_native_value(self, value: float) -> None:
         """Write a new actuator power level."""
         if self.address is None:
-            raise ValueError("no power level register configured for this room")
+            raise invalid_request(
+                "register_not_configured", room=self._attr_translation_placeholders["room"]
+            )
         level = round(value)
         if not 0 <= level <= 10:
-            raise ValueError("power level must be between 0 and 10")
-        client = self.hass.data[DOMAIN][self._entry_id]["client"]
-        await client.write_register(self.address, level)
+            raise invalid_request("power_level_out_of_range", value=level, min=0, max=10)
+        await async_write_register(self.hass, self._entry_id, self.address, level)
         self._attr_native_value = level
         shared = self.hass.data[DOMAIN][self._entry_id].get("polling")
         self._pending_write = (level, shared.generation if shared is not None else 0)

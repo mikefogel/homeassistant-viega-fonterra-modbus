@@ -7,11 +7,12 @@ import logging
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
-from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv, device_registry as dr
 from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN, PLATFORMS
+from .errors import action_failed, invalid_request
 from .modbus_handler import ModbusClientError, ViegaModbusClient
 from .overview import async_multi_module_overview
 from .polling import SharedPolling
@@ -46,22 +47,30 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         device_registry = dr.async_get(hass)
         device_entry = device_registry.async_get(call.data["device_id"])
         if device_entry is None:
-            raise HomeAssistantError(f"Unknown device_id: {call.data['device_id']}")
+            raise invalid_request("unknown_device", device_id=call.data["device_id"])
         entry_ids = [
             entry_id
             for entry_id in device_entry.config_entries
             if entry_id in hass.data.get(DOMAIN, {})
         ]
         if not entry_ids:
-            _LOGGER.warning(
-                "Rediscover service called for device %s, which has no "
-                "loaded Viega Fonterra config entry",
-                call.data["device_id"],
+            raise invalid_request(
+                "module_not_loaded", device=getattr(device_entry, "name", None) or ""
             )
-            return
         entry = hass.config_entries.async_get_entry(entry_ids[0])
-        if entry is not None:
-            await async_rediscover_entry(hass, entry)
+        if entry is None:
+            raise invalid_request(
+                "module_not_loaded", device=getattr(device_entry, "name", None) or ""
+            )
+        report = await async_rediscover_entry(hass, entry)
+        if report.failed:
+            raise action_failed(
+                "rediscover_failed",
+                device=hass.data.get(DOMAIN, {})
+                .get(entry.entry_id, {})
+                .get("device_name", entry.title),
+                error=report.error or "",
+            )
 
     async def _async_handle_overview(call: ServiceCall) -> ServiceResponse:
         return async_multi_module_overview(hass)

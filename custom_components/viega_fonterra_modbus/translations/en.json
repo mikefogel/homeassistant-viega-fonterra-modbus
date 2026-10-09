@@ -156,5 +156,34 @@
       "name": "Multi-module overview",
       "description": "Returns a per-module summary across every configured Viega Fonterra module: reachability, base-unit errors, stale/failed communication, and room/actuator counts."
     }
+  },
+  "exceptions": {
+    "temperature_out_of_range": {
+      "message": "Target temperature {value} °C is outside the allowed range ({min}–{max} °C) for the current mode."
+    },
+    "power_level_out_of_range": {
+      "message": "Power level {value} is outside the allowed range ({min}–{max})."
+    },
+    "unsupported_hvac_mode": {
+      "message": "Operating mode \"{mode}\" is not supported by the Viega module."
+    },
+    "unsupported_preset_mode": {
+      "message": "Profile mode \"{mode}\" is not supported by the Viega module."
+    },
+    "register_not_configured": {
+      "message": "Room {room} has no register for this setting, so it cannot be changed."
+    },
+    "write_failed": {
+      "message": "Could not send the change to Viega module {device}: {error}"
+    },
+    "unknown_device": {
+      "message": "Device {device_id} was not found."
+    },
+    "module_not_loaded": {
+      "message": "Viega module {device} is not loaded. Check that the integration is set up and running."
+    },
+    "rediscover_failed": {
+      "message": "Rediscovery of Viega module {device} failed: {error}. The previous room configuration is kept."
+    }
   }
 }

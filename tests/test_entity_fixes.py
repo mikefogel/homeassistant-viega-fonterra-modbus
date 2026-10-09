@@ -29,12 +29,15 @@ def test_power_level_number_resolves_register_from_room_id():
 def test_power_level_number_setting_value_without_address_raises():
     entity = ViegaPowerLevelNumber("entry_1", "wohnzimmer", {"name": "Wohnzimmer"})
 
+    from homeassistant.exceptions import ServiceValidationError
+
     try:
         asyncio.run(entity.async_set_native_value(5))
-    except ValueError:
-        pass
+    except ServiceValidationError as err:
+        assert err.translation_key == "register_not_configured"
+        assert err.translation_placeholders == {"room": "Wohnzimmer"}
     else:
-        raise AssertionError("expected a ValueError when no register is configured")
+        raise AssertionError("expected a ServiceValidationError when no register is configured")
 
 
 class _FakeClient:

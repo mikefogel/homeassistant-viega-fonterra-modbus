@@ -5,7 +5,9 @@ test_specification.py (feature flags, scaled target-temperature write).
 import asyncio
 from types import SimpleNamespace
 
+import pytest
 from homeassistant.components.climate import ClimateEntityFeature
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
 from custom_components.viega_fonterra_modbus.climate import ViegaRoomClimateEntity
 from custom_components.viega_fonterra_modbus.const import DOMAIN
@@ -113,12 +115,9 @@ def test_set_hvac_mode_rejects_an_unsupported_mode():
     entity = _entity()
     entity.hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"client": _RecordingClient()}}})
 
-    try:
+    with pytest.raises(ServiceValidationError) as excinfo:
         asyncio.run(entity.async_set_hvac_mode("auto"))
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("expected a ValueError for an unsupported hvac_mode")
+    assert excinfo.value.translation_key == "unsupported_hvac_mode"
 
 
 def test_set_preset_mode_writes_the_profile_mode_register_and_updates_state():
@@ -136,12 +135,9 @@ def test_set_preset_mode_rejects_an_unsupported_mode():
     entity = _entity()
     entity.hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"client": _RecordingClient()}}})
 
-    try:
+    with pytest.raises(ServiceValidationError) as excinfo:
         asyncio.run(entity.async_set_preset_mode("eco"))
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("expected a ValueError for an unsupported preset_mode")
+    assert excinfo.value.translation_key == "unsupported_preset_mode"
 
 
 def test_room_without_a_resolvable_target_register_excludes_the_feature_and_is_a_noop():
@@ -161,14 +157,45 @@ def test_room_without_a_resolvable_target_register_excludes_the_feature_and_is_a
 
 def test_set_temperature_out_of_register_range_raises():
     entity = _entity(room_config={"target_temperature_register": 50})
-    entity.hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"client": _RecordingClient()}}})
+    client = _RecordingClient()
+    entity.hass = SimpleNamespace(data={DOMAIN: {"entry_1": {"client": client}}})
 
-    try:
+    with pytest.raises(ServiceValidationError) as excinfo:
         asyncio.run(entity.async_set_temperature(temperature=10000.0))
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("expected a ValueError for a register value outside 0..65535")
+    assert excinfo.value.translation_key == "temperature_out_of_range"
+    assert excinfo.value.translation_placeholders == {
+        "value": "10000.0", "min": "5", "max": "30"
+    }
+    assert client.writes == []  # nothing is sent for an invalid request
+
+
+class _FailingWriteClient:
+    async def write_register(self, address, value):
+        from custom_components.viega_fonterra_modbus.modbus_handler import (
+            ModbusClientError,
+        )
+
+        raise ModbusClientError("Modbus write timeout after 5s")
+
+
+def test_failed_write_raises_translated_error_and_keeps_the_target():
+    """spec.md 10a: a transport failure surfaces as a translated
+    HomeAssistantError naming the module, and the displayed target stays."""
+    entity = _entity(room_config={"target_temperature_register": 50})
+    entity._attr_target_temperature = 21.0
+    entity.hass = SimpleNamespace(
+        data={DOMAIN: {"entry_1": {"client": _FailingWriteClient(), "device_name": "Keller"}}}
+    )
+
+    with pytest.raises(HomeAssistantError) as excinfo:
+        asyncio.run(entity.async_set_temperature(temperature=23.0))
+
+    assert not isinstance(excinfo.value, ServiceValidationError)
+    assert excinfo.value.translation_key == "write_failed"
+    assert excinfo.value.translation_placeholders == {
+        "device": "Keller", "error": "Modbus write timeout after 5s"
+    }
+    assert entity._attr_target_temperature == 21.0
 
 
 def test_async_update_reads_holding_registers_for_writable_values_and_input_registers_for_sensors():

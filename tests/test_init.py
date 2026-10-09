@@ -16,7 +16,13 @@ from custom_components.viega_fonterra_modbus.modbus_handler import (
     ModbusClientError,
     ViegaModbusClient,
 )
-from homeassistant.exceptions import ConfigEntryNotReady
+from custom_components.viega_fonterra_modbus.rediscovery import RediscoveryReport
+from homeassistant.exceptions import (
+    ConfigEntryNotReady,
+    HomeAssistantError,
+    ServiceValidationError,
+)
+import pytest
 
 
 class _FakeConfigEntriesForSetup:
@@ -220,6 +226,7 @@ def test_rediscover_service_resolves_the_device_to_its_config_entry(monkeypatch)
 
     async def fake_rediscover(hass, entry):
         calls.append(entry.entry_id)
+        return RediscoveryReport()
 
     monkeypatch.setattr(
         "custom_components.viega_fonterra_modbus.async_rediscover_entry", fake_rediscover
@@ -243,7 +250,8 @@ def test_rediscover_service_resolves_the_device_to_its_config_entry(monkeypatch)
     assert calls == ["entry_1"]
 
 
-def test_rediscover_service_is_a_noop_when_the_device_has_no_loaded_entry(monkeypatch):
+def test_rediscover_service_reports_a_device_without_a_loaded_entry(monkeypatch):
+    """spec.md 10a: the user gets a translated message instead of a silent no-op."""
     monkeypatch.setattr(
         "custom_components.viega_fonterra_modbus.dr.async_get",
         lambda hass: _FakeDeviceRegistry({"device_1": _FakeDeviceEntry({"entry_1"})}),
@@ -253,7 +261,38 @@ def test_rediscover_service_is_a_noop_when_the_device_has_no_loaded_entry(monkey
     asyncio.run(async_setup(hass, {}))
     handler = hass.services.registered[(DOMAIN, SERVICE_REDISCOVER)]
 
-    asyncio.run(handler(SimpleNamespace(data={"device_id": "device_1"})))  # must not raise
+    with pytest.raises(ServiceValidationError) as excinfo:
+        asyncio.run(handler(SimpleNamespace(data={"device_id": "device_1"})))
+    assert excinfo.value.translation_key == "module_not_loaded"
+
+
+def test_rediscover_service_reports_a_failed_rediscovery(monkeypatch):
+    async def failing_rediscover(hass, entry):
+        return RediscoveryReport(failed=True, error="Modbus read timeout after 5s")
+
+    monkeypatch.setattr(
+        "custom_components.viega_fonterra_modbus.async_rediscover_entry", failing_rediscover
+    )
+    monkeypatch.setattr(
+        "custom_components.viega_fonterra_modbus.dr.async_get",
+        lambda hass: _FakeDeviceRegistry({"device_1": _FakeDeviceEntry({"entry_1"})}),
+    )
+    entry = SimpleNamespace(entry_id="entry_1", title="Fonterra")
+    hass = SimpleNamespace(
+        services=_FakeServices(),
+        data={DOMAIN: {"entry_1": {"device_name": "Keller"}}},
+        config_entries=SimpleNamespace(async_get_entry=lambda entry_id: entry),
+    )
+
+    asyncio.run(async_setup(hass, {}))
+    handler = hass.services.registered[(DOMAIN, SERVICE_REDISCOVER)]
+
+    with pytest.raises(HomeAssistantError) as excinfo:
+        asyncio.run(handler(SimpleNamespace(data={"device_id": "device_1"})))
+    assert excinfo.value.translation_key == "rediscover_failed"
+    assert excinfo.value.translation_placeholders == {
+        "device": "Keller", "error": "Modbus read timeout after 5s"
+    }
 
 
 def test_rediscover_service_raises_for_an_unknown_device(monkeypatch):

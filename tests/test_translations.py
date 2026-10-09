@@ -104,3 +104,39 @@ def test_config_step_init_is_not_used_for_the_options_flow():
             f"{language}.json: config.step.init should not exist - move "
             "its content to options.step.init"
         )
+
+
+def test_every_exception_translation_key_used_in_code_is_translated():
+    """spec.md 10a: every translation key passed to `invalid_request()` or
+    `action_failed()` must have a message in every language, and no
+    message may be left over without a user in the code."""
+    import re
+
+    source_dir = TRANSLATIONS_DIR.parent
+    used: set[str] = set()
+    for path in source_dir.glob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        used |= set(
+            re.findall(r'(?:invalid_request|action_failed)\(\s*"([a-z_]+)"', text)
+        )
+    assert used, "expected at least one translated exception in the code"
+
+    for language in ("de", "en"):
+        exceptions = _load(language).get("exceptions", {})
+        assert set(exceptions) == used, (
+            f"{language}.json exceptions: missing {sorted(used - set(exceptions))}, "
+            f"unused {sorted(set(exceptions) - used)}"
+        )
+        for key, value in exceptions.items():
+            assert value.get("message"), f"{language}.json exceptions.{key} has no message"
+
+
+def test_exception_messages_use_the_same_placeholders_in_every_language():
+    import re
+
+    de = _load("de").get("exceptions", {})
+    en = _load("en").get("exceptions", {})
+    for key in de:
+        de_placeholders = set(re.findall(r"\{(\w+)\}", de[key]["message"]))
+        en_placeholders = set(re.findall(r"\{(\w+)\}", en[key]["message"]))
+        assert de_placeholders == en_placeholders, key

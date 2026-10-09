@@ -14,6 +14,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from .const import DOMAIN, MIN_SCAN_INTERVAL
 from .device import build_device_info
 from .entity_tracking import register_platform
+from .errors import async_write_register, invalid_request
 from .polling import PollingGate
 from .registers import (
     BASE_UNIT_REGISTERS,
@@ -353,35 +354,34 @@ class ViegaRoomClimateEntity(ClimateEntity, RestoreEntity):
         temperature = float(temperature)
         low, high = (16, 30) if self.hvac_mode == "cool" else (5, 30)
         if not low <= temperature <= high:
-            raise ValueError(f"target temperature must be between {low} and {high} °C")
+            raise invalid_request(
+                "temperature_out_of_range", value=temperature, min=low, max=high
+            )
         register_value = round(temperature * 10)
 
-        client = self.hass.data[DOMAIN][self._entry_id]["client"]
-        await client.write_register(int(target_register), register_value)
+        await async_write_register(
+            self.hass, self._entry_id, int(target_register), register_value
+        )
         self._attr_target_temperature = float(temperature)
         self._record_pending_write("target_temperature", int(target_register), register_value)
 
     async def async_set_hvac_mode(self, hvac_mode: str) -> None:
         """Write the operating mode to holding register 40001."""
         if hvac_mode not in self._attr_hvac_modes:
-            raise ValueError(f"unsupported HVAC mode: {hvac_mode}")
+            raise invalid_request("unsupported_hvac_mode", mode=hvac_mode)
         register_value = {"off": 0, "heat": 1, "cool": 2}[hvac_mode]
         address = int(self._registers["operating_mode"])
-        await self.hass.data[DOMAIN][self._entry_id]["client"].write_register(
-            address, register_value
-        )
+        await async_write_register(self.hass, self._entry_id, address, register_value)
         self._operating_mode = register_value
         self._record_pending_write("operating_mode", address, register_value)
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
         """Write the profile mode to holding register 40002."""
         if preset_mode not in self.preset_modes:
-            raise ValueError(f"unsupported preset mode: {preset_mode}")
+            raise invalid_request("unsupported_preset_mode", mode=preset_mode)
         value = self.preset_modes.index(preset_mode)
         address = int(self._registers["profile_mode"])
-        await self.hass.data[DOMAIN][self._entry_id]["client"].write_register(
-            address, value
-        )
+        await async_write_register(self.hass, self._entry_id, address, value)
         self._profile_mode = value
         self._record_pending_write("profile_mode", address, value)
 
