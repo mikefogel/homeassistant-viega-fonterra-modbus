@@ -982,9 +982,10 @@ Packaging and release:
   integration as YAML-only.
 - `hacs.json`'s `content_in_root` must stay `false` for this repository's
   layout (the integration lives under
-  `custom_components/viega_fonterra_modbus/`), and its `domains` value must
-  match the manifest domain exactly; a mismatch here makes HACS look for
-  `custom_components/None/manifest.json` and fail to install.
+  `custom_components/viega_fonterra_modbus/`). `hacs.json` must contain only
+  keys the current HACS schema allows: HACS takes the domain and IoT class
+  from `manifest.json`, and its validation rejects `domains` and
+  `iot_class` in `hacs.json` (found by the CI HACS check, §12a).
 - A release must use the same version number in `manifest.json` and its Git
   tag (e.g. manifest `0.1.5` with tag `v0.1.5`); verify the manifest content
   actually committed at that tag, not only the working tree, before
