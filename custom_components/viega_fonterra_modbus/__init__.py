@@ -82,7 +82,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Viega Fonterra from a config entry."""
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
     timeout = float(entry.data.get("modbus_timeout", 5))
-    client = ViegaModbusClient(entry.data["host"], entry.data["port"], timeout=timeout)
+    client = ViegaModbusClient(
+        entry.data["host"],
+        entry.data["port"],
+        timeout=timeout,
+        # Reconnect back-off is capped at the polling interval (spec.md 11c).
+        reconnect_backoff_max=float(entry.data.get("polling_interval", 30)),
+    )
     try:
         await client.connect()
     except ModbusClientError as err:

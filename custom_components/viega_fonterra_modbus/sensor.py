@@ -517,16 +517,20 @@ class ViegaConnectionHealthSensor(SensorEntity):
         "invalid_value_count",
         "last_exception_code",
         "last_success_duration",
+        "reconnect_count",
+        "last_reconnect_time",
     )
     _DEVICE_CLASS = {
         "last_success_time": SensorDeviceClass.TIMESTAMP,
         "last_failure_time": SensorDeviceClass.TIMESTAMP,
+        "last_reconnect_time": SensorDeviceClass.TIMESTAMP,
     }
     _UNIT = {"last_success_duration": UnitOfTime.SECONDS}
     _STATE_CLASS = {
         "consecutive_failures": SensorStateClass.MEASUREMENT,
         "invalid_value_count": SensorStateClass.TOTAL_INCREASING,
         "last_success_duration": SensorStateClass.MEASUREMENT,
+        "reconnect_count": SensorStateClass.TOTAL_INCREASING,
     }
 
     def __init__(self, entry_id: str, metric_key: str) -> None:

@@ -105,6 +105,12 @@
       "health_last_success_duration": {
         "name": "Last Modbus request duration"
       },
+      "health_reconnect_count": {
+        "name": "Modbus reconnections"
+      },
+      "health_last_reconnect_time": {
+        "name": "Last Modbus reconnection"
+      },
       "actuator_stats_open_actuator_count": {
         "name": "Currently open actuators"
       },

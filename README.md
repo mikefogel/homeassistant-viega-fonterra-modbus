@@ -174,7 +174,7 @@ automation:
 
 ### Connection health metrics
 
-Each module also exposes six diagnostic sensors derived entirely from the shared Modbus client's own bookkeeping — none of them issues an extra Modbus request:
+Each module also exposes eight diagnostic sensors derived entirely from the shared Modbus client's own bookkeeping — none of them issues an extra Modbus request:
 
 - last successful response timestamp
 - last failed request timestamp
@@ -182,8 +182,13 @@ Each module also exposes six diagnostic sensors derived entirely from the shared
 - invalid-value count (including the `-99` sentinel)
 - last Modbus exception code, when available
 - duration of the most recent successful request
+- number of automatic reconnections, and the time of the last one
 
 These are diagnostic only: a communication failure never overwrites a room's last valid value, and no host/port/network information is exposed through them.
+
+### Automatic reconnection
+
+If the connection to a module drops — the base unit or WLAN module restarts, the Wi-Fi or router goes down, or the device closes the connection — the integration reconnects on its own as soon as the module is reachable again; no reload is needed. While the module is unreachable, every entity keeps its last valid value. Reconnection attempts back off from 5 seconds up to the module's polling interval, a read that hit a broken connection is retried once on the new connection, and writes are never repeated automatically. The log shows one warning when the connection is lost and one info message when it is restored.
 
 ### Rediscovering the topology on demand
 

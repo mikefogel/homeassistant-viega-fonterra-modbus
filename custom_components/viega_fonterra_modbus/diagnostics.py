@@ -94,6 +94,8 @@ def _extended_diagnostics(entry_data: dict[str, Any]) -> dict[str, Any]:
             "last_exception_code": getattr(client, "last_exception_code", None),
             "recent_exception_codes": list(getattr(client, "recent_exception_codes", None) or []),
             "last_success_duration": getattr(client, "last_success_duration", None),
+            "reconnect_count": getattr(client, "reconnect_count", None),
+            "last_reconnect_time": _isoformat(getattr(client, "last_reconnect_time", None)),
         },
         "resolved_addresses": {
             "holding": sorted(holding),

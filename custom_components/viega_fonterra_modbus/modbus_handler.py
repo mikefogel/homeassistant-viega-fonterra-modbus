@@ -13,6 +13,11 @@ from datetime import datetime, timezone
 #: history (spec.md 16e: "the snapshot must have a fixed maximum size").
 RECENT_EXCEPTION_CODES_MAXLEN = 10
 
+#: Reconnection back-off (spec.md 11c): the first delay after a failed
+#: reconnect attempt; it doubles per failed attempt up to the client's
+#: `reconnect_backoff_max` (the module's polling interval).
+RECONNECT_BACKOFF_INITIAL = 5.0
+
 
 _LOGGER = logging.getLogger("custom_components.viega_fonterra_modbus.modbus")
 
@@ -31,6 +36,14 @@ class ModbusClientError(RuntimeError):
         self.exception_code = exception_code
 
 
+class ModbusConnectionLost(ModbusClientError):
+    """The connection broke (EOF, reset, socket error) during a request.
+
+    A read failing this way on an established connection is retried once on
+    a new connection (spec.md 11c).
+    """
+
+
 class ViegaModbusClient:
     """Minimal Modbus TCP helper for the Fonterra system."""
 
@@ -40,16 +53,28 @@ class ViegaModbusClient:
     _transaction_counter = 0
 
     def __init__(
-        self, host: str, port: int = 502, timeout: float = 5
+        self,
+        host: str,
+        port: int = 502,
+        timeout: float = 5,
+        reconnect_backoff_max: float = 30,
     ) -> None:
         self.host = host
         self.port = port
         self.timeout = timeout
+        self.reconnect_backoff_max = reconnect_backoff_max
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
         self._connected = False
         self._lock = asyncio.Lock()
         self._recv_buffer = b""
+
+        # Automatic reconnection (spec.md 11c): enabled by the first
+        # successful `connect()`, disabled for good by `disconnect()`.
+        self._auto_reconnect = False
+        self._connection_lost = False
+        self._reconnect_backoff = RECONNECT_BACKOFF_INITIAL
+        self._next_reconnect_at = 0.0
 
         # Connection health metrics (spec.md 16b), derived entirely from
         # this client's own request/response bookkeeping - reading them
@@ -63,6 +88,10 @@ class ViegaModbusClient:
         #: Bounded history of recent Modbus exception codes (spec.md 16e),
         #: oldest first - a fixed-size deque, never an unbounded log.
         self.recent_exception_codes: deque[int] = deque(maxlen=RECENT_EXCEPTION_CODES_MAXLEN)
+        #: Successful automatic reconnections after a lost connection
+        #: (spec.md 11c); the initial `connect()` is not counted.
+        self.reconnect_count: int = 0
+        self.last_reconnect_time: datetime | None = None
 
     def _record_success(self, duration: float, invalid_values: int = 0) -> None:
         self.last_success_time = datetime.now(timezone.utc)
@@ -244,16 +273,102 @@ class ViegaModbusClient:
                 f"expected {expected_count}"
             )
 
-    async def connect(self) -> None:
-        """Open a TCP socket to the configured Modbus endpoint."""
+    async def _open(self) -> None:
+        """Open the TCP socket; every failure becomes a `ModbusClientError`."""
         try:
             self._reader, self._writer = await asyncio.wait_for(
                 asyncio.open_connection(self.host, self.port), timeout=self.timeout
             )
-        except asyncio.TimeoutError:
-            raise ModbusClientError(f"Connection timeout after {self.timeout}s")
+        except asyncio.TimeoutError as err:
+            raise ModbusClientError(f"Connection timeout after {self.timeout}s") from err
+        except OSError as err:
+            raise ModbusClientError(f"Connection to {self.host}:{self.port} failed: {err}") from err
         self._connected = True
         self._recv_buffer = b""
+
+    async def connect(self) -> None:
+        """Open a TCP socket to the configured Modbus endpoint.
+
+        After this first successful connect the client reconnects on its own
+        whenever the connection is lost (spec.md 11c), until `disconnect()`
+        is called.
+        """
+        await self._open()
+        self._auto_reconnect = True
+        self._reconnect_backoff = RECONNECT_BACKOFF_INITIAL
+        self._next_reconnect_at = 0.0
+        self._connection_lost = False
+
+    async def _ensure_connected(self) -> None:
+        """Make sure a usable connection exists before a request is sent.
+
+        Called with `self._lock` held, so a reconnect can never interleave
+        with another request (spec.md 11b/11c). Reconnection attempts are
+        rate-limited: after a failed attempt, requests fail immediately until
+        the back-off has elapsed instead of each waiting for its own
+        connection timeout.
+        """
+        if self._connected and self._reader is not None and self._writer is not None:
+            return
+        if not self._auto_reconnect:
+            raise ModbusClientError("Modbus client is not connected")
+
+        now = time.monotonic()
+        if now < self._next_reconnect_at:
+            raise ModbusClientError(
+                f"Modbus connection to {self.host}:{self.port} is down; next "
+                f"reconnect attempt in {self._next_reconnect_at - now:.0f}s"
+            )
+        try:
+            await self._open()
+        except ModbusClientError:
+            self._next_reconnect_at = now + self._reconnect_backoff
+            self._reconnect_backoff = min(
+                self._reconnect_backoff * 2,
+                max(self.reconnect_backoff_max, RECONNECT_BACKOFF_INITIAL),
+            )
+            _LOGGER.debug(
+                "Modbus reconnect to %s:%s failed; next attempt in %.0fs",
+                self.host, self.port, self._next_reconnect_at - now, exc_info=True,
+            )
+            raise
+
+        self._reconnect_backoff = RECONNECT_BACKOFF_INITIAL
+        self._next_reconnect_at = 0.0
+        self.reconnect_count += 1
+        self.last_reconnect_time = datetime.now(timezone.utc)
+        if self._connection_lost:
+            self._connection_lost = False
+            _LOGGER.info(
+                "Modbus connection to %s:%s restored", self.host, self.port
+            )
+
+    def _discard_connection(self, reason: object) -> None:
+        """Drop the current connection after a failure (spec.md 11c).
+
+        Once a response has been missed or misread, the byte stream can no
+        longer be trusted to line up with the requests, so the socket is
+        closed and every buffered byte is dropped; a late response to an
+        earlier request can then never be taken as the answer to a later
+        one. Synchronous on purpose: it also runs when a request is
+        cancelled, where awaiting `wait_closed()` is not possible.
+        """
+        if self._connected and self._auto_reconnect and not self._connection_lost:
+            self._connection_lost = True
+            _LOGGER.warning(
+                "Modbus connection to %s:%s lost (%s); reconnecting automatically",
+                self.host, self.port, reason,
+            )
+        writer = self._writer
+        self._reader = None
+        self._writer = None
+        self._connected = False
+        self._recv_buffer = b""
+        if writer is not None:
+            try:
+                writer.close()
+            except Exception:
+                _LOGGER.debug("Error closing discarded Modbus connection", exc_info=True)
 
     async def _read_exact(self, size: int) -> bytes:
         """Accumulate exactly `size` bytes from the stream.
@@ -266,7 +381,7 @@ class ViegaModbusClient:
         while len(self._recv_buffer) < size:
             chunk = await self._reader.read(size - len(self._recv_buffer))
             if not chunk:
-                raise ModbusClientError(
+                raise ModbusConnectionLost(
                     "Modbus connection closed while reading a response"
                 )
             self._recv_buffer += chunk
@@ -305,8 +420,11 @@ class ViegaModbusClient:
         when the device is offline or its connection is already broken).
         The state reset below must always run, even when the close itself
         fails or times out, so the client is never left thinking it is
-        still connected.
+        still connected. Automatic reconnection is switched off for good
+        (spec.md 11c), so a request still queued behind the unload cannot
+        open a new connection.
         """
+        self._auto_reconnect = False
         if self._writer is not None:
             self._writer.close()
             try:
@@ -322,94 +440,114 @@ class ViegaModbusClient:
         self._connected = False
         self._recv_buffer = b""
 
+    async def _transact(
+        self,
+        build_request,
+        function_code: int,
+        count: int | None,
+        label: str,
+        retry_on_connection_loss: bool,
+    ) -> list[int]:
+        """Send one request and return its decoded registers (`[]` for a write).
+
+        `build_request` is called for every attempt so a retry gets a fresh
+        transaction ID. Every failure except a well-formed Modbus exception
+        response discards the connection (spec.md 11c). A read whose
+        established connection turned out to be broken is retried once on a
+        new connection, so the first poll after an outage is not lost; a
+        write is never retried.
+        """
+        async with self._lock:
+            attempts = 2 if retry_on_connection_loss else 1
+            for attempt in range(1, attempts + 1):
+                had_connection = self._connected
+                start = time.monotonic()
+                try:
+                    await self._ensure_connected()
+                    request = build_request()
+                    expected_transaction_id = int.from_bytes(request[0:2], byteorder="big")
+                    self._log_frame("TX", request)
+                    self._writer.write(request)
+                    await self._writer.drain()
+                    try:
+                        response = await asyncio.wait_for(
+                            self._read_frame(), timeout=self.timeout
+                        )
+                    except asyncio.TimeoutError as err:
+                        raise ModbusClientError(
+                            f"Modbus {label} timeout after {self.timeout}s"
+                        ) from err
+                    self._log_frame("RX", response)
+                    self.validate_transaction_id(response, expected_transaction_id)
+                    self.validate_function_code(response, function_code)
+                    values: list[int] = []
+                    if count is not None:
+                        values = self.decode_int16_response(response)
+                        self._validate_register_count(values, count)
+                except asyncio.CancelledError:
+                    self._discard_connection("request cancelled")
+                    raise
+                except Exception as exc:
+                    err: Exception = exc
+                    if isinstance(exc, OSError):
+                        err = ModbusConnectionLost(f"Modbus connection error: {exc}")
+                        err.__cause__ = exc
+                    if getattr(err, "exception_code", None) is None:
+                        self._discard_connection(err)
+                    if (
+                        attempt < attempts
+                        and had_connection
+                        and isinstance(err, ModbusConnectionLost)
+                    ):
+                        _LOGGER.debug(
+                            "Modbus %s failed on a broken connection (%s); "
+                            "retrying once on a new connection",
+                            label, err,
+                        )
+                        continue
+                    self._record_failure(err)
+                    if err is exc:
+                        raise
+                    raise err from exc
+                self._record_success(
+                    time.monotonic() - start,
+                    sum(1 for value in values if value == self.ERROR_SENTINEL),
+                )
+                return values
+        raise AssertionError("unreachable")  # pragma: no cover
+
     async def read_holding_registers(self, address: int, count: int = 1) -> list[int]:
         """Read one or more holding registers from the Modbus device."""
-        if not self._connected or self._reader is None or self._writer is None:
-            raise ModbusClientError("Modbus client is not connected")
-
-        request = self.build_read_request(address, count, unit_id=self.UNIT_ID)
-        expected_transaction_id = int.from_bytes(request[0:2], byteorder="big")
-        start = time.monotonic()
-        async with self._lock:
-            try:
-                self._log_frame("TX", request)
-                self._writer.write(request)
-                await self._writer.drain()
-
-                try:
-                    response = await asyncio.wait_for(self._read_frame(), timeout=self.timeout)
-                except asyncio.TimeoutError:
-                    raise ModbusClientError(f"Modbus read timeout after {self.timeout}s")
-                self._log_frame("RX", response)
-                self.validate_transaction_id(response, expected_transaction_id)
-                self.validate_function_code(response, 0x03)
-                values = self.decode_register_response(response)
-                self._validate_register_count(values, count)
-            except Exception as err:
-                self._record_failure(err)
-                raise
-            self._record_success(
-                time.monotonic() - start,
-                sum(1 for value in values if value == self.ERROR_SENTINEL),
-            )
-            return values
+        return await self._transact(
+            lambda: self.build_read_request(address, count, unit_id=self.UNIT_ID),
+            0x03,
+            count,
+            "read",
+            retry_on_connection_loss=True,
+        )
 
     async def read_input_registers(self, address: int, count: int = 1) -> list[int]:
         """Read signed Int16 input registers using function code 0x04."""
-        if not self._connected or self._reader is None or self._writer is None:
-            raise ModbusClientError("Modbus client is not connected")
 
-        request = self.build_read_request(address, count, unit_id=self.UNIT_ID)
-        request = request[:7] + b"\x04" + request[8:]
-        expected_transaction_id = int.from_bytes(request[0:2], byteorder="big")
-        start = time.monotonic()
-        async with self._lock:
-            try:
-                self._log_frame("TX", request)
-                self._writer.write(request)
-                await self._writer.drain()
-                try:
-                    response = await asyncio.wait_for(self._read_frame(), timeout=self.timeout)
-                except asyncio.TimeoutError:
-                    raise ModbusClientError(f"Modbus input read timeout after {self.timeout}s")
-                self._log_frame("RX", response)
-                self.validate_transaction_id(response, expected_transaction_id)
-                self.validate_function_code(response, 0x04)
-                values = self.decode_int16_response(response)
-                self._validate_register_count(values, count)
-            except Exception as err:
-                self._record_failure(err)
-                raise
-            self._record_success(
-                time.monotonic() - start,
-                sum(1 for value in values if value == self.ERROR_SENTINEL),
-            )
-            return values
+        def build() -> bytes:
+            request = self.build_read_request(address, count, unit_id=self.UNIT_ID)
+            return request[:7] + b"\x04" + request[8:]
+
+        return await self._transact(
+            build, 0x04, count, "input read", retry_on_connection_loss=True
+        )
 
     async def write_register(self, address: int, value: int) -> None:
         """Write a single register via Modbus function code 0x10 (Write
-        Multiple Registers, quantity 1) - see `build_write_request`."""
-        if not self._connected or self._reader is None or self._writer is None:
-            raise ModbusClientError("Modbus client is not connected")
+        Multiple Registers, quantity 1) - see `build_write_request`.
 
-        request = self.build_write_request(address, value, unit_id=self.UNIT_ID)
-        expected_transaction_id = int.from_bytes(request[0:2], byteorder="big")
-        start = time.monotonic()
-        async with self._lock:
-            try:
-                self._log_frame("TX", request)
-                self._writer.write(request)
-                await self._writer.drain()
-
-                try:
-                    response = await asyncio.wait_for(self._read_frame(), timeout=self.timeout)
-                except asyncio.TimeoutError:
-                    raise ModbusClientError(f"Modbus write timeout after {self.timeout}s")
-                self._log_frame("RX", response)
-                self.validate_transaction_id(response, expected_transaction_id)
-                self.validate_function_code(response, 0x10)
-            except Exception as err:
-                self._record_failure(err)
-                raise
-            self._record_success(time.monotonic() - start)
-
+        Never retried automatically (spec.md 11c): a failed write is reported
+        to the caller, and the next write uses a new connection.
+        """
+        await self._transact(
+            lambda: self.build_write_request(address, value, unit_id=self.UNIT_ID),
+            0x10,
+            None,
+            "write",
+            retry_on_connection_loss=False,
+        )
