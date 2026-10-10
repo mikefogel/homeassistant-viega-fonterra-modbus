@@ -504,3 +504,33 @@ def test_base_unit_temperature_sensor_restores_last_numeric_value():
     asyncio.run(sensor.async_added_to_hass())
 
     assert sensor._attr_native_value == 42.3
+
+
+def test_restored_statistics_survive_the_first_update_after_a_restart():
+    """spec.md 16f: the restored value seeds the shared statistics, so the
+    first cycle does not reset the counter to 0 (it previously did)."""
+    entry_data: dict = {}
+    hass = SimpleNamespace(data={DOMAIN: {"entry_1": entry_data}})
+    entity = ViegaActuatorStatisticsSensor("entry_1", "confirmed_open_seconds")
+    entity.hass = hass
+
+    async def _fake_last_state():
+        return SimpleNamespace(state="12.5", attributes={})
+
+    entity.async_get_last_state = _fake_last_state
+    asyncio.run(entity.async_added_to_hass())
+    asyncio.run(entity.async_update())
+
+    assert entity._attr_native_value == 12.5
+    assert entry_data["actuator_statistics"].confirmed_open_seconds == 12.5
+
+
+def test_only_the_metrics_that_change_every_cycle_are_disabled_by_default():
+    from custom_components.viega_fonterra_modbus.sensor import ViegaConnectionHealthSensor
+
+    disabled = {
+        key
+        for key in ViegaConnectionHealthSensor.METRIC_KEYS
+        if not ViegaConnectionHealthSensor("entry_1", key).entity_registry_enabled_default
+    }
+    assert disabled == {"last_success_time", "last_success_duration"}

@@ -6,6 +6,14 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### ⚠️ Please check after updating
+
+- 🗄️ To keep the database small, **Last successful Modbus response** and
+  **Last Modbus request duration** are now disabled by default for newly
+  set-up modules; on existing installations they stay enabled. The README
+  section "Keeping the database small" shows how to keep their history out
+  of the recorder.
+
 ### ✨ Added
 
 - 🔁 The circulation-pump blueprint accepts several indicators, so one pump
@@ -18,8 +26,16 @@ and versions follow [Semantic Versioning](https://semver.org/).
   user dashboard) with real screenshots from Home Assistant 2026.10 and
   their complete YAML.
 
+### 🔄 Changed
+
+- 🗄️ The cumulative open time of the actuator statistics now changes once
+  per open period instead of on every polling cycle (far fewer database
+  rows).
+
 ### 🐛 Fixed
 
+- 🔢 The open-transition count and cumulative open time started again at
+  0 after every restart instead of continuing from their restored values.
 - 📖 The README dashboard example used `sensor.fonterra_wlan_serial_number`;
   the entity is `sensor.fonterra_wlan_module_serial_number`.
 

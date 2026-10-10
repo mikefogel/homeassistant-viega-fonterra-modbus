@@ -739,6 +739,17 @@ exception code, duration of the last successful request, number of
 reconnections, and time of the last reconnection. They never overwrite device
 values and expose no network-identifying data.
 
+**Recorder load.** A sensor whose state changes on every polling cycle writes
+one database row per cycle (measured: ~185 bytes; at the default 30 s about
+2,900 rows or 0.5 MB per day and module, ~5 MB per module at Home
+Assistant's default 10-day retention). The two metrics that change on every
+successful cycle – *last successful response* and *duration of the last
+successful request* – are therefore disabled by default
+(`entity_registry_enabled_default = False`); users enable them when they need
+them. All other metrics change only on failures, reconnections, or invalid
+values and stay enabled. The README explains how to exclude any entity from
+the recorder instead.
+
 ### 16c. Read-after-write verification
 
 After an acknowledged write the integration requests an early polling cycle
@@ -768,7 +779,11 @@ Diagnostic sensors derived from the pump indicator's debounced actuator values
 (no extra reads): number of open actuators, open-transition count, time of the
 last transition, and cumulative open time. The open count stays unavailable
 until a debounced value exists and is not restored; the other three are
-restored. They are not presented as device registers.
+restored and **continue from the restored value** – the shared statistics
+object is seeded with it, so the first cycle after a restart never resets a
+counter to `0`. The cumulative open time is updated once per open period,
+when it ends (open → closed), not on every cycle, so it writes a database row
+per transition only. They are not presented as device registers.
 
 ### 16g. Multi-module overview
 

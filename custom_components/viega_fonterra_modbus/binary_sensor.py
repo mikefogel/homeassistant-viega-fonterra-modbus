@@ -239,9 +239,25 @@ class ActuatorStatistics:
         self.open_actuator_count: int | None = None
         self.open_transition_count: int = 0
         self.last_transition_time: datetime | None = None
+        #: Total of all *completed* open periods. Updated once per period,
+        #: when it ends, so the sensor writes one recorder row per
+        #: transition instead of one per polling cycle (spec.md 16f).
         self.confirmed_open_seconds: float = 0.0
         self._last_aggregate: bool | None = None
-        self._last_update_monotonic: float | None = None
+        self._open_since: float | None = None
+
+    def restore(self, metric_key: str, value: object) -> None:
+        """Continue from a value restored after a restart (spec.md 16f).
+
+        Only applied while the statistic still has its initial value, so a
+        value accumulated in this run is never replaced by an older one.
+        """
+        if metric_key == "open_transition_count" and self.open_transition_count == 0:
+            self.open_transition_count = int(value)
+        elif metric_key == "confirmed_open_seconds" and self.confirmed_open_seconds == 0.0:
+            self.confirmed_open_seconds = float(value)
+        elif metric_key == "last_transition_time" and self.last_transition_time is None:
+            self.last_transition_time = value
 
     def update(self, accepted: dict[int, int | None]) -> None:
         """Feed one polling cycle's debounced actuator values.
@@ -251,11 +267,6 @@ class ActuatorStatistics:
         `None` if it has not settled yet.
         """
         settled = [value for value in accepted.values() if value is not None]
-
-        now = time.monotonic()
-        if self._last_aggregate is True and self._last_update_monotonic is not None:
-            self.confirmed_open_seconds += now - self._last_update_monotonic
-        self._last_update_monotonic = now
 
         if not settled:
             # spec.md 16f: unavailable until a valid debounced reading
@@ -269,6 +280,10 @@ class ActuatorStatistics:
             self.last_transition_time = datetime.now(timezone.utc)
             if aggregate:
                 self.open_transition_count += 1
+                self._open_since = time.monotonic()
+            elif self._open_since is not None:
+                self.confirmed_open_seconds += time.monotonic() - self._open_since
+                self._open_since = None
         self._last_aggregate = aggregate
 
 

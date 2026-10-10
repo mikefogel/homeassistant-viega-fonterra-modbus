@@ -143,7 +143,7 @@ Depending on the discovered rooms/actuators and available registers, the integra
 | Binary sensor | `binary_sensor.fonterra_base_unit_error` | On when the base-unit error code is non-zero |
 | Sensor | `sensor.fonterra_wohnzimmer_diagnostic` | That room's error/warning state in your language (e.g. "Kein Fehler", "Warnung: Batterie des Raumthermostats schwach"), with the raw code as attribute |
 | Binary sensor | `binary_sensor.fonterra_circulation_pump` | Derived circulation-pump indicator (see below) |
-| Sensor | `sensor.fonterra_last_successful_modbus_response` and seven more `..._health_*` sensors | Connection health metrics (see below) |
+| Sensor | `sensor.fonterra_last_successful_modbus_response` and seven more `..._health_*` sensors | Connection health metrics (see below; two of them are disabled by default) |
 | Sensor | `sensor.fonterra_currently_open_actuators` and three more `..._actuator_stats_*` sensors | Derived actuator statistics (see below) |
 
 Operating mode and profile mode are set on the base unit itself, not per
@@ -229,6 +229,8 @@ Each module also exposes eight diagnostic sensors derived entirely from the shar
 
 These are diagnostic only: a communication failure never overwrites a room's last valid value, and no host/port/network information is exposed through them.
 
+**Last successful response** and **duration of the last request** change on every polling cycle, so they are **disabled by default** to keep your database small (see "Keeping the database small" below). Enable them under *Settings → Devices & services → Entities* if you want them; the other six only change on failures, reconnections, or invalid values.
+
 ### Repairs notifications
 
 Problems that need your attention show up under **Settings → Repairs**, so you notice them even without looking at the dashboard:
@@ -269,7 +271,7 @@ Four more diagnostic sensors are derived from the circulation-pump indicator's o
 - timestamp of the last confirmed transition (on↔off)
 - cumulative confirmed-open time
 
-These are computed values, not device registers, and are not a substitute for the circulation-pump binary sensor itself. The open-actuator count stays unavailable until at least one actuator has completed its debounce cycle and is never restored to a stale value after a restart; the transition count, cumulative open time, and last-transition timestamp do restore.
+These are computed values, not device registers, and are not a substitute for the circulation-pump binary sensor itself. The cumulative open time grows once per open period, when it ends, not on every cycle. The open-actuator count stays unavailable until at least one actuator has completed its debounce cycle and is never restored to a stale value after a restart; the transition count, cumulative open time, and last-transition timestamp are restored and continue counting from there.
 
 ### Multi-module overview
 
@@ -2348,6 +2350,26 @@ entities:
   - sensor.kuche_heizdauer_heute
   - sensor.wohnzimmer_heizdauer_heute
 ```
+
+## Keeping the database small
+
+Home Assistant's recorder stores a new row every time an entity's state changes – about 185 bytes each. A sensor that changes on every polling cycle therefore adds about 2,900 rows (≈0.5 MB) per day and module at the default 30-second interval, ≈5 MB per module with the default 10 days of history. Most of this integration's entities change far less often: temperatures only when they actually change, actuators and the pump on transitions, the cumulative open time once per open period.
+
+The two connection-health sensors that change on every cycle are disabled by default. If you enable them, or want to keep history for any other entity out of the database while still seeing its current value, exclude it from the recorder in `configuration.yaml`:
+
+```yaml
+recorder:
+  exclude:
+    entity_globs:
+      # English installation
+      - sensor.*_last_successful_modbus_response
+      - sensor.*_last_modbus_request_duration
+      # German installation
+      - sensor.*_letzte_erfolgreiche_modbus_antwort
+      - sensor.*_dauer_der_letzten_modbus_anfrage
+```
+
+Restart Home Assistant afterwards. Existing history of these entities is removed by the next automatic purge (or right away with the `recorder.purge_entities` action). Check your own entity IDs under *Developer tools → States* – they depend on your device name and on the language Home Assistant had when the entities were created.
 
 ## Verifying your configuration
 

@@ -406,19 +406,48 @@ def test_statistics_count_only_off_to_on_flips_as_open_transitions():
     assert stats.open_transition_count == 2
 
 
-def test_statistics_accumulate_confirmed_open_seconds_only_while_open(monkeypatch):
+def test_confirmed_open_seconds_grow_once_per_completed_open_period(monkeypatch):
+    """spec.md 16f: the open time is added when an open period ends, so the
+    sensor changes once per transition instead of on every polling cycle."""
     stats = ActuatorStatistics()
-    times = [0.0, 1.0, 3.0, 3.0, 10.0]
-    sequence = itertools.chain(times, itertools.repeat(times[-1]))
-    monkeypatch.setattr(binary_sensor_module.time, "monotonic", lambda: next(sequence))
+    now = {"t": 0.0}
+    monkeypatch.setattr(binary_sensor_module.time, "monotonic", lambda: now["t"])
 
-    stats.update({1: 1})  # t=0: settles open (first settle: no elapsed time yet to add)
-    stats.update({1: 1})  # t=1: 1s elapsed while open -> +1s
-    stats.update({1: 1})  # t=3: 2s elapsed while open -> +2s
-    stats.update({1: 0})  # t=3: aggregate flips to closed (0s elapsed this call)
-    stats.update({1: 0})  # t=10: elapsed while *closed* -> no addition
-
+    stats.update({1: 1})  # t=0: opens
+    for t in (1.0, 2.0, 3.0):  # still open: value unchanged on every cycle
+        now["t"] = t
+        stats.update({1: 1})
+        assert stats.confirmed_open_seconds == 0.0
+    now["t"] = 3.0
+    stats.update({1: 0})  # closes after 3 s
     assert stats.confirmed_open_seconds == 3.0
+
+    now["t"] = 10.0
+    stats.update({1: 0})  # time while closed is not counted
+    now["t"] = 12.0
+    stats.update({1: 1})
+    now["t"] = 14.5
+    stats.update({1: 0})
+    assert stats.confirmed_open_seconds == 5.5
+
+
+def test_statistics_continue_from_restored_values():
+    stats = ActuatorStatistics()
+    stats.restore("open_transition_count", 4.0)
+    stats.restore("confirmed_open_seconds", 12.5)
+
+    stats.update({1: 1})
+
+    assert stats.open_transition_count == 5
+    assert stats.confirmed_open_seconds == 12.5
+
+
+def test_restore_never_replaces_a_value_accumulated_in_this_run():
+    stats = ActuatorStatistics()
+    stats.update({1: 1})
+    stats.restore("open_transition_count", 40.0)
+
+    assert stats.open_transition_count == 1
 
 
 def test_pump_entity_update_feeds_the_shared_actuator_statistics():

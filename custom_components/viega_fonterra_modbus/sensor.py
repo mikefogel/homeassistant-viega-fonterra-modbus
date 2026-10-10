@@ -16,6 +16,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util import dt as dt_util
 
+from .binary_sensor import ActuatorStatistics
 from .const import DOMAIN
 from .device import build_device_info
 from .diagnostic import ViegaDiagnosticTextEntity, _room_error_address
@@ -512,6 +513,9 @@ class ViegaConnectionHealthSensor(ViegaCoordinatedEntity, SensorEntity):
         "last_reconnect_time": SensorDeviceClass.TIMESTAMP,
     }
     _UNIT = {"last_success_duration": UnitOfTime.SECONDS}
+    #: Metrics that change on every successful polling cycle and would write
+    #: one recorder row per cycle; disabled by default (spec.md 16b).
+    _CHANGES_EVERY_CYCLE = {"last_success_time", "last_success_duration"}
     _STATE_CLASS = {
         "consecutive_failures": SensorStateClass.MEASUREMENT,
         "invalid_value_count": SensorStateClass.TOTAL_INCREASING,
@@ -524,6 +528,9 @@ class ViegaConnectionHealthSensor(ViegaCoordinatedEntity, SensorEntity):
         self._metric_key = metric_key
         self._attr_unique_id = f"{entry_id}_health_{metric_key}"
         self._attr_translation_key = f"health_{metric_key}"
+        self._attr_entity_registry_enabled_default = (
+            metric_key not in self._CHANGES_EVERY_CYCLE
+        )
         self._attr_device_class = self._DEVICE_CLASS.get(metric_key)
         self._attr_native_unit_of_measurement = self._UNIT.get(metric_key)
         self._attr_state_class = self._STATE_CLASS.get(metric_key)
@@ -595,14 +602,23 @@ class ViegaActuatorStatisticsSensor(ViegaCoordinatedEntity, SensorEntity, Restor
         if last_state is None or last_state.state in ("unknown", "unavailable"):
             return
         if self._metric_key == "last_transition_time":
-            parsed = dt_util.parse_datetime(last_state.state)
-            if parsed is not None:
-                self._attr_native_value = parsed
-            return
-        try:
-            self._attr_native_value = float(last_state.state)
-        except (TypeError, ValueError):
-            return
+            value = dt_util.parse_datetime(last_state.state)
+            if value is None:
+                return
+        else:
+            try:
+                value = float(last_state.state)
+            except (TypeError, ValueError):
+                return
+        self._attr_native_value = value
+        # Seed the shared statistics so the first cycle after a restart
+        # continues from this value instead of resetting it (spec.md 16f).
+        if self.hass is not None:
+            entry_data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+            if entry_data is not None:
+                entry_data.setdefault(
+                    "actuator_statistics", ActuatorStatistics()
+                ).restore(self._metric_key, value)
 
     async def async_update(self) -> None:
         """Copy the current statistic off the shared `ActuatorStatistics`.
