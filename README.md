@@ -143,7 +143,7 @@ Depending on the discovered rooms/actuators and available registers, the integra
 | Binary sensor | `binary_sensor.fonterra_base_unit_error` | On when the base-unit error code is non-zero |
 | Sensor | `sensor.fonterra_wohnzimmer_diagnostic` | That room's error/warning state in your language (e.g. "Kein Fehler", "Warnung: Batterie des Raumthermostats schwach"), with the raw code as attribute |
 | Binary sensor | `binary_sensor.fonterra_circulation_pump` | Derived circulation-pump indicator (see below) |
-| Sensor | `sensor.fonterra_last_successful_modbus_response` and seven more `..._health_*` sensors | Connection health metrics (see below; two of them are disabled by default) |
+| Sensor | `sensor.fonterra_last_successful_modbus_response` and eight more health sensors | Connection health metrics and invalid registers (see below; three of them are disabled by default) |
 | Sensor | `sensor.fonterra_currently_open_actuators` and three more `..._actuator_stats_*` sensors | Derived actuator statistics (see below) |
 
 Operating mode and profile mode are set on the base unit itself, not per
@@ -217,7 +217,7 @@ automation:
 
 ### Connection health metrics
 
-Each module also exposes eight diagnostic sensors derived entirely from the shared Modbus client's own bookkeeping — none of them issues an extra Modbus request:
+Each module also exposes nine diagnostic sensors derived entirely from the integration's own bookkeeping — none of them issues an extra Modbus request:
 
 - last successful response timestamp
 - last failed request timestamp
@@ -226,10 +226,11 @@ Each module also exposes eight diagnostic sensors derived entirely from the shar
 - last Modbus exception code, when available
 - duration of the most recent successful request
 - number of automatic reconnections, and the time of the last one
+- **invalid registers**: how many registers the device reported as `-99` in the latest polling cycle, with the list of them (e.g. `room_3.current_temperature`) as an attribute
 
 These are diagnostic only: a communication failure never overwrites a room's last valid value, and no host/port/network information is exposed through them.
 
-**Last successful response** and **duration of the last request** change on every polling cycle, so they are **disabled by default** to keep your database small (see "Keeping the database small" below). Enable them under *Settings → Devices & services → Entities* if you want them; the other six only change on failures, reconnections, or invalid values.
+**Last successful response**, **duration of the last request**, and the **invalid-value count** change on every polling cycle (the count does whenever a register is permanently `-99`), so they are **disabled by default** to keep your database small (see "Keeping the database small" below). Enable them under *Settings → Devices & services → Entities* if you want them; the others only change on failures, reconnections, or when the set of invalid registers changes.
 
 ### Repairs notifications
 
@@ -2355,7 +2356,7 @@ entities:
 
 Home Assistant's recorder stores a new row every time an entity's state changes – about 185 bytes each. A sensor that changes on every polling cycle therefore adds about 2,900 rows (≈0.5 MB) per day and module at the default 30-second interval, ≈5 MB per module with the default 10 days of history. Most of this integration's entities change far less often: temperatures only when they actually change, actuators and the pump on transitions, the cumulative open time once per open period.
 
-The two connection-health sensors that change on every cycle are disabled by default. If you enable them, or want to keep history for any other entity out of the database while still seeing its current value, exclude it from the recorder in `configuration.yaml`:
+The three connection-health sensors that can change on every cycle are disabled by default. If you enable them, or want to keep history for any other entity out of the database while still seeing its current value, exclude it from the recorder in `configuration.yaml`:
 
 ```yaml
 recorder:
@@ -2364,9 +2365,11 @@ recorder:
       # English installation
       - sensor.*_last_successful_modbus_response
       - sensor.*_last_modbus_request_duration
+      - sensor.*_invalid_modbus_value_count
       # German installation
       - sensor.*_letzte_erfolgreiche_modbus_antwort
       - sensor.*_dauer_der_letzten_modbus_anfrage
+      - sensor.*_anzahl_ungultiger_modbus_werte
 ```
 
 Restart Home Assistant afterwards. Existing history of these entities is removed by the next automatic purge (or right away with the `recorder.purge_entities` action). Check your own entity IDs under *Developer tools → States* – they depend on your device name and on the language Home Assistant had when the entities were created.
@@ -2405,6 +2408,15 @@ This means automatic discovery has never succeeded for this module (see "Setup" 
 ### Values are unavailable or show as `-99`
 
 A register value of `-99` means the device itself considers the value unavailable (for example, no room thermostat is paired for that room). The integration never shows `-99` (or a value scaled from it): it keeps the previous valid value, and the room's diagnostic sensor shows the room's own error state, e.g. "Keine Verbindung zum Raumthermostat". If a value has never been valid since setup, cross-check the affected room/actuator's register addresses using "Verifying your configuration" above.
+
+### The invalid-value count keeps growing
+
+The device reports at least one register as `-99` ("value not available") in every polling cycle, so the count grows by that number each cycle. Typical causes are a room without a paired room thermostat (its measured temperature) or an actuator that reports no return temperature. The integration keeps showing the last valid values; to find the register:
+
+- the **Invalid registers** sensor (diagnostic, on the module's device) shows how many registers are currently `-99` and lists them, e.g. `room_3.current_temperature`;
+- **Download diagnostics** lists every register that has been `-99` since the last start, with its room, manual address, and the number of cycles.
+
+Compare the listed room or actuator with the installation (thermostat paired? battery?) and with the manual's register table.
 
 ### A Repairs entry says the module is not reachable
 

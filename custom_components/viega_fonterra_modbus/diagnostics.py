@@ -101,6 +101,13 @@ def _extended_diagnostics(entry_data: dict[str, Any]) -> dict[str, Any]:
             "holding": sorted(holding),
             "input": sorted(input_),
         },
+        # Every register that has reported -99 (spec.md 16b), with the
+        # number of cycles - the cause behind a growing invalid-value count.
+        "invalid_registers": (
+            entry_data["polling"].invalid_registers_report()
+            if hasattr(entry_data.get("polling"), "invalid_registers_report")
+            else []
+        ),
         "last_rediscovery": entry_data.get("last_rediscovery"),
     }
 

@@ -533,4 +533,4 @@ def test_only_the_metrics_that_change_every_cycle_are_disabled_by_default():
         for key in ViegaConnectionHealthSensor.METRIC_KEYS
         if not ViegaConnectionHealthSensor("entry_1", key).entity_registry_enabled_default
     }
-    assert disabled == {"last_success_time", "last_success_duration"}
+    assert disabled == {"last_success_time", "last_success_duration", "invalid_value_count"}

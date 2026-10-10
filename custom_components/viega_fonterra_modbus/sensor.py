@@ -99,6 +99,7 @@ async def async_setup_entry(
         ViegaConnectionHealthSensor(entry.entry_id, metric_key)
         for metric_key in ViegaConnectionHealthSensor.METRIC_KEYS
     )
+    entities.append(ViegaInvalidRegistersSensor(entry.entry_id))
 
     entities.extend(
         ViegaActuatorStatisticsSensor(entry.entry_id, metric_key)
@@ -513,9 +514,11 @@ class ViegaConnectionHealthSensor(ViegaCoordinatedEntity, SensorEntity):
         "last_reconnect_time": SensorDeviceClass.TIMESTAMP,
     }
     _UNIT = {"last_success_duration": UnitOfTime.SECONDS}
-    #: Metrics that change on every successful polling cycle and would write
-    #: one recorder row per cycle; disabled by default (spec.md 16b).
-    _CHANGES_EVERY_CYCLE = {"last_success_time", "last_success_duration"}
+    #: Metrics that change on every polling cycle in normal operation and
+    #: would write one recorder row per cycle; disabled by default (spec.md
+    #: 16b). The invalid-value count grows on every cycle while any register
+    #: is permanently -99; ViegaInvalidRegistersSensor shows which.
+    _CHANGES_EVERY_CYCLE = {"last_success_time", "last_success_duration", "invalid_value_count"}
     _STATE_CLASS = {
         "consecutive_failures": SensorStateClass.MEASUREMENT,
         "invalid_value_count": SensorStateClass.TOTAL_INCREASING,
@@ -545,6 +548,39 @@ class ViegaConnectionHealthSensor(ViegaCoordinatedEntity, SensorEntity):
         """
         client = self.hass.data[DOMAIN][self._entry_id]["client"]
         self._attr_native_value = getattr(client, self._metric_key, None)
+
+    @property
+    def device_info(self):
+        return build_device_info(self.hass, self._entry_id)
+
+
+class ViegaInvalidRegistersSensor(ViegaCoordinatedEntity, SensorEntity):
+    """How many registers the device reported as `-99` in the latest polling
+    cycle, and which (spec.md 16b) - the cause behind a growing
+    invalid-value count, e.g. a room without a paired thermostat.
+
+    Read from the polling coordinator's own bookkeeping; no Modbus request.
+    Not restored: it describes the current cycle.
+    """
+
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_translation_key = "health_invalid_registers"
+
+    def __init__(self, entry_id: str) -> None:
+        self._entry_id = entry_id
+        self._attr_unique_id = f"{entry_id}_health_invalid_registers"
+        self._attr_native_value = None
+        self._attr_extra_state_attributes = {"invalid_registers": []}
+
+    async def async_update(self) -> None:
+        coordinator = self.hass.data[DOMAIN][self._entry_id].get("polling")
+        if not hasattr(coordinator, "invalid_register_ids") or not coordinator.generation:
+            return
+        registers = coordinator.invalid_register_ids()
+        self._attr_native_value = len(registers)
+        self._attr_extra_state_attributes = {"invalid_registers": registers}
 
     @property
     def device_info(self):

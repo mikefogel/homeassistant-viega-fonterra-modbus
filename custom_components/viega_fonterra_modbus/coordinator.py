@@ -29,7 +29,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import DOMAIN
 from .modbus_handler import ModbusClientError
-from .registers import known_addresses_for_topology
+from .registers import known_addresses_for_topology, register_labels
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -43,6 +43,9 @@ MAX_BLOCK_REGISTERS = 125
 REQUEST_TTL_CYCLES = 3
 
 ReadKey = tuple[str, int, int]  # (bank, address, count)
+
+#: The device's "value not available" sentinel (spec.md 10).
+ERROR_SENTINEL = -99
 _T = TypeVar("_T")
 
 
@@ -89,6 +92,10 @@ class ViegaDataCoordinator(DataUpdateCoordinator[dict[ReadKey, list[int]]]):
         self.generation = 0
         self._requested: dict[ReadKey, int] = {}
         self._lock = asyncio.Lock()
+        #: Registers that were `-99` in the latest cycle, and in how many
+        #: cycles each register has been `-99` since setup (spec.md 16b).
+        self.invalid_now: set[ReadKey] = set()
+        self.invalid_cycles: dict[ReadKey, int] = {}
 
     async def read(
         self, hass: HomeAssistant, entry_id: str, bank: str, address: int, count: int = 1
@@ -147,7 +154,43 @@ class ViegaDataCoordinator(DataUpdateCoordinator[dict[ReadKey, list[int]]]):
                 if values is not None:
                     data[(bank, address, count)] = values
             self.generation += 1
+            self._track_invalid(data)
             return data
+
+    def _track_invalid(self, data: dict[ReadKey, list[int]]) -> None:
+        self.invalid_now = {
+            key for key, values in data.items() if values and values[0] == ERROR_SENTINEL
+        }
+        for key in self.invalid_now:
+            self.invalid_cycles[key] = self.invalid_cycles.get(key, 0) + 1
+
+    def _label(self, key: ReadKey) -> tuple[str, str | None]:
+        rooms = self.hass.data.get(DOMAIN, {}).get(self.entry_id, {}).get("rooms", {})
+        bank, address, _ = key
+        return register_labels(rooms).get((bank, address), (f"{bank}_{address}", None))
+
+    def invalid_register_ids(self) -> list[str]:
+        """Identifiers of the registers that were `-99` in the latest cycle."""
+        return sorted(self._label(key)[0] for key in self.invalid_now)
+
+    def invalid_registers_report(self) -> list[dict[str, Any]]:
+        """Every register that has been `-99` at least once, for the
+        diagnostics export (spec.md 16e)."""
+        report = []
+        for key, cycles in sorted(self.invalid_cycles.items()):
+            bank, address, count = key
+            identifier, room = self._label(key)
+            report.append({
+                "register": identifier,
+                "room": room,
+                "bank": bank,
+                "address": address,
+                "manual_address": (40000 if bank == "holding" else 30000) + address,
+                "count": count,
+                "invalid_cycles": cycles,
+                "invalid_now": key in self.invalid_now,
+            })
+        return report
 
     def _reader(self, bank: str):
         return (

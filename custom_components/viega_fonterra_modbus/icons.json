@@ -20,6 +20,12 @@
         "state": {
           "no_error": "mdi:check-circle-outline"
         }
+      },
+      "health_invalid_registers": {
+        "default": "mdi:alert-octagon-outline",
+        "range": {
+          "0": "mdi:check-circle-outline"
+        }
       }
     }
   },

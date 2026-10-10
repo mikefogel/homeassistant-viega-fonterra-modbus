@@ -739,16 +739,40 @@ exception code, duration of the last successful request, number of
 reconnections, and time of the last reconnection. They never overwrite device
 values and expose no network-identifying data.
 
+**Invalid registers.** A register the device permanently reports as `-99`
+(e.g. the measured temperature of a room without a paired thermostat) makes
+the invalid-value count grow on every cycle without saying which register is
+affected. The polling cycle (§16i) therefore records, per register, whether
+its value in the latest cycle was `-99` and in how many cycles it has been
+`-99` since setup. This is exposed as:
+
+- a diagnostic sensor **Invalid registers**: the number of registers that were
+  `-99` in the latest cycle (`0` when everything is valid, unknown before the
+  first cycle), with the attribute `invalid_registers`, a sorted list of
+  stable register identifiers such as `room_3.current_temperature`,
+  `actuator_5.return_temperature`, or `base_unit.flow_temperature` (not
+  translated text); its state changes only when the set of invalid
+  registers changes;
+- the diagnostics export (§16e), which lists every register that has been
+  `-99` at least once with its identifier, room name (if any), bank, PDU and
+  manual address, number of `-99` cycles, and whether it is `-99` right now.
+
+Registers that are not part of the documented topology are identified by bank
+and address (e.g. `input_999`). Text registers count as invalid when their
+first register is `-99`. No extra Modbus request is made.
+
 **Recorder load.** A sensor whose state changes on every polling cycle writes
 one database row per cycle (measured: ~185 bytes; at the default 30 s about
 2,900 rows or 0.5 MB per day and module, ~5 MB per module at Home
-Assistant's default 10-day retention). The two metrics that change on every
-successful cycle – *last successful response* and *duration of the last
-successful request* – are therefore disabled by default
+Assistant's default 10-day retention). Metrics that change on every cycle in
+normal operation are therefore disabled by default
 (`entity_registry_enabled_default = False`); users enable them when they need
-them. All other metrics change only on failures, reconnections, or invalid
-values and stay enabled. The README explains how to exclude any entity from
-the recorder instead.
+them: *last successful response*, *duration of the last successful request*,
+and the *invalid-value count* (which grows on every cycle while any register
+is permanently `-99`; *Invalid registers* replaces it for finding the cause).
+All other metrics change only on failures, reconnections, or changes of the
+invalid set and stay enabled. The README explains how to exclude any entity
+from the recorder instead.
 
 ### 16c. Read-after-write verification
 
@@ -769,8 +793,9 @@ addresses. A failed block only drops its own registers from that cycle.
 
 The diagnostics export additionally contains a bounded snapshot: the
 connection-health metrics, a fixed-size history of recent Modbus exception
-codes, the documented addresses a polling cycle reads for the topology, and the
-last rediscovery's changes. No frames, no unbounded data, no firmware version
+codes, the documented addresses a polling cycle reads for the topology, the
+registers that have reported `-99` (§16b), and the last rediscovery's
+changes. No frames, no unbounded data, no firmware version
 (the device documents no such register), no network identifiers.
 
 ### 16f. Derived actuator statistics

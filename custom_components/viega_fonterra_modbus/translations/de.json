@@ -151,6 +151,14 @@
       "health_last_reconnect_time": {
         "name": "Letzte Modbus-Neuverbindung"
       },
+      "health_invalid_registers": {
+        "name": "Ungültige Register",
+        "state_attributes": {
+          "invalid_registers": {
+            "name": "Register"
+          }
+        }
+      },
       "actuator_stats_open_actuator_count": {
         "name": "Aktuell geöffnete Aktoren"
       },

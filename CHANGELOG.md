@@ -8,14 +8,20 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### ⚠️ Please check after updating
 
-- 🗄️ To keep the database small, **Last successful Modbus response** and
-  **Last Modbus request duration** are now disabled by default for newly
-  set-up modules; on existing installations they stay enabled. The README
+- 🗄️ To keep the database small, **Last successful Modbus response**,
+  **Last Modbus request duration**, and **Invalid Modbus value count** are
+  now disabled by default for newly set-up modules; on existing
+  installations they stay enabled. The README
   section "Keeping the database small" shows how to keep their history out
   of the recorder.
 
 ### ✨ Added
 
+- 🔎 New diagnostic sensor **Invalid registers**: how many registers the
+  device reports as `-99` right now and which ones (e.g.
+  `room_3.current_temperature`) – the cause behind a steadily growing
+  invalid-value count. "Download diagnostics" lists every such register
+  with room, address, and number of cycles.
 - 🔁 The circulation-pump blueprint accepts several indicators, so one pump
   shared by several Viega modules (e.g. three floors) runs while any of them
   needs heat. Automations created with a single indicator keep working.

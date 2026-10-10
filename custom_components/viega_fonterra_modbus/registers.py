@@ -201,6 +201,44 @@ BASE_UNIT_ERROR_CODES: dict[int, str] = {
     22: "Room warning: room thermostat battery is weak",
     24: "Room warning: connection to the room thermostat is weak",
 }
+def register_labels(rooms: dict[str, object]) -> dict[tuple[str, int], tuple[str, str | None]]:
+    """Map `(bank, PDU address)` to a stable register identifier and the
+    room name it belongs to (spec.md 16b "Invalid registers").
+
+    Identifiers are technical keys, not translated text: `base_unit.<key>`,
+    `room_<n>.<key>`, `actuator_<m>.<key>`. Multi-register text fields are
+    keyed by their first register.
+    """
+    labels: dict[tuple[str, int], tuple[str, str | None]] = {
+        ("holding", BASE_UNIT_REGISTERS["operating_mode"]): ("base_unit.operating_mode", None),
+        ("holding", BASE_UNIT_REGISTERS["profile_mode"]): ("base_unit.profile_mode", None),
+        ("input", BASE_UNIT_REGISTERS["error_code"]): ("base_unit.error_code", None),
+        ("input", BASE_UNIT_REGISTERS["flow_temperature"]): ("base_unit.flow_temperature", None),
+        ("input", BASE_UNIT_REGISTERS["wlan_serial_number"]): ("base_unit.wlan_serial_number", None),
+        ("input", BASE_UNIT_REGISTERS["base_unit_serial_number"]): ("base_unit.serial_number", None),
+        ("input", BASE_UNIT_REGISTERS["base_unit_name"]): ("base_unit.name", None),
+    }
+    for room_id, room_config in rooms.items():
+        if not isinstance(room_config, dict):
+            continue
+        name = room_config.get("name")
+        room_number = resolve_room_number(room_id, room_config)
+        if room_number:
+            registers = room_registers(room_number)
+            labels[("input", registers["current_temperature"])] = (f"room_{room_number}.current_temperature", name)
+            labels[("input", registers["error_code"])] = (f"room_{room_number}.error_code", name)
+            labels[("holding", registers["power_level"])] = (f"room_{room_number}.power_level", name)
+            labels[("holding", registers["target_temperature"])] = (f"room_{room_number}.target_temperature", name)
+        for actor_number in room_actor_numbers(room_config):
+            try:
+                actor = actor_registers(actor_number)
+            except ValueError:
+                continue
+            for key in ("position", "return_temperature", "room_id"):
+                labels[("input", actor[key])] = (f"actuator_{actor_number}.{key}", name)
+    return labels
+
+
 #: Codes the manual's table describes as warnings rather than faults; they
 #: are reported with "warning" severity in Home Assistant's repairs list
 #: (spec.md 16j). Every other non-zero code is treated as a fault.
