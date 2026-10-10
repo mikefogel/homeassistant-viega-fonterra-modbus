@@ -778,6 +778,21 @@ from the recorder instead.
 
 ### 16c. Read-after-write verification
 
+**Stepwise values are sent once they are stable.** The target temperature and
+the power level are typically changed in steps (several clicks on "+"). A new
+value is shown immediately but sent to the module only after it has been
+unchanged for **5 s** (`NUMERIC_SEND_DELAY`); every further change restarts
+the wait, so a series of clicks results in one write of the final value.
+Validation (range, configured register, heating mode for presets) still
+happens at once and rejects an invalid request with a translated error
+(§10a). While a value waits, no polling data may overwrite it. If sending
+fails after the wait, the action has already returned: the failure is logged
+as a warning and the entity returns to the device value. A value still
+waiting when the entity is removed (reload, unload) is sent right away.
+Operating mode, on/off, and preset are single actions and are sent
+immediately. An entity used without Home Assistant's scheduler (not added to
+a platform, e.g. in unit tests) sends immediately.
+
 After an acknowledged write the entity **immediately** shows the written value
 and reports its new state to Home Assistant (`async_write_ha_state`), for the
 target temperature, operating mode (including on/off), preset, and power

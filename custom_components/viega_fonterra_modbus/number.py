@@ -7,6 +7,7 @@ import time
 from homeassistant.components.number import NumberEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import DOMAIN, WRITE_CONFIRM_GRACE
@@ -112,7 +113,7 @@ class ViegaPowerLevelNumber(ViegaCoordinatedEntity, NumberEntity, RestoreEntity)
             self._verify_pending_write(values[0], entry_data.get("polling"))
             # Keep showing a written level until a newer cycle confirms it
             # (spec.md 16c): older data must not flicker it back.
-            if self._pending_write is None:
+            if self._pending_write is None and not self._is_waiting("power_level"):
                 self._attr_native_value = values[0]
 
     def _verify_pending_write(self, raw: int, shared) -> None:
@@ -142,13 +143,25 @@ class ViegaPowerLevelNumber(ViegaCoordinatedEntity, NumberEntity, RestoreEntity)
         level = round(value)
         if not 0 <= level <= 10:
             raise invalid_request("power_level_out_of_range", value=level, min=0, max=10)
-        await async_write_register(self.hass, self._entry_id, self.address, level)
+        if not self._is_waiting("power_level"):
+            # Shown again if the write fails (spec.md 10a).
+            self._level_before_change = self._attr_native_value
         self._attr_native_value = level
-        shared = self.hass.data[DOMAIN][self._entry_id].get("polling")
-        self._pending_write = (
-            level, shared.generation if shared is not None else 0, time.monotonic()
-        )
-        await self._async_after_write()
+
+        async def send() -> None:
+            try:
+                await async_write_register(self.hass, self._entry_id, self.address, level)
+            except HomeAssistantError:
+                self._attr_native_value = self._level_before_change
+                raise
+            shared = self.hass.data[DOMAIN][self._entry_id].get("polling")
+            self._pending_write = (
+                level, shared.generation if shared is not None else 0, time.monotonic()
+            )
+            await self._async_after_write()
+
+        # Shown at once, sent once the value has been stable (spec.md 16c).
+        await self._async_send_when_stable("power_level", send)
 
     @property
     def device_info(self):

@@ -13,6 +13,9 @@ MIN_SCAN_INTERVAL = 5  # seconds; also the minimum accepted `polling_interval`
 # mismatching read within this time after a write keeps the written value
 # on screen instead of reverting it (spec.md 16c).
 WRITE_CONFIRM_GRACE = 60.0  # seconds
+# A stepwise value (target temperature, power level) is sent to the module
+# only after it has been unchanged for this long (spec.md 16c).
+NUMERIC_SEND_DELAY = 5.0  # seconds
 # "diagnostic" is not a real Home Assistant platform/integration domain (unlike
 # sensor/binary_sensor/switch/climate/number) and must never be added here:
 # diagnostic.py's entities are created directly by sensor.py's

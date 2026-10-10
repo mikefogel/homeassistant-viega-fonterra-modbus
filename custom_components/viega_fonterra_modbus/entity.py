@@ -3,10 +3,17 @@ polling coordinator (spec.md 16i)."""
 
 from __future__ import annotations
 
-from homeassistant.core import callback
-from homeassistant.helpers.entity import Entity
+import logging
+from collections.abc import Awaitable, Callable
 
-from .const import DOMAIN
+from homeassistant.core import CALLBACK_TYPE, callback
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.event import async_call_later
+
+from .const import DOMAIN, NUMERIC_SEND_DELAY
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class ViegaCoordinatedEntity(Entity):
@@ -47,6 +54,67 @@ class ViegaCoordinatedEntity(Entity):
             self._async_update_from_coordinator(),
             f"{DOMAIN} update {self.entity_id}",
         )
+
+    #: Sends waiting for their value to be stable: key -> (cancel timer, send).
+    _waiting_sends: dict[str, tuple[CALLBACK_TYPE, Callable[[], Awaitable[None]]]]
+
+    def _is_waiting(self, key: str) -> bool:
+        return key in getattr(self, "_waiting_sends", {})
+
+    async def _async_send_when_stable(
+        self, key: str, send: Callable[[], Awaitable[None]]
+    ) -> None:
+        """Send `send()` once the value for `key` has been unchanged for
+        `NUMERIC_SEND_DELAY` (spec.md 16c); a new call restarts the wait.
+
+        The new value must already be set on the entity; it is shown right
+        away. Without Home Assistant's scheduler (entity not added to a
+        platform) the value is sent immediately and errors propagate.
+        """
+        if self.hass is None or self.platform is None:
+            await send()
+            return
+        waiting = self.__dict__.setdefault("_waiting_sends", {})
+        if key in waiting:
+            waiting[key][0]()  # restart the wait
+        self.async_write_ha_state()
+
+        @callback
+        def _due(_now) -> None:
+            waiting.pop(key, None)
+            self.hass.async_create_task(
+                self._async_send_logged(key, send), f"{DOMAIN} send {self.entity_id}"
+            )
+
+        waiting[key] = (async_call_later(self.hass, NUMERIC_SEND_DELAY, _due), send)
+
+    async def _async_send_logged(self, key: str, send: Callable[[], Awaitable[None]]) -> None:
+        """Run a delayed send; the action has already returned, so a failure
+        is logged and the entity returns to the device value."""
+        try:
+            await send()
+        except HomeAssistantError as err:
+            _LOGGER.warning("%s: sending %s failed: %s", self.entity_id, key, err)
+            await self._async_send_failed(key)
+
+    async def _async_send_failed(self, key: str) -> None:
+        """Show the device value again after a failed delayed send."""
+        if self.hass is not None and self.platform is not None and self.entity_id:
+            self.async_write_ha_state()
+        coordinator = self._coordinator
+        if coordinator is not None:
+            await coordinator.async_request_refresh()
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Send a value that is still waiting right away (reload, unload)."""
+        for key, (cancel, send) in list(getattr(self, "_waiting_sends", {}).items()):
+            cancel()
+            self._waiting_sends.pop(key, None)
+            try:
+                await send()
+            except HomeAssistantError as err:
+                _LOGGER.warning("%s: sending %s on removal failed: %s", self.entity_id, key, err)
+        await super().async_will_remove_from_hass()
 
     async def _async_after_write(self) -> None:
         """Show an acknowledged write right away and read it back soon

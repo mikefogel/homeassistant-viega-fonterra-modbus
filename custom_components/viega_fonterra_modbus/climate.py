@@ -13,6 +13,7 @@ from homeassistant.components.climate import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTemperature
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import DOMAIN, WRITE_CONFIRM_GRACE
@@ -317,6 +318,8 @@ class ViegaRoomClimateEntity(ViegaCoordinatedEntity, ClimateEntity, RestoreEntit
         # A written value not yet confirmed by a newer cycle stays on screen
         # (spec.md 16c): data older than the write must not flicker it back.
         pending = set(self._pending_writes)
+        if self._is_waiting("target_temperature"):
+            pending.add("target_temperature")  # not even sent yet
         if _LOGGER.isEnabledFor(logging.DEBUG):
             _LOGGER.debug(
                 "Room %s (%s): raw register values=%s registers(PDU)=%s",
@@ -471,13 +474,25 @@ class ViegaRoomClimateEntity(ViegaCoordinatedEntity, ClimateEntity, RestoreEntit
                 "temperature_out_of_range", value=temperature, min=low, max=high
             )
         register_value = round(temperature * 10)
+        if not self._is_waiting("target_temperature"):
+            # The value before this series of changes, shown again if the
+            # write fails (spec.md 10a: a failed write changes nothing).
+            self._target_before_change = self._attr_target_temperature
+        self._attr_target_temperature = temperature
 
-        await async_write_register(
-            self.hass, self._entry_id, int(target_register), register_value
-        )
-        self._attr_target_temperature = float(temperature)
-        self._record_pending_write("target_temperature", int(target_register), register_value)
-        await self._async_after_write()
+        async def send() -> None:
+            try:
+                await async_write_register(
+                    self.hass, self._entry_id, int(target_register), register_value
+                )
+            except HomeAssistantError:
+                self._attr_target_temperature = self._target_before_change
+                raise
+            self._record_pending_write("target_temperature", int(target_register), register_value)
+            await self._async_after_write()
+
+        # Shown at once, sent once the value has been stable (spec.md 16c).
+        await self._async_send_when_stable("target_temperature", send)
 
     async def async_set_hvac_mode(self, hvac_mode: str) -> None:
         """Write the operating mode to holding register 40001."""

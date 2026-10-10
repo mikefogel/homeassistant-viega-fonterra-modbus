@@ -6,6 +6,16 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### 🔄 Changed
+
+- ⏳ **Changes are collected before sending:** a new target temperature or
+  power level is shown at once but sent to the module only after it has
+  been unchanged for 5 seconds. Several quick clicks on "+" or "−" now lead
+  to one single write of the final value. Operating mode, on/off, and
+  preset are still sent immediately; an invalid value is still rejected at
+  once. If sending fails after the wait, the previous value is shown again
+  and a warning is logged.
+
 ### 🐛 Fixed
 
 - 🔙 After changing the target temperature (or mode, preset, power level),
