@@ -6,28 +6,51 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.3] - 2026-10-11
+
+🌟 **Highlights:** after the latest Viega firmware update, all values froze
+without any warning – the modules suddenly reject combined register
+reads. This release reads them one by one again and makes sure such a
+silent freeze can never go unnoticed.
+
+### ⚠️ Please check after updating
+
+- 🔄 If your values have not changed since a recent Viega firmware update,
+  they were **frozen**: temperatures, setpoints, actuator positions, the
+  pump indicator, and room diagnostics all kept their last state. After
+  this update they should move again within a polling cycle. Your Home
+  Assistant log then shows a one-time warning per area: *"the module
+  rejected reading … ; reading them one by one"*.
+
 ### 🐛 Fixed
 
-- 🧩 **Values that silently stopped updating:** after a Viega firmware
-  update a module rejected one of the combined register reads (Modbus
-  exception 4) on every cycle, so actuator positions, room diagnostics, and
-  the pump indicator kept stale values (the pump stayed *unknown*). Rejected
-  blocks are now read register by register, so everything else updates
-  again; a warning is logged once.
+- 🧩 **Values that silently stopped updating:** the modules answer combined
+  reads of data registers with a Modbus exception (codes 3 and 4) since the
+  Viega update, so none of these values were refreshed. Rejected blocks
+  are now read register by register, now and in later cycles, so all
+  values update again.
 
 ### ✨ Added
 
-- 🔎 The **Invalid registers** sensor and *Download diagnostics* also list
-  registers the module rejects, with the Modbus exception code.
+- 🚨 **Repairs entry "values are not updating":** when a module answers
+  but keeps rejecting some registers for 30 minutes, *Settings → Repairs*
+  names the affected values, the Modbus exception code, and since when.
+  It clears itself once everything is read again. `-99` values and
+  connection problems do not trigger it.
+- 🔎 The **Invalid registers** sensor (new attribute *rejected registers*)
+  and *Download diagnostics* list registers the module rejects, with the
+  Modbus exception code.
 
 ### 📚 Documentation
 
-- 🛠️ New README section *After a Viega Fonterra firmware update*: a Viega
-  update can switch Modbus TCP off and give the module a new MAC and IP
-  address – how to get it back and how to prevent it: use the hostname
-  `smart-<serial number>`, which the module sends itself and which survives
-  a MAC change (names assigned in the router and fixed IP reservations do
-  not).
+- 🛠️ New README section *After a Viega Fonterra firmware update*: the
+  update can switch Modbus TCP off, give the module a new MAC and IP
+  address, and make it reject combined reads – how to get everything back
+  and how to prevent it: use the hostname `smart-<serial number>`, which
+  the module sends itself and which survives a MAC change (names assigned
+  in the router and fixed IP reservations do not).
+- 🩺 Troubleshooting entry *Some values stopped updating, or the pump
+  indicator stays "unknown"*.
 
 ## [1.3.2] - 2026-10-10
 
@@ -242,7 +265,8 @@ First release.
   configuration diagnostics.
 - German and English translations.
 
-[Unreleased]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.3.2...HEAD
+[Unreleased]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.3.3...HEAD
+[1.3.3]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.3.2...v1.3.3
 [1.3.2]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.2.0...v1.3.0
