@@ -1,0 +1,120 @@
+title: Heating
+views:
+  - title: Overview
+    path: heating-overview
+    icon: mdi:radiator
+    cards:
+      - type: markdown
+        content: "## Viega Fonterra – Fonterra"
+
+      - type: entities
+        title: Module status
+        entities:
+          - entity: sensor.fonterra_flow_temperature
+            name: Flow temperature
+          - entity: binary_sensor.fonterra_circulation_pump
+            name: Circulation pump
+          - entity: sensor.fonterra_base_unit_error_code
+            name: Error code
+          - entity: binary_sensor.fonterra_base_unit_error
+            name: Error active
+
+      - type: entities
+        title: Diagnostics (module)
+        entities:
+          - entity: sensor.fonterra_base_unit_name
+          - entity: sensor.fonterra_base_unit_serial_number
+          - entity: sensor.fonterra_wlan_module_serial_number
+
+      # --- Bad (1 actuator) ------------------------------------------------
+      - type: vertical-stack
+        cards:
+          - type: thermostat
+            entity: climate.fonterra_bad
+          - type: entities
+            title: Bad details
+            entities:
+              - entity: number.fonterra_bad_power_level
+                name: Power level
+              - entity: sensor.fonterra_bad_diagnostic
+                name: Diagnostic
+          - type: glance
+            title: Bad actuator
+            entities:
+              - entity: binary_sensor.fonterra_bad_actuator_1_position
+                name: Actuator 1
+              - entity: sensor.fonterra_bad_actuator_1_return_temperature
+                name: Return 1
+
+      # --- Schlafzimmer (2 actuators) --------------------------------------
+      - type: vertical-stack
+        cards:
+          - type: thermostat
+            entity: climate.fonterra_schlafzimmer
+          - type: entities
+            title: Schlafzimmer details
+            entities:
+              - entity: number.fonterra_schlafzimmer_power_level
+                name: Power level
+              - entity: sensor.fonterra_schlafzimmer_diagnostic
+                name: Diagnostic
+          - type: glance
+            title: Schlafzimmer actuators
+            entities:
+              - entity: binary_sensor.fonterra_schlafzimmer_actuator_2_position
+                name: Actuator 2
+              - entity: sensor.fonterra_schlafzimmer_actuator_2_return_temperature
+                name: Return 2
+              - entity: binary_sensor.fonterra_schlafzimmer_actuator_3_position
+                name: Actuator 3
+              - entity: sensor.fonterra_schlafzimmer_actuator_3_return_temperature
+                name: Return 3
+
+      # --- Arbeitszimmer (1 actuator) --------------------------------------
+      - type: vertical-stack
+        cards:
+          - type: thermostat
+            entity: climate.fonterra_arbeitszimmer
+          - type: entities
+            title: Arbeitszimmer details
+            entities:
+              - entity: number.fonterra_arbeitszimmer_power_level
+                name: Power level
+              - entity: sensor.fonterra_arbeitszimmer_diagnostic
+                name: Diagnostic
+          - type: glance
+            title: Arbeitszimmer actuator
+            entities:
+              - entity: binary_sensor.fonterra_arbeitszimmer_actuator_4_position
+                name: Actuator 4
+              - entity: sensor.fonterra_arbeitszimmer_actuator_4_return_temperature
+                name: Return 4
+
+      # --- Kinderzimmer (1 actuator) ---------------------------------------
+      - type: vertical-stack
+        cards:
+          - type: thermostat
+            entity: climate.fonterra_kinderzimmer
+          - type: entities
+            title: Kinderzimmer details
+            entities:
+              - entity: number.fonterra_kinderzimmer_power_level
+                name: Power level
+              - entity: sensor.fonterra_kinderzimmer_diagnostic
+                name: Diagnostic
+          - type: glance
+            title: Kinderzimmer actuator
+            entities:
+              - entity: binary_sensor.fonterra_kinderzimmer_actuator_5_position
+                name: Actuator 5
+              - entity: sensor.fonterra_kinderzimmer_actuator_5_return_temperature
+                name: Return 5
+
+      - type: history-graph
+        title: Temperature history
+        hours_to_show: 24
+        entities:
+          - entity: climate.fonterra_bad
+          - entity: climate.fonterra_schlafzimmer
+          - entity: climate.fonterra_arbeitszimmer
+          - entity: climate.fonterra_kinderzimmer

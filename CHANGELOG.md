@@ -13,6 +13,14 @@ and versions follow [Semantic Versioning](https://semver.org/).
   needs heat. Automations created with a single indicator keep working.
 - 📖 README: step-by-step guide for creating the pump automation, for one
   shared pump and for one pump per module.
+- 🖼️ README: three example dashboards (standard, tiles with built-in cards,
+  tiles with button-card from HACS) with real screenshots from Home
+  Assistant 2026.10 and their complete YAML.
+
+### 🐛 Fixed
+
+- 📖 The README dashboard example used `sensor.fonterra_wlan_serial_number`;
+  the entity is `sensor.fonterra_wlan_module_serial_number`.
 
 ## [1.2.0] - 2026-10-10
 

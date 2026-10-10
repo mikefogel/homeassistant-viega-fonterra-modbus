@@ -1,0 +1,138 @@
+title: Heating
+views:
+  - title: Fonterra
+    path: fonterra
+    icon: mdi:radiator
+    type: sections
+    max_columns: 4
+    # Labelled module status badges at the top of the view
+    badges:
+      - type: entity
+        entity: sensor.fonterra_flow_temperature
+        name: Flow
+        show_name: true
+      - type: entity
+        entity: binary_sensor.fonterra_circulation_pump
+        name: Pump
+        show_name: true
+      - type: entity
+        entity: sensor.fonterra_currently_open_actuators
+        name: Circuits open
+        show_name: true
+      - type: entity
+        entity: binary_sensor.fonterra_base_unit_error
+        name: Error
+        show_name: true
+    sections:
+      - type: grid
+        column_span: 4
+        cards:
+          - type: heading
+            heading: Viega Fonterra – Fonterra
+            heading_style: title
+
+      # One section per room: copy it and replace the room part of the IDs
+      - type: grid
+        cards:
+          - type: tile
+            entity: climate.fonterra_bad
+            name: Bad
+            vertical: false
+            state_content:
+              - hvac_action
+              - current_temperature
+            features:
+              - type: target-temperature
+          - type: tile
+            entity: binary_sensor.fonterra_bad_actuator_1_position
+            name: Actuator 1
+          - type: tile
+            entity: sensor.fonterra_bad_actuator_1_return_temperature
+            name: Return 1
+          - type: tile
+            entity: sensor.fonterra_bad_diagnostic
+            name: Diagnostic
+
+      - type: grid
+        cards:
+          - type: tile
+            entity: climate.fonterra_schlafzimmer
+            name: Schlafzimmer
+            vertical: false
+            state_content:
+              - hvac_action
+              - current_temperature
+            features:
+              - type: target-temperature
+          - type: tile
+            entity: binary_sensor.fonterra_schlafzimmer_actuator_2_position
+            name: Actuator 2
+          - type: tile
+            entity: sensor.fonterra_schlafzimmer_actuator_2_return_temperature
+            name: Return 2
+          - type: tile
+            entity: binary_sensor.fonterra_schlafzimmer_actuator_3_position
+            name: Actuator 3
+          - type: tile
+            entity: sensor.fonterra_schlafzimmer_actuator_3_return_temperature
+            name: Return 3
+          - type: tile
+            entity: sensor.fonterra_schlafzimmer_diagnostic
+            name: Diagnostic
+
+      - type: grid
+        cards:
+          - type: tile
+            entity: climate.fonterra_arbeitszimmer
+            name: Arbeitszimmer
+            vertical: false
+            state_content:
+              - hvac_action
+              - current_temperature
+            features:
+              - type: target-temperature
+          - type: tile
+            entity: binary_sensor.fonterra_arbeitszimmer_actuator_4_position
+            name: Actuator 4
+          - type: tile
+            entity: sensor.fonterra_arbeitszimmer_actuator_4_return_temperature
+            name: Return 4
+          - type: tile
+            entity: sensor.fonterra_arbeitszimmer_diagnostic
+            name: Diagnostic
+
+      - type: grid
+        cards:
+          - type: tile
+            entity: climate.fonterra_kinderzimmer
+            name: Kinderzimmer
+            vertical: false
+            state_content:
+              - hvac_action
+              - current_temperature
+            features:
+              - type: target-temperature
+          - type: tile
+            entity: binary_sensor.fonterra_kinderzimmer_actuator_5_position
+            name: Actuator 5
+          - type: tile
+            entity: sensor.fonterra_kinderzimmer_actuator_5_return_temperature
+            name: Return 5
+          - type: tile
+            entity: sensor.fonterra_kinderzimmer_diagnostic
+            name: Diagnostic
+
+      # Temperature history of every room across the full width
+      - type: grid
+        column_span: 4
+        cards:
+          - type: history-graph
+            title: Temperature history (24 h)
+            grid_options:
+              columns: full
+            hours_to_show: 24
+            entities:
+              - entity: climate.fonterra_bad
+              - entity: climate.fonterra_schlafzimmer
+              - entity: climate.fonterra_arbeitszimmer
+              - entity: climate.fonterra_kinderzimmer

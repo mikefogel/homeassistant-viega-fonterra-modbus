@@ -275,96 +275,20 @@ These are computed values, not device registers, and are not a substitute for th
 
 If you have more than one Viega Fonterra module configured, the `viega_fonterra_modbus.overview` service (Developer Tools → Actions, "response data" enabled) returns a per-module summary in one call: reachability, whether a base-unit error is active, whether communication looks stale or failed, and the room/actuator count — all without any extra Modbus read. Two modules' same-named rooms (e.g. both called "Wohnzimmer") are never merged: every room and every module in the response always carries its own config entry ID. One module's failure while building the summary never affects another module's entry in the response.
 
-## Example dashboard
+## Example dashboards
 
-A minimal Lovelace overview built entirely from Home Assistant's built-in
-cards (`thermostat`, `entities`, `glance`, `history-graph`, `markdown`) — no
-HACS frontend cards required. It fits one module with a handful of rooms on
-a single view: module-wide status and diagnostics at the top, one block per
-room below, and a combined temperature history at the end.
+Three complete dashboards to start from. All screenshots are taken from a real Home Assistant 2026.10 running this integration against a simulated, anonymous module ("Fonterra" with the rooms Bad, Schlafzimmer, Arbeitszimmer, and Kinderzimmer, five heating circuits, 24 hours of history) – they show exactly what the YAML below produces. They are re-rendered with [`tools/dashboard-screenshots/render.sh`](tools/dashboard-screenshots/render.sh); the YAML lives in [`docs/dashboards/`](docs/dashboards/).
 
-![Example dashboard mock-up](docs/dashboard-example.png)
+**Using one:** *Settings → Dashboards → Add dashboard → New dashboard from scratch*, open it, then *⋮ → Edit dashboard → ⋮ → Raw configuration editor*, paste the YAML, and replace the entity IDs with your own. Entity IDs follow `<domain>.<device_name>_<room_name>[...]` in the language Home Assistant had when the entities were created – a German installation gets e.g. `binary_sensor.dachgeschoss_umwalzpumpe` instead of `..._circulation_pump`. Look them up under *Developer tools → States*, filtered by your device name. Labels such as "Heating", "Open", or "No error" appear in your own language.
 
-This is a mock-up built to illustrate the layout, not a live screenshot —
-render the YAML below against your own entities to see your actual values.
+### 1. Standard – built-in cards
 
-Every entity ID below follows the pattern already used in
-["Entities"](#entities) above: `<domain>.<device_name>_<room_name>[...]`. The
-example uses the default device name `fonterra` and three generic room
-names (`bedroom`, `kitchen`, `living_room`, the last one with two actuators
-to show the multi-actuator case) — replace both with your own device and
-room names. You can look up your exact entity IDs under **Developer tools →
-States**, filtered by your device name.
+One thermostat card per room with its details, actuators, and a combined temperature history. Works on every supported Home Assistant version.
 
-```yaml
-title: Heating
-views:
-  - title: Overview
-    path: heating-overview
-    icon: mdi:radiator
-    cards:
-      # Header
-      - type: markdown
-        content: "## Viega Fonterra – <device_name>"
+![Standard dashboard with thermostat cards](docs/dashboard-standard.png)
 
-      # Module-wide status (one of these per module)
-      - type: entities
-        title: Module status
-        entities:
-          - entity: sensor.<device_name>_flow_temperature
-            name: Flow temperature
-          - entity: binary_sensor.<device_name>_circulation_pump
-            name: Circulation pump
-          - entity: sensor.<device_name>_base_unit_error_code
-            name: Error code
-          - entity: binary_sensor.<device_name>_base_unit_error
-            name: Error active
-
-      - type: entities
-        title: Diagnostics (module)
-        entities:
-          - entity: sensor.<device_name>_base_unit_name
-          - entity: sensor.<device_name>_base_unit_serial_number
-          - entity: sensor.<device_name>_wlan_serial_number
-
-      # One block per room — copy this vertical-stack for each room
-      - type: vertical-stack
-        cards:
-          - type: thermostat
-            entity: climate.<device_name>_<room_name>
-
-          - type: entities
-            title: <Room name> details
-            entities:
-              - entity: number.<device_name>_<room_name>_power_level
-                name: Power level
-              - entity: sensor.<device_name>_<room_name>_diagnostic
-                name: Diagnostic
-
-          - type: glance
-            title: <Room name> actuator(s)
-            entities:
-              - entity: binary_sensor.<device_name>_<room_name>_actuator_<N>_position
-                name: Actuator <N>
-              - entity: sensor.<device_name>_<room_name>_actuator_<N>_return_temperature
-                name: Return <N>
-              # a room with more than one actuator (spec.md 4) repeats this
-              # pair of lines once per actuator number
-
-      # Repeat the vertical-stack block above for every other room ...
-
-      # Compare every room's temperature over time
-      - type: history-graph
-        title: Temperature history
-        hours_to_show: 24
-        entities:
-          - entity: climate.<device_name>_<room_name>
-          # add the remaining rooms here
-```
-
-Filled in for three rooms — a single-actuator `bedroom` and `kitchen`, and a
-`living_room` with two actuators (actuator numbers are illustrative; use the
-ones your own installation actually discovered):
+<details>
+<summary>YAML</summary>
 
 ```yaml
 title: Heating
@@ -393,98 +317,477 @@ views:
         entities:
           - entity: sensor.fonterra_base_unit_name
           - entity: sensor.fonterra_base_unit_serial_number
-          - entity: sensor.fonterra_wlan_serial_number
+          - entity: sensor.fonterra_wlan_module_serial_number
 
-      # --- Bedroom (1 actuator) ------------------------------------------
+      # --- Bad (1 actuator) ------------------------------------------------
       - type: vertical-stack
         cards:
           - type: thermostat
-            entity: climate.fonterra_bedroom
+            entity: climate.fonterra_bad
           - type: entities
-            title: Bedroom details
+            title: Bad details
             entities:
-              - entity: number.fonterra_bedroom_power_level
+              - entity: number.fonterra_bad_power_level
                 name: Power level
-              - entity: sensor.fonterra_bedroom_diagnostic
+              - entity: sensor.fonterra_bad_diagnostic
                 name: Diagnostic
           - type: glance
-            title: Bedroom actuator
+            title: Bad actuator
             entities:
-              - entity: binary_sensor.fonterra_bedroom_actuator_4_position
-                name: Actuator 4
-              - entity: sensor.fonterra_bedroom_actuator_4_return_temperature
-                name: Return 4
+              - entity: binary_sensor.fonterra_bad_actuator_1_position
+                name: Actuator 1
+              - entity: sensor.fonterra_bad_actuator_1_return_temperature
+                name: Return 1
 
-      # --- Kitchen (1 actuator) -------------------------------------------
+      # --- Schlafzimmer (2 actuators) --------------------------------------
       - type: vertical-stack
         cards:
           - type: thermostat
-            entity: climate.fonterra_kitchen
+            entity: climate.fonterra_schlafzimmer
           - type: entities
-            title: Kitchen details
+            title: Schlafzimmer details
             entities:
-              - entity: number.fonterra_kitchen_power_level
+              - entity: number.fonterra_schlafzimmer_power_level
                 name: Power level
-              - entity: sensor.fonterra_kitchen_diagnostic
+              - entity: sensor.fonterra_schlafzimmer_diagnostic
                 name: Diagnostic
           - type: glance
-            title: Kitchen actuator
+            title: Schlafzimmer actuators
             entities:
-              - entity: binary_sensor.fonterra_kitchen_actuator_3_position
+              - entity: binary_sensor.fonterra_schlafzimmer_actuator_2_position
+                name: Actuator 2
+              - entity: sensor.fonterra_schlafzimmer_actuator_2_return_temperature
+                name: Return 2
+              - entity: binary_sensor.fonterra_schlafzimmer_actuator_3_position
                 name: Actuator 3
-              - entity: sensor.fonterra_kitchen_actuator_3_return_temperature
+              - entity: sensor.fonterra_schlafzimmer_actuator_3_return_temperature
                 name: Return 3
 
-      # --- Living room (2 actuators) ---------------------------------------
+      # --- Arbeitszimmer (1 actuator) --------------------------------------
       - type: vertical-stack
         cards:
           - type: thermostat
-            entity: climate.fonterra_living_room
+            entity: climate.fonterra_arbeitszimmer
           - type: entities
-            title: Living room details
+            title: Arbeitszimmer details
             entities:
-              - entity: number.fonterra_living_room_power_level
+              - entity: number.fonterra_arbeitszimmer_power_level
                 name: Power level
-              - entity: sensor.fonterra_living_room_diagnostic
+              - entity: sensor.fonterra_arbeitszimmer_diagnostic
                 name: Diagnostic
           - type: glance
-            title: Living room actuators
+            title: Arbeitszimmer actuator
             entities:
-              - entity: binary_sensor.fonterra_living_room_actuator_1_position
-                name: Actuator 1
-              - entity: sensor.fonterra_living_room_actuator_1_return_temperature
-                name: Return 1
-              - entity: binary_sensor.fonterra_living_room_actuator_2_position
-                name: Actuator 2
-              - entity: sensor.fonterra_living_room_actuator_2_return_temperature
-                name: Return 2
+              - entity: binary_sensor.fonterra_arbeitszimmer_actuator_4_position
+                name: Actuator 4
+              - entity: sensor.fonterra_arbeitszimmer_actuator_4_return_temperature
+                name: Return 4
+
+      # --- Kinderzimmer (1 actuator) ---------------------------------------
+      - type: vertical-stack
+        cards:
+          - type: thermostat
+            entity: climate.fonterra_kinderzimmer
+          - type: entities
+            title: Kinderzimmer details
+            entities:
+              - entity: number.fonterra_kinderzimmer_power_level
+                name: Power level
+              - entity: sensor.fonterra_kinderzimmer_diagnostic
+                name: Diagnostic
+          - type: glance
+            title: Kinderzimmer actuator
+            entities:
+              - entity: binary_sensor.fonterra_kinderzimmer_actuator_5_position
+                name: Actuator 5
+              - entity: sensor.fonterra_kinderzimmer_actuator_5_return_temperature
+                name: Return 5
 
       - type: history-graph
         title: Temperature history
         hours_to_show: 24
         entities:
-          - entity: climate.fonterra_bedroom
-          - entity: climate.fonterra_kitchen
-          - entity: climate.fonterra_living_room
+          - entity: climate.fonterra_bad
+          - entity: climate.fonterra_schlafzimmer
+          - entity: climate.fonterra_arbeitszimmer
+          - entity: climate.fonterra_kinderzimmer
 ```
 
-Remember that `hvac_mode` and `preset_mode` are shared across every room of
-the same module (see "Entities" above): the thermostat card's mode buttons
-change them for the whole module, whichever room's card you use.
+</details>
 
-For a more compact view with many rooms, the built-in **tile** card works
-just as well — it shows the room's current activity (heating/idle/...) and
-puts the controls directly on the tile:
+### 2. Tiles – built-in cards
+
+A compact overview with one column per room: activity and temperature, target −/+, every actuator with its return temperature, and the room diagnostic; module status as badges at the top. Uses the *sections* view, badges, and the heading card (Home Assistant 2024.10 or newer).
+
+![Tiles dashboard built from Home Assistant's own cards](docs/dashboard-tiles.png)
+
+<details>
+<summary>YAML</summary>
 
 ```yaml
-type: tile
-entity: climate.fonterra_living_room
-features:
-  - type: target-temperature
-  - type: climate-preset-modes
-    style: icons
-    preset_modes: [manual, profile, setback]
+title: Heating
+views:
+  - title: Fonterra
+    path: fonterra
+    icon: mdi:radiator
+    type: sections
+    max_columns: 4
+    # Labelled module status badges at the top of the view
+    badges:
+      - type: entity
+        entity: sensor.fonterra_flow_temperature
+        name: Flow
+        show_name: true
+      - type: entity
+        entity: binary_sensor.fonterra_circulation_pump
+        name: Pump
+        show_name: true
+      - type: entity
+        entity: sensor.fonterra_currently_open_actuators
+        name: Circuits open
+        show_name: true
+      - type: entity
+        entity: binary_sensor.fonterra_base_unit_error
+        name: Error
+        show_name: true
+    sections:
+      - type: grid
+        column_span: 4
+        cards:
+          - type: heading
+            heading: Viega Fonterra – Fonterra
+            heading_style: title
+
+      # One section per room: copy it and replace the room part of the IDs
+      - type: grid
+        cards:
+          - type: tile
+            entity: climate.fonterra_bad
+            name: Bad
+            vertical: false
+            state_content:
+              - hvac_action
+              - current_temperature
+            features:
+              - type: target-temperature
+          - type: tile
+            entity: binary_sensor.fonterra_bad_actuator_1_position
+            name: Actuator 1
+          - type: tile
+            entity: sensor.fonterra_bad_actuator_1_return_temperature
+            name: Return 1
+          - type: tile
+            entity: sensor.fonterra_bad_diagnostic
+            name: Diagnostic
+
+      - type: grid
+        cards:
+          - type: tile
+            entity: climate.fonterra_schlafzimmer
+            name: Schlafzimmer
+            vertical: false
+            state_content:
+              - hvac_action
+              - current_temperature
+            features:
+              - type: target-temperature
+          - type: tile
+            entity: binary_sensor.fonterra_schlafzimmer_actuator_2_position
+            name: Actuator 2
+          - type: tile
+            entity: sensor.fonterra_schlafzimmer_actuator_2_return_temperature
+            name: Return 2
+          - type: tile
+            entity: binary_sensor.fonterra_schlafzimmer_actuator_3_position
+            name: Actuator 3
+          - type: tile
+            entity: sensor.fonterra_schlafzimmer_actuator_3_return_temperature
+            name: Return 3
+          - type: tile
+            entity: sensor.fonterra_schlafzimmer_diagnostic
+            name: Diagnostic
+
+      - type: grid
+        cards:
+          - type: tile
+            entity: climate.fonterra_arbeitszimmer
+            name: Arbeitszimmer
+            vertical: false
+            state_content:
+              - hvac_action
+              - current_temperature
+            features:
+              - type: target-temperature
+          - type: tile
+            entity: binary_sensor.fonterra_arbeitszimmer_actuator_4_position
+            name: Actuator 4
+          - type: tile
+            entity: sensor.fonterra_arbeitszimmer_actuator_4_return_temperature
+            name: Return 4
+          - type: tile
+            entity: sensor.fonterra_arbeitszimmer_diagnostic
+            name: Diagnostic
+
+      - type: grid
+        cards:
+          - type: tile
+            entity: climate.fonterra_kinderzimmer
+            name: Kinderzimmer
+            vertical: false
+            state_content:
+              - hvac_action
+              - current_temperature
+            features:
+              - type: target-temperature
+          - type: tile
+            entity: binary_sensor.fonterra_kinderzimmer_actuator_5_position
+            name: Actuator 5
+          - type: tile
+            entity: sensor.fonterra_kinderzimmer_actuator_5_return_temperature
+            name: Return 5
+          - type: tile
+            entity: sensor.fonterra_kinderzimmer_diagnostic
+            name: Diagnostic
+
+      # Temperature history of every room across the full width
+      - type: grid
+        column_span: 4
+        cards:
+          - type: history-graph
+            title: Temperature history (24 h)
+            grid_options:
+              columns: full
+            hours_to_show: 24
+            entities:
+              - entity: climate.fonterra_bad
+              - entity: climate.fonterra_schlafzimmer
+              - entity: climate.fonterra_arbeitszimmer
+              - entity: climate.fonterra_kinderzimmer
 ```
+
+</details>
+
+### 3. Tiles with button-card (HACS)
+
+The same information in a denser, more styled layout with the room temperature coloured by what the room is doing and a module status line that counts the open circuits. **Optional and not part of this integration:** it needs the [button-card](https://github.com/custom-cards/button-card) frontend card from HACS (tested with 7.0.1). Everything else in this README works with built-in cards only.
+
+![Tiles dashboard built with button-card](docs/dashboard-button-card.png)
+
+<details>
+<summary>YAML</summary>
+
+```yaml
+# Requires the button-card frontend card from HACS:
+# https://github.com/custom-cards/button-card
+title: Heating
+button_card_templates:
+  # One room card: activity, temperature, target, diagnostic, actuators, -/+
+  viega_room:
+    show_icon: false
+    show_name: false
+    show_state: false
+    tap_action:
+      action: more-info
+      entity: "[[[ return variables.climate ]]]"
+    styles:
+      card:
+        - padding: 14px
+        - border-radius: 14px
+      grid:
+        - grid-template-areas: '"head head head" "temp temp temp" "info info info" "acts acts acts" "minus target plus"'
+        - grid-template-columns: 1fr 1fr 1fr
+        - row-gap: 6px
+      custom_fields:
+        head:
+          - justify-self: start
+          - font-size: 14px
+        temp:
+          - justify-self: start
+          - font-size: 40px
+          - font-weight: 300
+          - line-height: 1.1
+          - color: >-
+              [[[ const a = states[variables.climate].attributes.hvac_action;
+                  return a === 'heating' ? 'var(--state-climate-heat-color)'
+                       : a === 'cooling' ? 'var(--state-climate-cool-color)'
+                       : 'var(--primary-text-color)'; ]]]
+        info:
+          - justify-self: start
+          - font-size: 12px
+          - color: var(--secondary-text-color)
+        acts:
+          - justify-self: stretch
+          - font-size: 12px
+        target:
+          - align-self: center
+          - font-size: 16px
+    custom_fields:
+      head: >-
+        [[[ const c = states[variables.climate];
+            const a = c.attributes.hvac_action;
+            const color = a === 'heating' ? 'var(--state-climate-heat-color)'
+                        : a === 'cooling' ? 'var(--state-climate-cool-color)'
+                        : 'var(--secondary-text-color)';
+            return `${variables.name} · <span style="color:${color}">`
+                 + `${hass.formatEntityAttributeValue(c, 'hvac_action')}</span>`; ]]]
+      temp: >-
+        [[[ return `${states[variables.climate].attributes.current_temperature.toFixed(1)}°`; ]]]
+      info: >-
+        [[[ const c = states[variables.climate];
+            return `${hass.formatEntityAttributeName(c, 'temperature')} `
+                 + `${c.attributes.temperature.toFixed(1)} °C · `
+                 + hass.formatEntityState(states[variables.diagnostic]); ]]]
+      acts: >-
+        [[[ return variables.actuators.map(([position, ret, number]) => {
+              const open = states[position].state === 'on';
+              const color = open ? 'var(--state-climate-heat-color)' : 'var(--disabled-text-color)';
+              return `<div style="display:flex;justify-content:space-between">`
+                   + `<span><span style="color:${color}">●</span> `
+                   + `${hass.formatEntityState(states[position])} · ${number}</span>`
+                   + `<span>${hass.formatEntityState(states[ret])}</span></div>`;
+            }).join(''); ]]]
+      target: >-
+        [[[ return `${states[variables.climate].attributes.temperature.toFixed(1)}`; ]]]
+      minus:
+        card:
+          type: custom:button-card
+          icon: mdi:minus
+          styles:
+            card:
+              - border-radius: 50%
+              - width: 40px
+              - height: 40px
+          tap_action:
+            action: perform-action
+            perform_action: climate.set_temperature
+            target:
+              entity_id: "[[[ return variables.climate ]]]"
+            data:
+              temperature: "[[[ return states[variables.climate].attributes.temperature - 0.5 ]]]"
+      plus:
+        card:
+          type: custom:button-card
+          icon: mdi:plus
+          styles:
+            card:
+              - border-radius: 50%
+              - width: 40px
+              - height: 40px
+          tap_action:
+            action: perform-action
+            perform_action: climate.set_temperature
+            target:
+              entity_id: "[[[ return variables.climate ]]]"
+            data:
+              temperature: "[[[ return states[variables.climate].attributes.temperature + 0.5 ]]]"
+
+views:
+  - title: Fonterra
+    path: fonterra
+    icon: mdi:radiator
+    type: sections
+    max_columns: 4
+    sections:
+      - type: grid
+        column_span: 4
+        cards:
+          # Module status line: flow, pump, open circuits, base-unit error
+          - type: custom:button-card
+            grid_options:
+              columns: full
+            show_icon: false
+            show_name: false
+            show_state: false
+            tap_action:
+              action: none
+            styles:
+              card:
+                - padding: 12px 16px
+              grid:
+                - grid-template-areas: '"title flow pump open error"'
+                - grid-template-columns: 2fr 1fr 1fr 1fr 1fr
+              custom_fields:
+                title:
+                  - justify-self: start
+                  - font-size: 18px
+                  - font-weight: 500
+            custom_fields:
+              title: Viega Fonterra – Fonterra
+              flow: >-
+                [[[ return `Flow <b>${hass.formatEntityState(states['sensor.fonterra_flow_temperature'])}</b>`; ]]]
+              pump: >-
+                [[[ return `Pump <b>${hass.formatEntityState(states['binary_sensor.fonterra_circulation_pump'])}</b>`; ]]]
+              open: >-
+                [[[ const actuators = Object.keys(states).filter(
+                      (id) => /^binary_sensor\.fonterra_.+_actuator_\d+_position$/.test(id));
+                    const open = actuators.filter((id) => states[id].state === 'on').length;
+                    return `Circuits open <b>${open} / ${actuators.length}</b>`; ]]]
+              error: >-
+                [[[ return `Error <b>${hass.formatEntityState(states['binary_sensor.fonterra_base_unit_error'])}</b>`; ]]]
+
+      - type: grid
+        cards:
+          - type: custom:button-card
+            template: viega_room
+            variables:
+              name: Bad
+              climate: climate.fonterra_bad
+              diagnostic: sensor.fonterra_bad_diagnostic
+              actuators:
+                - [binary_sensor.fonterra_bad_actuator_1_position, sensor.fonterra_bad_actuator_1_return_temperature, 1]
+
+      - type: grid
+        cards:
+          - type: custom:button-card
+            template: viega_room
+            variables:
+              name: Schlafzimmer
+              climate: climate.fonterra_schlafzimmer
+              diagnostic: sensor.fonterra_schlafzimmer_diagnostic
+              actuators:
+                - [binary_sensor.fonterra_schlafzimmer_actuator_2_position, sensor.fonterra_schlafzimmer_actuator_2_return_temperature, 2]
+                - [binary_sensor.fonterra_schlafzimmer_actuator_3_position, sensor.fonterra_schlafzimmer_actuator_3_return_temperature, 3]
+
+      - type: grid
+        cards:
+          - type: custom:button-card
+            template: viega_room
+            variables:
+              name: Arbeitszimmer
+              climate: climate.fonterra_arbeitszimmer
+              diagnostic: sensor.fonterra_arbeitszimmer_diagnostic
+              actuators:
+                - [binary_sensor.fonterra_arbeitszimmer_actuator_4_position, sensor.fonterra_arbeitszimmer_actuator_4_return_temperature, 4]
+
+      - type: grid
+        cards:
+          - type: custom:button-card
+            template: viega_room
+            variables:
+              name: Kinderzimmer
+              climate: climate.fonterra_kinderzimmer
+              diagnostic: sensor.fonterra_kinderzimmer_diagnostic
+              actuators:
+                - [binary_sensor.fonterra_kinderzimmer_actuator_5_position, sensor.fonterra_kinderzimmer_actuator_5_return_temperature, 5]
+
+      - type: grid
+        column_span: 4
+        cards:
+          - type: history-graph
+            title: Temperature history (24 h)
+            grid_options:
+              columns: full
+            hours_to_show: 24
+            entities:
+              - entity: climate.fonterra_bad
+              - entity: climate.fonterra_schlafzimmer
+              - entity: climate.fonterra_arbeitszimmer
+              - entity: climate.fonterra_kinderzimmer
+```
+
+</details>
+
+Whichever layout you use: operating mode and profile mode are shared by every room of a module (see "Entities"), so changing them on one room's card changes them for the whole module.
 
 ## Heating time per room
 
@@ -685,6 +988,8 @@ custom_components/viega_fonterra_modbus/
 
 blueprints/automation/viega_fonterra_modbus/
 └── circulation_pump.yaml # Circulation-pump blueprint
+docs/                     # Dashboard screenshots and their YAML (docs/dashboards/)
+tools/dashboard-screenshots/  # Re-renders the screenshots with a real Home Assistant and a simulated module
 tests/                    # Test suite (pytest-homeassistant-custom-component)
 .github/workflows/        # CI: tests, hassfest/HACS validation, weekly latest-HA run
 spec.md                   # Binding specification (stable section numbers, referenced from code)

@@ -259,9 +259,30 @@ There is no per-room heating register, so the value is derived:
 
 Everything the integration exposes must be usable with Home Assistant's
 built-in cards (`thermostat`, `tile` with its built-in features, `entities`,
-`glance`, `history-graph`, `statistics-graph`, `area`, `markdown`, ...). No
-feature may depend on a HACS or other custom frontend card, and every
-dashboard example in the README uses built-in cards only.
+`glance`, `history-graph`, `statistics-graph`, `heading`, `area`,
+`markdown`, ...). No feature may depend on a HACS or other custom frontend
+card.
+
+The README offers three example dashboards, each as a screenshot plus its
+complete YAML (kept in `docs/dashboards/`, identical to the README blocks):
+
+1. **Standard** – thermostat, entities, glance, and history-graph cards;
+   works on the minimum Home Assistant version.
+2. **Tiles** – a sections view with one column per room (tile cards with the
+   target-temperature feature, actuator, return-temperature, and diagnostic
+   tiles), labelled module-status badges, and a full-width history graph;
+   built-in cards only.
+3. **Tiles with button-card** – the same content in a denser layout. This is
+   the only example that uses a HACS card and must say so clearly: it is
+   optional, names the card and the version it was tested with, and nothing
+   else in the README depends on it. Its texts come from Home Assistant's own
+   formatting (`hass.formatEntityState` etc.), so they follow the user's
+   language.
+
+The screenshots must show what the YAML actually produces: they are taken
+from a real Home Assistant instance running this integration against a
+simulated, anonymous module (generic room names, no real serial numbers or
+addresses), with `tools/dashboard-screenshots/render.sh`, never drawn by hand.
 
 ### 5b. Register addressing and writes
 
@@ -559,8 +580,8 @@ manual reload; the integration resumes on its own once the module is reachable.
   `hacs.json` keeps `content_in_root: false` and contains only keys the
   current HACS schema accepts (domain and IoT class come from
   `manifest.json`).
-- Development-only files (`tests/`, `requirements-test.txt`, `pytest.ini`,
-  `.github/`, `.gitattributes`, `.gitignore`) are versioned but marked
+- Development-only files (`tests/`, `tools/`, `requirements-test.txt`,
+  `pytest.ini`, `.github/`, `.gitattributes`, `.gitignore`) are versioned but marked
   `export-ignore` in `.gitattributes`, so release archives do not contain
   them; HACS installs only `custom_components/viega_fonterra_modbus/`.
   Personal tooling (`.claude/`, private scripts) is not versioned at all

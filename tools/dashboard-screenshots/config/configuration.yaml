@@ -1,0 +1,57 @@
+homeassistant:
+  name: Home
+  language: en
+  country: DE
+  time_zone: Europe/Berlin
+  unit_system: metric
+  currency: EUR
+  latitude: 50.0
+  longitude: 8.0
+  elevation: 100
+  auth_providers:
+    - type: trusted_networks
+      trusted_networks:
+        - 127.0.0.1/32
+        - ::1/128
+      allow_bypass_login: true
+    - type: homeassistant
+
+frontend:
+config:
+history:
+recorder:
+  purge_keep_days: 3
+logbook:
+http:
+  server_host: 127.0.0.1
+  server_port: 18123
+
+lovelace:
+  resource_mode: yaml
+  resources:
+    - url: /local/button-card.js
+      type: module
+  dashboards:
+    viega-standard:
+      mode: yaml
+      filename: dashboards/standard.yaml
+      title: Standard
+      icon: mdi:radiator
+      show_in_sidebar: true
+    viega-tiles:
+      mode: yaml
+      filename: dashboards/tiles.yaml
+      title: Tiles
+      icon: mdi:view-grid
+      show_in_sidebar: true
+    viega-button-card:
+      mode: yaml
+      filename: dashboards/button_card.yaml
+      title: Button card
+      icon: mdi:gesture-tap-button
+      show_in_sidebar: true
+
+logger:
+  default: warning
+  logs:
+    custom_components.viega_fonterra_modbus: info

@@ -1,0 +1,206 @@
+# Requires the button-card frontend card from HACS:
+# https://github.com/custom-cards/button-card
+title: Heating
+button_card_templates:
+  # One room card: activity, temperature, target, diagnostic, actuators, -/+
+  viega_room:
+    show_icon: false
+    show_name: false
+    show_state: false
+    tap_action:
+      action: more-info
+      entity: "[[[ return variables.climate ]]]"
+    styles:
+      card:
+        - padding: 14px
+        - border-radius: 14px
+      grid:
+        - grid-template-areas: '"head head head" "temp temp temp" "info info info" "acts acts acts" "minus target plus"'
+        - grid-template-columns: 1fr 1fr 1fr
+        - row-gap: 6px
+      custom_fields:
+        head:
+          - justify-self: start
+          - font-size: 14px
+        temp:
+          - justify-self: start
+          - font-size: 40px
+          - font-weight: 300
+          - line-height: 1.1
+          - color: >-
+              [[[ const a = states[variables.climate].attributes.hvac_action;
+                  return a === 'heating' ? 'var(--state-climate-heat-color)'
+                       : a === 'cooling' ? 'var(--state-climate-cool-color)'
+                       : 'var(--primary-text-color)'; ]]]
+        info:
+          - justify-self: start
+          - font-size: 12px
+          - color: var(--secondary-text-color)
+        acts:
+          - justify-self: stretch
+          - font-size: 12px
+        target:
+          - align-self: center
+          - font-size: 16px
+    custom_fields:
+      head: >-
+        [[[ const c = states[variables.climate];
+            const a = c.attributes.hvac_action;
+            const color = a === 'heating' ? 'var(--state-climate-heat-color)'
+                        : a === 'cooling' ? 'var(--state-climate-cool-color)'
+                        : 'var(--secondary-text-color)';
+            return `${variables.name} · <span style="color:${color}">`
+                 + `${hass.formatEntityAttributeValue(c, 'hvac_action')}</span>`; ]]]
+      temp: >-
+        [[[ return `${states[variables.climate].attributes.current_temperature.toFixed(1)}°`; ]]]
+      info: >-
+        [[[ const c = states[variables.climate];
+            return `${hass.formatEntityAttributeName(c, 'temperature')} `
+                 + `${c.attributes.temperature.toFixed(1)} °C · `
+                 + hass.formatEntityState(states[variables.diagnostic]); ]]]
+      acts: >-
+        [[[ return variables.actuators.map(([position, ret, number]) => {
+              const open = states[position].state === 'on';
+              const color = open ? 'var(--state-climate-heat-color)' : 'var(--disabled-text-color)';
+              return `<div style="display:flex;justify-content:space-between">`
+                   + `<span><span style="color:${color}">●</span> `
+                   + `${hass.formatEntityState(states[position])} · ${number}</span>`
+                   + `<span>${hass.formatEntityState(states[ret])}</span></div>`;
+            }).join(''); ]]]
+      target: >-
+        [[[ return `${states[variables.climate].attributes.temperature.toFixed(1)}`; ]]]
+      minus:
+        card:
+          type: custom:button-card
+          icon: mdi:minus
+          styles:
+            card:
+              - border-radius: 50%
+              - width: 40px
+              - height: 40px
+          tap_action:
+            action: perform-action
+            perform_action: climate.set_temperature
+            target:
+              entity_id: "[[[ return variables.climate ]]]"
+            data:
+              temperature: "[[[ return states[variables.climate].attributes.temperature - 0.5 ]]]"
+      plus:
+        card:
+          type: custom:button-card
+          icon: mdi:plus
+          styles:
+            card:
+              - border-radius: 50%
+              - width: 40px
+              - height: 40px
+          tap_action:
+            action: perform-action
+            perform_action: climate.set_temperature
+            target:
+              entity_id: "[[[ return variables.climate ]]]"
+            data:
+              temperature: "[[[ return states[variables.climate].attributes.temperature + 0.5 ]]]"
+
+views:
+  - title: Fonterra
+    path: fonterra
+    icon: mdi:radiator
+    type: sections
+    max_columns: 4
+    sections:
+      - type: grid
+        column_span: 4
+        cards:
+          # Module status line: flow, pump, open circuits, base-unit error
+          - type: custom:button-card
+            grid_options:
+              columns: full
+            show_icon: false
+            show_name: false
+            show_state: false
+            tap_action:
+              action: none
+            styles:
+              card:
+                - padding: 12px 16px
+              grid:
+                - grid-template-areas: '"title flow pump open error"'
+                - grid-template-columns: 2fr 1fr 1fr 1fr 1fr
+              custom_fields:
+                title:
+                  - justify-self: start
+                  - font-size: 18px
+                  - font-weight: 500
+            custom_fields:
+              title: Viega Fonterra – Fonterra
+              flow: >-
+                [[[ return `Flow <b>${hass.formatEntityState(states['sensor.fonterra_flow_temperature'])}</b>`; ]]]
+              pump: >-
+                [[[ return `Pump <b>${hass.formatEntityState(states['binary_sensor.fonterra_circulation_pump'])}</b>`; ]]]
+              open: >-
+                [[[ const actuators = Object.keys(states).filter(
+                      (id) => /^binary_sensor\.fonterra_.+_actuator_\d+_position$/.test(id));
+                    const open = actuators.filter((id) => states[id].state === 'on').length;
+                    return `Circuits open <b>${open} / ${actuators.length}</b>`; ]]]
+              error: >-
+                [[[ return `Error <b>${hass.formatEntityState(states['binary_sensor.fonterra_base_unit_error'])}</b>`; ]]]
+
+      - type: grid
+        cards:
+          - type: custom:button-card
+            template: viega_room
+            variables:
+              name: Bad
+              climate: climate.fonterra_bad
+              diagnostic: sensor.fonterra_bad_diagnostic
+              actuators:
+                - [binary_sensor.fonterra_bad_actuator_1_position, sensor.fonterra_bad_actuator_1_return_temperature, 1]
+
+      - type: grid
+        cards:
+          - type: custom:button-card
+            template: viega_room
+            variables:
+              name: Schlafzimmer
+              climate: climate.fonterra_schlafzimmer
+              diagnostic: sensor.fonterra_schlafzimmer_diagnostic
+              actuators:
+                - [binary_sensor.fonterra_schlafzimmer_actuator_2_position, sensor.fonterra_schlafzimmer_actuator_2_return_temperature, 2]
+                - [binary_sensor.fonterra_schlafzimmer_actuator_3_position, sensor.fonterra_schlafzimmer_actuator_3_return_temperature, 3]
+
+      - type: grid
+        cards:
+          - type: custom:button-card
+            template: viega_room
+            variables:
+              name: Arbeitszimmer
+              climate: climate.fonterra_arbeitszimmer
+              diagnostic: sensor.fonterra_arbeitszimmer_diagnostic
+              actuators:
+                - [binary_sensor.fonterra_arbeitszimmer_actuator_4_position, sensor.fonterra_arbeitszimmer_actuator_4_return_temperature, 4]
+
+      - type: grid
+        cards:
+          - type: custom:button-card
+            template: viega_room
+            variables:
+              name: Kinderzimmer
+              climate: climate.fonterra_kinderzimmer
+              diagnostic: sensor.fonterra_kinderzimmer_diagnostic
+              actuators:
+                - [binary_sensor.fonterra_kinderzimmer_actuator_5_position, sensor.fonterra_kinderzimmer_actuator_5_return_temperature, 5]
+
+      - type: grid
+        column_span: 4
+        cards:
+          - type: history-graph
+            title: Temperature history (24 h)
+            grid_options:
+              columns: full
+            hours_to_show: 24
+            entities:
+              - entity: climate.fonterra_bad
+              - entity: climate.fonterra_schlafzimmer
+              - entity: climate.fonterra_arbeitszimmer
+              - entity: climate.fonterra_kinderzimmer
