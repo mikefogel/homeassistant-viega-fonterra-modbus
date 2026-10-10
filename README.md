@@ -32,7 +32,7 @@ This custom integration connects one or more Viega Fonterra Smart Control system
 - What each room is doing right now — heating, cooling, idle, or off — shown on the built-in thermostat and tile cards and as colored bands in the history graph
 - Room power-level Number entities
 - Flow temperature (one shared entity per module), per-actuator return temperature, and per-actuator position (open/closed)
-- Derived, debounced circulation-pump indicator for driving your own pump automation, with a ready-made, one-click importable blueprint (including a run-on time), plus derived actuator statistics (open count, transition count, cumulative open time)
+- Derived, debounced circulation-pump indicator for driving your own pump automation, with a ready-made, one-click importable blueprint (run-on time; one pump for several modules or one pump per module), plus derived actuator statistics (open count, transition count, cumulative open time)
 - Guide for daily heating time per room with Home Assistant's built-in helpers, as a bar chart per day
 - WLAN module and base-unit identity diagnostics
 - Base-unit error code and error status
@@ -174,7 +174,7 @@ The Fonterra register map uses signed 16-bit input values. Temperatures are scal
 - **off** once every used actuator is confirmed closed
 - **unknown/unavailable** until the first actuator has settled
 
-Every actuator's raw open/closed reading is debounced before it can affect this entity: a reading only counts once the actuator's position register has returned the *same* value on 3 consecutive reads, so a single noisy or transitional reading cannot flip the pump. A failed read or a `-99` value is skipped — it neither advances nor resets that actuator's debounce counter.
+Every actuator's raw open/closed reading is debounced before it can affect this entity: a reading only counts once the actuator's position register has returned the *same* value in 3 consecutive polling cycles, so a single noisy or transitional reading cannot flip the pump. A failed read or a `-99` value is skipped — it neither advances nor resets that actuator's debounce counter.
 
 This entity writes nothing back to the device and does not control anything on the Fonterra system. It is meant to drive your own automation for a circulation pump that is wired and switched independently (e.g. via a smart relay).
 
@@ -244,7 +244,7 @@ If the connection to a module drops — the base unit or WLAN module restarts, t
 
 ### Rediscovering the topology on demand
 
-Beyond the automatic discovery that runs on every setup (see "Setup" above), you can trigger a rediscovery of an already-running module at any time with the `viega_fonterra_modbus.rediscover` service (Developer Tools → Actions), targeting the module's device. It re-reads the actuator Raum-ID and room-name registers, compares the result with the currently loaded topology, and updates entities in place — added, removed, renamed, or reassigned rooms and actuators are logged and reported as a `viega_fonterra_modbus_rediscovery` event — without reloading the config entry or reconnecting. If the device can't be read during the rediscovery attempt, the previously working topology is left untouched.
+Beyond the automatic discovery that runs on every setup (see "Setup" above), you can trigger a rediscovery of an already-running module at any time with the `viega_fonterra_modbus.rediscover` service (Developer Tools → Actions), targeting the module's device. It re-reads the actuator Raum-ID and room-name registers, compares the result with the currently loaded topology, and updates entities in place — added, removed, renamed, or reassigned rooms and actuators are logged and reported as a `viega_fonterra_modbus_rediscovery` event — without reloading the config entry or reconnecting. If the device can't be read during the rediscovery attempt, the previously working topology is left untouched and the action reports a translated error message instead of failing silently.
 
 ### Write verification
 
@@ -572,7 +572,7 @@ This means automatic discovery has never succeeded for this module (see "Setup" 
 
 ### Values are unavailable or show as `-99`
 
-A register value of `-99` means the device itself considers the value unavailable (for example, no room thermostat is paired for that room). The integration keeps the previous valid value and exposes the communication problem through the room's diagnostic entity. Cross-check the affected room/actuator's register addresses using "Verifying your configuration" above.
+A register value of `-99` means the device itself considers the value unavailable (for example, no room thermostat is paired for that room). The integration never shows `-99` (or a value scaled from it): it keeps the previous valid value, and the room's diagnostic sensor shows the room's own error state, e.g. "Keine Verbindung zum Raumthermostat". If a value has never been valid since setup, cross-check the affected room/actuator's register addresses using "Verifying your configuration" above.
 
 ### A Repairs entry says the module is not reachable
 
@@ -581,6 +581,10 @@ The module has not answered for 30 minutes. The integration keeps reconnecting o
 ### The heating bands in the history graph look striped
 
 Expected: Fonterra actuators often open and close every few minutes while regulating, and a room's activity (heating/idle) follows them directly. The striping shows when water actually flows. Whether to smooth this is an open item (see `spec.md` §17).
+
+### An automation that checked the diagnostic text stopped working (after 1.2.0)
+
+Since version 1.2.0 the room diagnostic sensor's state and the error-code sensor's `description` attribute hold a key that Home Assistant translates for display — e.g. `no_error`, `error_22`, `unknown_error` — instead of English text. An automation or template that compared `"No error"` must compare `no_error` instead. The keys and their texts are listed in `translations/en.json` under `entity.sensor.room_diagnostic.state`.
 
 ### Changing the mode/preset in one room changes it everywhere
 
@@ -649,7 +653,7 @@ GitHub Actions run on every push to `main` and every pull request: the test suit
 
 ### Releases
 
-Every user-visible change is listed under "Unreleased" in [CHANGELOG.md](CHANGELOG.md). A release renames that section to the new version, sets the same version in `manifest.json` (e.g. `1.2.0`) and the Git tag (`v1.2.0`), and uses the section as the GitHub release notes. Tests, CI workflows and other development files are excluded from release downloads via `.gitattributes`; HACS only installs `custom_components/viega_fonterra_modbus/`.
+Every user-visible change is listed under "Unreleased" in [CHANGELOG.md](CHANGELOG.md), grouped under ⚠️ (please check after updating), ✨ Added, 🔄 Changed and 🐛 Fixed. A release renames that section to the new version, sets the same version in `manifest.json` (e.g. `1.2.0`) and the Git tag (`v1.2.0`), is tagged only after CI has passed for that commit, and uses the section as the GitHub release notes. The full release checklist is in `spec.md` §12. Tests, CI workflows and other development files are excluded from release downloads via `.gitattributes`; HACS only installs `custom_components/viega_fonterra_modbus/`.
 
 ### Project structure
 
@@ -683,17 +687,17 @@ blueprints/automation/viega_fonterra_modbus/
 └── circulation_pump.yaml # Circulation-pump blueprint
 tests/                    # Test suite (pytest-homeassistant-custom-component)
 .github/workflows/        # CI: tests, hassfest/HACS validation, weekly latest-HA run
-spec.md                   # Binding specification
+spec.md                   # Binding specification (stable section numbers, referenced from code)
 CHANGELOG.md              # User-visible changes per version
 ```
 
 ## Icon / branding
 
-[`brands/custom_integrations/viega_fonterra_modbus/`](brands/custom_integrations/viega_fonterra_modbus/) contains `icon.png`/`icon@2x.png` (and dark-theme variants) — an original underfloor-heating design (warmth rising from a floor, not the Viega logo or any other vendor's), laid out exactly as the [home-assistant/brands](https://github.com/home-assistant/brands) repository expects for `custom_integrations/viega_fonterra_modbus/`. Home Assistant's own UI (Settings → Devices & services) only shows a custom integration's icon once that repository has merged it; these files are ready to submit there as a pull request but have not been submitted yet, so the icon won't appear there until that happens — it does already show up wherever this repository's own files are rendered directly (this README, HACS's repository listing).
+[`brands/custom_integrations/viega_fonterra_modbus/`](brands/custom_integrations/viega_fonterra_modbus/) contains `icon.png`/`icon@2x.png` (and dark-theme variants) — an original underfloor-heating design (warmth rising from a floor, not the Viega logo or any other vendor's), laid out exactly as the [home-assistant/brands](https://github.com/home-assistant/brands) repository expects for `custom_integrations/viega_fonterra_modbus/`. Home Assistant's own UI (Settings → Devices & services) only shows a custom integration's icon once that repository has merged it; these files are ready to submit there as a pull request but have not been submitted yet (an open item, see `spec.md` §17), so the icon won't appear there until that happens — it does already show up wherever this repository's own files are rendered directly (this README, HACS's repository listing).
 
 ## Documentation
 
-- [System specification](spec.md)
+- [System specification](spec.md) — binding description of every behaviour; changes are specified there first
 - [Changelog](CHANGELOG.md)
 - [Register address map](RegisterMap.md)
 - [Viega Fonterra Smart Control manual](https://www.viega.de/content/dam/viega-assets/viega-worldwide-assets/products/surface-tempering/fonterra-smart-control/technical-documents/instructions-for-use/Fonterra%20Smart%20Control-de-DE.pdf) (hosted by Viega, see "Third-party documentation" below)
