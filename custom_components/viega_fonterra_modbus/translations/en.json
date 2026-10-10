@@ -289,6 +289,10 @@
     "base_unit_error_unknown": {
       "title": "Viega module {device}: error code {code}",
       "description": "The base unit of **{device}** reports error code {code}, which is not described in the Viega manual known to this integration.\n\nThis message disappears automatically once the base unit no longer reports the error."
+    },
+    "registers_not_updating": {
+      "title": "Viega module {device}: values are not updating",
+      "description": "The Viega Fonterra module **{device}** answers, but has rejected reading these registers since {since} (Modbus exception {codes}):\n\n{registers}\n\nThe affected values in Home Assistant are frozen at their last known state. This often follows a Viega firmware update. Check that Modbus TCP is fully enabled in the Viega app and that the module runs normally; if the problem stays, report it with *Download diagnostics* attached. This message disappears automatically once all values can be read again."
     }
   }
 }

@@ -20,13 +20,14 @@ import asyncio
 import inspect
 import logging
 from collections.abc import Awaitable, Callable
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, TypeVar
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .modbus_handler import ModbusClientError
@@ -109,6 +110,9 @@ class ViegaDataCoordinator(DataUpdateCoordinator[dict[ReadKey, list[int]]]):
         #: (spec.md 16d).
         self.rejected_now: dict[ReadKey, int] = {}
         self.rejected_cycles: dict[ReadKey, int] = {}
+        #: Since when each currently rejected register has been rejected in
+        #: every cycle (UTC); drives the "values not updating" repair issue.
+        self.rejected_since: dict[ReadKey, datetime] = {}
         #: Registers of a rejected block; read one by one from then on.
         self._read_singly: set[tuple[str, int]] = set()
         self._warned_rejected: set[ReadKey] = set()
@@ -200,6 +204,10 @@ class ViegaDataCoordinator(DataUpdateCoordinator[dict[ReadKey, list[int]]]):
 
     def _track_rejected(self, rejected: dict[ReadKey, int]) -> None:
         self.rejected_now = rejected
+        now = dt_util.utcnow()
+        self.rejected_since = {
+            key: self.rejected_since.get(key, now) for key in rejected
+        }
         for key, exception_code in rejected.items():
             self.rejected_cycles[key] = self.rejected_cycles.get(key, 0) + 1
             if key not in self._warned_rejected:
@@ -209,6 +217,14 @@ class ViegaDataCoordinator(DataUpdateCoordinator[dict[ReadKey, list[int]]]):
                     "Modbus exception %s); its value cannot be updated",
                     self.entry_id, self._label(key)[0], key[0], key[1], exception_code,
                 )
+
+    def rejected_labels(self, keys) -> list[str]:
+        """Identifiers with room name, e.g. `room_2.error_code (Bad)`."""
+        labels = []
+        for key in sorted(keys):
+            identifier, room = self._label(key)
+            labels.append(f"{identifier} ({room})" if room else identifier)
+        return labels
 
     def rejected_register_ids(self) -> list[str]:
         """Identifiers of the registers the module rejected in the latest cycle."""

@@ -238,6 +238,7 @@ Problems that need your attention show up under **Settings → Repairs**, so you
 
 - **Module not reachable** — no response from a module for 30 minutes.
 - **Base-unit error** — the base unit reports an error code, with the code's meaning from the Viega manual (e.g. "Replace the backup battery"). Warnings such as a weak thermostat battery are shown as warnings, faults as errors.
+- **Values are not updating** — the module answers, but has rejected reading some registers for 30 minutes (e.g. after a Viega firmware update), so those values are frozen. The entry names the affected registers and the Modbus exception code. Registers reporting `-99` do not trigger it.
 
 Both disappear on their own once the problem is gone. They use only values the integration already reads.
 
@@ -2450,7 +2451,7 @@ Compare the listed room or actuator with the installation (thermostat paired? ba
 
 If a module answers part of the polling cycle with a Modbus exception (observed after a Viega firmware update: exception code `4` on every cycle), the affected entities cannot get new values and keep showing their last ones – e.g. actuator positions, the room diagnostics, and the circulation-pump indicator, which then stays *unknown*. Signs: *Last failed Modbus request* is as recent as *Last successful Modbus response*, and *Last Modbus exception code* shows a value.
 
-The integration handles this on its own: when the module rejects a block of registers, it reads them one by one, so all other values update again; the log shows a warning once (`the module rejected reading input registers …`). Any register the module still rejects is listed in the **Invalid registers** sensor (attribute *rejected registers*) and under `rejected_registers` in **Download diagnostics**. If that list is not empty, compare it with the installation and include it in an issue report.
+The integration handles this on its own: when the module rejects a block of registers, it reads them one by one, so all other values update again; the log shows a warning once (`the module rejected reading input registers …`). Any register the module still rejects is listed in the **Invalid registers** sensor (attribute *rejected registers*) and under `rejected_registers` in **Download diagnostics**; after 30 minutes *Settings → Repairs* also shows **"values are not updating"** for that module. If that list is not empty, compare it with the installation and include it in an issue report.
 
 ### A Repairs entry says the module is not reachable
 

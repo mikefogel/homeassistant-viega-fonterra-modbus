@@ -23,8 +23,12 @@ from .registers import BASE_UNIT_ERROR_CODES, ERROR_CODE_WARNINGS
 
 #: A module without any successful response for this long is reported.
 UNREACHABLE_AFTER = timedelta(minutes=30)
-#: How often the unreachable condition is re-evaluated.
+#: A register the module keeps rejecting for this long is reported.
+REJECTED_AFTER = timedelta(minutes=30)
+#: How often both conditions are re-evaluated.
 CHECK_INTERVAL = timedelta(minutes=1)
+#: At most this many registers are named in the issue text.
+MAX_LISTED_REGISTERS = 10
 
 ERROR_SENTINEL = -99
 
@@ -39,12 +43,54 @@ class ModuleIssues:
         self.setup_time = dt_util.utcnow()
         self.unreachable_issue_id = f"{entry_id}_module_unreachable"
         self.error_issue_id = f"{entry_id}_base_unit_error"
+        self.stale_issue_id = f"{entry_id}_registers_not_updating"
 
     @callback
     def async_start(self) -> CALLBACK_TYPE:
-        """Start the periodic unreachable check; returns its cancel callback."""
-        return async_track_time_interval(
-            self.hass, self.async_check_unreachable, CHECK_INTERVAL
+        """Start the periodic checks; returns their cancel callback."""
+        return async_track_time_interval(self.hass, self._async_check, CHECK_INTERVAL)
+
+    @callback
+    def _async_check(self, now: datetime | None = None) -> None:
+        self.async_check_unreachable(now)
+        self.async_check_rejected(now)
+
+    @callback
+    def async_check_rejected(self, now: datetime | None = None) -> None:
+        """Raise "values not updating" when the reachable module has rejected
+        a register in every cycle for `REJECTED_AFTER` (spec.md 16j); clear
+        it once every register is read again."""
+        entry_data = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
+        coordinator = entry_data.get("polling") if entry_data else None
+        rejected_since = getattr(coordinator, "rejected_since", {})
+        current = dt_util.utcnow()
+        stale = {
+            key: since for key, since in rejected_since.items()
+            if current - since >= REJECTED_AFTER
+        }
+        if not stale:
+            ir.async_delete_issue(self.hass, DOMAIN, self.stale_issue_id)
+            return
+        labels = coordinator.rejected_labels(stale)
+        listed = ", ".join(labels[:MAX_LISTED_REGISTERS])
+        if len(labels) > MAX_LISTED_REGISTERS:
+            listed += f" (+{len(labels) - MAX_LISTED_REGISTERS})"
+        codes = sorted({
+            coordinator.rejected_now[key] for key in stale if key in coordinator.rejected_now
+        })
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            self.stale_issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.ERROR,
+            translation_key="registers_not_updating",
+            translation_placeholders={
+                "device": self.device_name,
+                "registers": listed,
+                "codes": ", ".join(str(code) for code in codes),
+                "since": dt_util.as_local(min(stale.values())).strftime("%Y-%m-%d %H:%M"),
+            },
         )
 
     @callback
@@ -106,3 +152,4 @@ class ModuleIssues:
         """Delete this module's issues (unload/removal)."""
         ir.async_delete_issue(self.hass, DOMAIN, self.unreachable_issue_id)
         ir.async_delete_issue(self.hass, DOMAIN, self.error_issue_id)
+        ir.async_delete_issue(self.hass, DOMAIN, self.stale_issue_id)

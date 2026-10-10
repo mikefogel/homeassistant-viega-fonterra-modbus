@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import timedelta
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from pytest_homeassistant_custom_component.common import (
 from custom_components.viega_fonterra_modbus.const import DOMAIN
 from custom_components.viega_fonterra_modbus.issues import (
     CHECK_INTERVAL,
+    REJECTED_AFTER,
     UNREACHABLE_AFTER,
 )
 from custom_components.viega_fonterra_modbus.registers import (
@@ -217,7 +219,7 @@ async def test_modules_have_separate_issues(hass, fake_device):
 
 
 def test_every_issue_key_is_translated_with_title_and_description():
-    expected = {"module_unreachable", "base_unit_error_unknown"} | {
+    expected = {"module_unreachable", "registers_not_updating", "base_unit_error_unknown"} | {
         f"base_unit_error_{code}" for code in BASE_UNIT_ERROR_CODES if code != 0
     }
     for language in ("de", "en"):
@@ -227,7 +229,113 @@ def test_every_issue_key_is_translated_with_title_and_description():
         assert set(issues) == expected, language
         for key, value in issues.items():
             assert value["title"] and value["description"], (language, key)
+        placeholders = set(
+            re.findall(r"\{(\w+)\}", issues["registers_not_updating"]["description"])
+        )
+        assert placeholders == {"device", "since", "codes", "registers"}, language
 
 
 def test_warning_codes_are_documented_codes():
     assert ERROR_CODE_WARNINGS <= set(BASE_UNIT_ERROR_CODES)
+
+
+# --- Values not updating (registers rejected for 30 minutes) ---------------
+
+
+async def _setup_rejecting(hass, monkeypatch, rejected_addresses):
+    from custom_components.viega_fonterra_modbus.modbus_handler import ModbusClientError
+
+    async def read_input_registers(self, address, count=1):
+        if set(range(address, address + count)) & rejected_addresses:
+            raise ModbusClientError("exception", exception_code=4)
+        return [0] * count
+
+    monkeypatch.setattr(FakeClient, "read_input_registers", read_input_registers)
+    return await _setup(hass)
+
+
+async def test_registers_rejected_for_30_minutes_raise_values_not_updating(hass, fake_device, monkeypatch):
+    error_register = BASE_UNIT_REGISTERS["error_code"]
+    entry, data = await _setup_rejecting(hass, monkeypatch, {error_register})
+    coordinator = data["polling"]
+    issue_id = f"{entry.entry_id}_registers_not_updating"
+
+    data["issues"].async_check_rejected()
+    assert _issue(hass, issue_id) is None  # rejected, but not for 30 minutes yet
+
+    for key in coordinator.rejected_since:
+        coordinator.rejected_since[key] -= REJECTED_AFTER
+    data["issues"].async_check_rejected()
+
+    issue = _issue(hass, issue_id)
+    assert issue.severity == ir.IssueSeverity.ERROR
+    assert issue.translation_key == "registers_not_updating"
+    assert issue.translation_placeholders["registers"] == "base_unit.error_code"
+    assert issue.translation_placeholders["codes"] == "4"
+    assert issue.translation_placeholders["device"] == "Fonterra"
+
+
+async def test_values_not_updating_clears_when_registers_are_read_again(hass, fake_device, monkeypatch):
+    rejected = {BASE_UNIT_REGISTERS["error_code"]}
+    entry, data = await _setup_rejecting(hass, monkeypatch, rejected)
+    coordinator = data["polling"]
+    for key in coordinator.rejected_since:
+        coordinator.rejected_since[key] -= REJECTED_AFTER
+    data["issues"].async_check_rejected()
+    assert _issue(hass, f"{entry.entry_id}_registers_not_updating") is not None
+
+    rejected.clear()  # the module answers again
+    await coordinator.async_refresh()
+    data["issues"].async_check_rejected()
+
+    assert _issue(hass, f"{entry.entry_id}_registers_not_updating") is None
+
+
+async def test_invalid_values_and_transport_failures_do_not_raise_it(hass, fake_device, monkeypatch):
+    entry, data = await _setup(hass)
+    coordinator = data["polling"]
+
+    async def sentinel(self, address, count=1):
+        return [-99] * count
+
+    monkeypatch.setattr(FakeClient, "read_input_registers", sentinel)
+    await coordinator.async_refresh()
+
+    async def offline(self, address, count=1):
+        raise OSError("unreachable")
+
+    monkeypatch.setattr(FakeClient, "read_input_registers", offline)
+    await coordinator.async_refresh()
+    data["issues"].async_check_rejected()
+
+    assert coordinator.rejected_since == {}
+    assert _issue(hass, f"{entry.entry_id}_registers_not_updating") is None
+
+
+async def test_long_register_lists_are_shortened(hass, fake_device, monkeypatch):
+    from custom_components.viega_fonterra_modbus.issues import MAX_LISTED_REGISTERS
+
+    entry, data = await _setup(hass)
+    coordinator = data["polling"]
+    old = dt_util.utcnow() - REJECTED_AFTER - timedelta(minutes=1)
+    keys = [("input", 300 + i, 1) for i in range(MAX_LISTED_REGISTERS + 3)]
+    coordinator.rejected_now = {key: 4 for key in keys}
+    coordinator.rejected_since = {key: old for key in keys}
+
+    data["issues"].async_check_rejected()
+
+    registers = _issue(hass, f"{entry.entry_id}_registers_not_updating").translation_placeholders["registers"]
+    assert registers.endswith("(+3)")
+    assert registers.count(",") == MAX_LISTED_REGISTERS - 1
+
+
+async def test_periodic_check_raises_values_not_updating(hass, fake_device, monkeypatch):
+    entry, data = await _setup_rejecting(hass, monkeypatch, {BASE_UNIT_REGISTERS["flow_temperature"]})
+    coordinator = data["polling"]
+    for key in coordinator.rejected_since:
+        coordinator.rejected_since[key] -= REJECTED_AFTER
+
+    async_fire_time_changed(hass, dt_util.utcnow() + CHECK_INTERVAL + timedelta(seconds=1))
+    await hass.async_block_till_done()
+
+    assert _issue(hass, f"{entry.entry_id}_registers_not_updating") is not None

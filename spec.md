@@ -924,6 +924,19 @@ having access to the installation:
   has its own translation key (fully translated text); unknown codes share a
   generic key with the code as placeholder. A new code replaces the issue.
 
+- **Values not updating:** the module is reachable but has rejected at least
+  one register with a Modbus exception – even when read alone (§16d) – in
+  every cycle for `30` minutes (counted per register from the first
+  rejection). The affected entities keep stale values, which no other
+  warning reveals (the module answers, so "unreachable" stays quiet).
+  Severity `error`. Placeholders: module name, the affected registers as
+  identifiers with room name (at most 10, then "+N"), the exception codes,
+  and since when. It clears itself once every register is read again.
+  Registers reporting `-99` do not raise it (often normal, e.g. a room
+  without a thermostat; see the *Invalid registers* sensor), nor do
+  transport failures (covered by "unreachable"), nor blocks whose registers
+  are read successfully one by one.
+
 Rules: one issue per module and type (issue ID from the config entry ID); not
 fixable through a flow – each clears itself (next successful response; code
 back to `0`); titles and descriptions come from the `issues` section of every

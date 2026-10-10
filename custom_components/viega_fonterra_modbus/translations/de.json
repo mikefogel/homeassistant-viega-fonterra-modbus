@@ -289,6 +289,10 @@
     "base_unit_error_unknown": {
       "title": "Viega-Modul {device}: Fehlercode {code}",
       "description": "Die Basiseinheit von **{device}** meldet Fehlercode {code}, der in der dieser Integration bekannten Viega-Anleitung nicht beschrieben ist.\n\nDiese Meldung verschwindet automatisch, sobald die Basiseinheit den Fehler nicht mehr meldet."
+    },
+    "registers_not_updating": {
+      "title": "Viega-Modul {device}: Werte werden nicht aktualisiert",
+      "description": "Das Viega-Fonterra-Modul **{device}** antwortet, lehnt aber seit {since} das Lesen dieser Register ab (Modbus-Exception {codes}):\n\n{registers}\n\nDie betroffenen Werte in Home Assistant bleiben auf dem zuletzt bekannten Stand stehen. Das tritt häufig nach einem Viega-Firmware-Update auf. Bitte prüfen, ob Modbus TCP in der Viega-App vollständig aktiviert ist und das Modul normal läuft; bleibt das Problem bestehen, mit angehängter *Diagnose* melden. Diese Meldung verschwindet automatisch, sobald alle Werte wieder gelesen werden können."
     }
   }
 }
