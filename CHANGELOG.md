@@ -6,48 +6,64 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-10
+
+🌟 **Highlights:** changes on your thermostat cards appear instantly again,
+a new sensor tells you *which* registers report invalid values, the pump
+blueprint now drives one pump for several modules, and the database stays
+much smaller.
+
 ### ⚠️ Please check after updating
 
-- 🗄️ To keep the database small, **Last successful Modbus response**,
-  **Last Modbus request duration**, and **Invalid Modbus value count** are
-  now disabled by default for newly set-up modules; on existing
-  installations they stay enabled. The README
-  section "Keeping the database small" shows how to keep their history out
-  of the recorder.
+- 🗄️ To keep the database small, three diagnostic sensors that change on
+  every polling cycle are now **disabled by default** for newly set-up
+  modules: *Last successful Modbus response*, *Last Modbus request
+  duration*, and *Invalid Modbus value count*. On existing installations
+  they stay enabled – see the README section *Keeping the database small*
+  for how to keep their history out of the recorder.
 
 ### ✨ Added
 
-- 🔎 New diagnostic sensor **Invalid registers**: how many registers the
-  device reports as `-99` right now and which ones (e.g.
+- 🔎 **Invalid registers** sensor: shows how many registers the device
+  currently reports as `-99` and which ones (e.g.
   `room_3.current_temperature`) – the cause behind a steadily growing
-  invalid-value count. "Download diagnostics" lists every such register
-  with room, address, and number of cycles.
-- 🔁 The circulation-pump blueprint accepts several indicators, so one pump
-  shared by several Viega modules (e.g. three floors) runs while any of them
-  needs heat. Automations created with a single indicator keep working.
-- 📖 README: step-by-step guide for creating the pump automation, for one
-  shared pump and for one pump per module.
-- 🖼️ README: three example dashboards (standard, tiles with built-in cards,
-  and a German button-card layout from HACS based on a real, anonymised
-  user dashboard) with real screenshots from Home Assistant 2026.10 and
-  their complete YAML.
+  invalid-value count. *Download diagnostics* lists every such register
+  with room, manual address, and number of cycles.
+- 🔁 **Pump blueprint for several modules:** select the pump indicators of
+  all modules a pump supplies (e.g. three floors) – it runs while any of
+  them needs heat. Automations created with a single indicator keep
+  working.
 
 ### 🔄 Changed
 
-- 🗄️ The cumulative open time of the actuator statistics now changes once
-  per open period instead of on every polling cycle (far fewer database
-  rows).
+- ⚡ Requested read-backs after a change now run within about a second
+  (previously throttled to one every 10 seconds).
+- 🗄️ The cumulative open time of the actuator statistics changes once per
+  open period instead of on every polling cycle – far fewer database rows.
 
 ### 🐛 Fixed
 
-- 🎛️ A changed target temperature, mode, preset, or power level appeared
-  only after a delay (since 1.2.0), and two quick clicks on "+" raised the
-  target by only 0.5 °C: the new value is now shown immediately, kept until
-  the device confirms it, and read back within about a second.
-- 🔢 The open-transition count and cumulative open time started again at
-  0 after every restart instead of continuing from their restored values.
-- 📖 The README dashboard example used `sensor.fonterra_wlan_serial_number`;
-  the entity is `sensor.fonterra_wlan_module_serial_number`.
+- 🎛️ **Instant feedback:** a new target temperature, mode, on/off, preset,
+  or power level appeared only after a delay (since 1.2.0), and two quick
+  clicks on "+" raised the target by only 0.5 °C. The new value is now
+  shown immediately, kept until the device confirms it, and read back
+  within about a second.
+- 🔢 The open-transition count and cumulative open time restarted at 0
+  after every restart instead of continuing from their restored values.
+
+### 📚 Documentation
+
+- 🖼️ **Three example dashboards** with real screenshots from Home
+  Assistant 2026.10 and their complete YAML: standard, tiles with built-in
+  cards, and a German button-card layout (HACS) based on a real,
+  anonymised user dashboard.
+- 🪜 Step-by-step guide for the pump automation – one shared pump or one
+  pump per module.
+- 🗄️ New section *Keeping the database small* with recorder exclude
+  examples for English and German installations.
+- 🩺 Troubleshooting entry for a growing invalid-value count.
+- ✏️ Corrected the WLAN-module serial number entity ID in the dashboard
+  example (`sensor.fonterra_wlan_module_serial_number`).
 
 ## [1.2.0] - 2026-10-10
 
@@ -156,7 +172,8 @@ First release.
   configuration diagnostics.
 - German and English translations.
 
-[Unreleased]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.0.0...v1.0.1

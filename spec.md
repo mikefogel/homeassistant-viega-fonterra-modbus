@@ -588,8 +588,10 @@ manual reload; the integration resumes on its own once the module is reachable.
   Personal tooling (`.claude/`, private scripts) is not versioned at all
   (`.gitignore`). Files are never deleted to keep them out of a release.
 - `CHANGELOG.md` (Keep a Changelog, emoji headings: ⚠️ for anything users
-  must check after updating, ✨ Added, 🔄 Changed, 🐛 Fixed) lists every
-  user-visible change under `[Unreleased]` as it is committed.
+  must check after updating, ✨ Added, 🔄 Changed, 🐛 Fixed, 📚
+  Documentation; every entry starts with a fitting emoji, and a release may
+  open with a short 🌟 Highlights line) lists every user-visible change
+  under `[Unreleased]` as it is committed.
 - A release: renames `[Unreleased]` to the new version and date; sets the same
   version in `manifest.json` (`1.2.0`) and the tag (`v1.2.0`); is tagged only
   from a commit whose CI passed (§12a); checks the tagged manifest and
