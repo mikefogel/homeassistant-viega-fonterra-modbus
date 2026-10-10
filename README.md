@@ -15,7 +15,7 @@
 > - Using third-party software with your installation may affect Viega's own warranty or support terms — if in doubt, ask your installer or Viega directly.
 > - Provided **"as is", without warranty of any kind, express or implied** — see the MIT license at the bottom of this file for the exact legal terms.
 
-<img src="brands/custom_integrations/viega_fonterra_modbus/icon.png" alt="Viega Fonterra Smart Control icon" width="96" height="96">
+<img src="custom_components/viega_fonterra_modbus/brand/icon.png" alt="Viega Fonterra Smart Control icon" width="96" height="96">
 
 This custom integration connects one or more Viega Fonterra Smart Control systems to Home Assistant over local Modbus TCP. It provides room thermostats, register sensors, actuator controls, and diagnostic information.
 
@@ -2523,6 +2523,7 @@ custom_components/viega_fonterra_modbus/
 ├── entity_tracking.py    # Per-room entity bookkeeping used by rediscovery
 ├── device.py             # Shared device_info builder
 ├── const.py              # Constants and defaults
+├── brand/                # Integration icon (icon.png, icon@2x.png), shown by Home Assistant 2026.3+
 ├── translations/         # German and English texts (entities, dialogs, errors, repairs)
 ├── services.yaml         # Service definitions (rediscover, overview)
 └── manifest.json         # Integration metadata (domain, version, ...)
@@ -2539,7 +2540,9 @@ CHANGELOG.md              # User-visible changes per version
 
 ## Icon / branding
 
-[`brands/custom_integrations/viega_fonterra_modbus/`](brands/custom_integrations/viega_fonterra_modbus/) contains `icon.png`/`icon@2x.png` — an original design (a house with underfloor-heating loops and a thermometer on an orange tile, not the Viega logo or any other vendor's; SVG source in [`docs/icon.svg`](docs/icon.svg)). It needs no separate dark-theme variant, since the white symbol on the orange tile reads on light and dark backgrounds alike. The folder is laid out exactly as the [home-assistant/brands](https://github.com/home-assistant/brands) repository expects for `custom_integrations/viega_fonterra_modbus/`. Home Assistant's own UI (Settings → Devices & services) only shows a custom integration's icon once that repository has merged it; these files are ready to submit there as a pull request but have not been submitted yet (an open item, see `spec.md` §17), so the icon won't appear there until that happens — it does already show up wherever this repository's own files are rendered directly (this README, HACS's repository listing).
+The integration ships its own icon in [`custom_components/viega_fonterra_modbus/brand/`](custom_components/viega_fonterra_modbus/brand/) (`icon.png` 256 px, `icon@2x.png` 512 px) – an original design: a house with underfloor-heating loops and a thermometer on an orange tile, not the Viega logo or any other vendor's. The SVG source is [`docs/icon.svg`](docs/icon.svg).
+
+Since Home Assistant 2026.3, custom integrations bring their brand images in this `brand/` folder themselves ([announcement](https://developers.home-assistant.io/blog/2026/02/24/brands-proxy-api)): once the integration is installed or updated, Home Assistant shows the icon under *Settings → Devices & services*, and the integration marketplace picks it up from the latest release. Older Home Assistant versions simply ignore the folder. There is no separate dark variant – the white symbol on the orange tile works on light and dark themes alike.
 
 ## Documentation
 

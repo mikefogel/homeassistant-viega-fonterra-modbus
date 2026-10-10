@@ -577,6 +577,14 @@ manual reload; the integration resumes on its own once the module is reachable.
 - Clear separation of register map (`registers.py`), transport
   (`modbus_handler.py`), polling (`coordinator.py`), and entity platforms; no
   placeholder-only code paths.
+- The integration ships its brand images itself, in
+  `custom_components/viega_fonterra_modbus/brand/` (supported since Home
+  Assistant 2026.3, which shows them instead of the brands CDN; older
+  versions ignore the folder): `icon.png` (256×256) and `icon@2x.png`
+  (512×512), PNG, square, transparent, trimmed. No `dark_` variants – the
+  icon works on both themes – and no separate logo (the icon is used). The
+  SVG source is `docs/icon.svg`. Nothing is submitted to
+  `home-assistant/brands`, whose `custom_integrations` folder is legacy.
 - `manifest.json` declares `config_flow: true` and `@mikefogel` as code owner;
   `hacs.json` keeps `content_in_root: false` and contains only keys the
   current HACS schema accepts (domain and IoT class come from
@@ -945,12 +953,6 @@ on the Home Assistant versions CI tests.
 Approved ideas, deliberately postponed. Each must be specified in its own
 section before it is implemented.
 
-- **Submit the brand icons** in `brands/custom_integrations/viega_fonterra_modbus/`
-  (PNG only, as the brands repository expects; no `dark_` variants, since the
-  icon works on both themes; SVG source in `docs/icon.svg`) to
-  `home-assistant/brands`, so Home Assistant shows the integration's icon
-  under Settings → Devices & services. First check whether Home Assistant's
-  current handling of custom-integration brands still requires that route.
 - **Decide whether to smooth `hvac_action`** (§5a.2). The actuators toggle
   every few minutes, so the heating bands look striped (confirmed on the real
   installation with v1.1.0). Decide whether to keep the unsmoothed device state

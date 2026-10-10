@@ -21,7 +21,6 @@ jobs:
     steps:
       - uses: hacs/action@main
         with:
+          # The brands check passes through the integration's own
+          # brand/icon.png (spec.md 12).
           category: integration
-          # The icons are not submitted to home-assistant/brands yet
-          # (spec.md 17), so that check would always fail.
-          ignore: brands

@@ -8,10 +8,11 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### 🔄 Changed
 
-- 🎨 New integration icon: a house with underfloor-heating loops and a
-  thermometer on an orange tile. The `brands/` folder now holds only the
-  PNGs the brands repository expects (no identical dark variants); the SVG
-  source lives in `docs/icon.svg`.
+- 🎨 **New integration icon** – a house with underfloor-heating loops and a
+  thermometer on an orange tile – now shipped inside the integration
+  (`brand/` folder). Home Assistant 2026.3 or newer shows it under
+  *Settings → Devices & services* after the update; no submission to the
+  brands repository is needed anymore.
 
 ## [1.3.1] - 2026-10-10
 

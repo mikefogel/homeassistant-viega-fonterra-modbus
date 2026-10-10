@@ -1,6 +1,6 @@
 [![hacs_badge](https://img.shields.io/badge/HACS-Default-orange.svg)](https://github.com/custom-components/hacs)
 
-<img src="brands/custom_integrations/viega_fonterra_modbus/icon.png" alt="Viega Fonterra Smart Control icon" width="96" height="96">
+<img src="custom_components/viega_fonterra_modbus/brand/icon.png" alt="Viega Fonterra Smart Control icon" width="96" height="96">
 
 ## Viega Fonterra Smart Control for Home Assistant
 
