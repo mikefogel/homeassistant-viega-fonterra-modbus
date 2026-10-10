@@ -6,6 +6,11 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### 🔄 Changed
+
+- 🎨 New integration icon: a house with underfloor-heating loops and a
+  thermometer on an orange tile (PNG in all sizes plus the SVG source).
+
 ## [1.3.1] - 2026-10-10
 
 🌟 **Highlights:** changing the temperature now feels calm and reliable –
