@@ -85,7 +85,7 @@ The setup form accepts:
 
 | Field | Description | Default |
 | --- | --- | --- |
-| Host | IPv4 address or resolvable hostname of the WLAN module/base unit | `192.168.0.188` |
+| Host | IPv4 address or resolvable hostname of the WLAN module/base unit – a hostname such as `smart-<serial number>` keeps working when the router hands out a new IP address (see "After a Viega Fonterra firmware update") | `192.168.0.188` |
 | Port | Modbus TCP port | `502` |
 | Device name | The Home Assistant device name for this module | `Fonterra` |
 | Polling interval | Seconds between two polling cycles of the module (all its values are read once per cycle) | `30` (range `5`–`300`) |
@@ -2395,11 +2395,39 @@ logger:
 
 With that enabled, every transmitted (`TX`) and received (`RX`) frame appears in the Home Assistant log (or **Settings → System → Logs**) with direction, host, port, frame length, transaction ID, unit ID, function code, and the complete frame in hexadecimal. The second logger line (`custom_components.viega_fonterra_modbus`, without `.modbus`) additionally logs the resolved room/actuator topology on every setup — which room a given actuator was assigned to and which registers back each of its entities — useful for cross-checking against the physical installation. Do not leave either enabled permanently on a busy installation — they log a line for every single register read/write.
 
+## After a Viega Fonterra firmware update
+
+A firmware update of the Fonterra Smart Control (pushed by Viega through its cloud) can cut the connection to Home Assistant in two ways at once. Observed in October 2026 on a real installation, where all three modules became unreachable after an update:
+
+1. **Modbus TCP was switched off.** The integration cannot connect until it is enabled again – in the Viega Smart Control app or web interface (this also works remotely through the Viega cloud).
+2. **The module came back with a different MAC address** – a firmware-generated ("locally administered") one, e.g. `C4:93:00:1C:C3:EE` became `C6:93:00:1C:C3:ED`. The router therefore treats it as a new device: the old DHCP lease and any IP reservation no longer apply, and the module gets a **new IP address**. The hostname the module itself sends in its DHCP request (`smart-<serial number>`) stays the same – but a **name you assigned to the module in the router** (e.g. renamed in the FRITZ!Box device list) belongs to the old device entry and is gone for the new one.
+
+What you see in Home Assistant: values stop changing (they stay at their last known state), and after 30 minutes *Settings → Repairs* shows **"Viega module … is not reachable"** for each affected module.
+
+**Getting it back:**
+
+1. Enable Modbus TCP again in the Viega app.
+2. Look up the module's current address in your router (e.g. FRITZ!Box: *Home Network → Network*).
+3. In Home Assistant open *Settings → Devices & services → Viega Fonterra Smart Control → (module) → Configure* and enter the new host. The integration reconnects on its own and the Repairs entries disappear by themselves.
+
+**Preventing it next time – use the hostname:**
+
+Enter the module's **own hostname** instead of its IP address as *Host* in the integration: `smart-<serial number>`, with a FRITZ!Box also as `smart-<serial number>.fritz.box` (check the exact name in your router's device list). The module sends this name itself in its DHCP request, so it does not depend on the MAC or IP address; the integration resolves it on every (re)connection and finds the module again after an update – only Modbus TCP may still need to be switched on again.
+
+Do **not** rely on anything the router attaches to the device entry, because a Viega update can change the MAC and with it the device entry, as described above:
+
+- a **name you gave the module in the router** (e.g. renamed in the FRITZ!Box device list) stays with the old, now offline entry – the new entry only has the module's own `smart-<serial number>` name;
+- a **fixed IP reservation** is tied to the MAC address and simply no longer applies.
+
+If you renamed a module in the router before, use its own name in the integration anyway, or rename the new entry again after each update.
+
+After every Viega update, check that values still change and look at *Settings → Repairs*.
+
 ## Troubleshooting
 
 ### Connection failed
 
-Check that Modbus TCP is enabled in the Fonterra software and that Home Assistant can reach the configured host and port. The default endpoint used by the setup form is `192.168.0.188:502`; use your device's actual address if it differs.
+Check that Modbus TCP is enabled in the Fonterra software and that Home Assistant can reach the configured host and port. The default endpoint used by the setup form is `192.168.0.188:502`; use your device's actual address if it differs. If it stopped working right after a Viega update, see "After a Viega Fonterra firmware update" above.
 
 ### No rooms, climate, or Number entities were created
 
@@ -2420,7 +2448,7 @@ Compare the listed room or actuator with the installation (thermostat paired? ba
 
 ### A Repairs entry says the module is not reachable
 
-The module has not answered for 30 minutes. The integration keeps reconnecting on its own (see "Automatic reconnection"); all values stay at their last known state in the meantime. Check that the base unit and its WLAN module have power and network, and that nothing else (e.g. a router change) moved the module to a different IP address — if it did, update the host under **Configure**. The entry disappears by itself once the module answers again.
+The module has not answered for 30 minutes. The integration keeps reconnecting on its own (see "Automatic reconnection"); all values stay at their last known state in the meantime. Check that the base unit and its WLAN module have power and network, and that nothing else (e.g. a router change or a Viega firmware update, see "After a Viega Fonterra firmware update") moved the module to a different IP address or switched Modbus TCP off — if it did, update the host under **Configure**. The entry disappears by itself once the module answers again.
 
 ### The heating bands in the history graph look striped
 

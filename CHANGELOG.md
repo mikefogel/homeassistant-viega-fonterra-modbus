@@ -6,6 +6,15 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### 📚 Documentation
+
+- 🛠️ New README section *After a Viega Fonterra firmware update*: a Viega
+  update can switch Modbus TCP off and give the module a new MAC and IP
+  address – how to get it back and how to prevent it: use the hostname
+  `smart-<serial number>`, which the module sends itself and which survives
+  a MAC change (names assigned in the router and fixed IP reservations do
+  not).
+
 ## [1.3.2] - 2026-10-10
 
 🌟 **Highlights:** the integration finally shows its own icon in Home
