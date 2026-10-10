@@ -6,25 +6,34 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-10-10
+
+🌟 **Highlights:** changing the temperature now feels calm and reliable –
+clicks are collected, sent once, and the display never jumps back while
+the module catches up.
+
 ### 🔄 Changed
 
 - ⏳ **Changes are collected before sending:** a new target temperature or
-  power level is shown at once but sent to the module only after it has
-  been unchanged for 5 seconds. Several quick clicks on "+" or "−" now lead
-  to one single write of the final value. Operating mode, on/off, and
-  preset are still sent immediately; an invalid value is still rejected at
-  once. If sending fails after the wait, the previous value is shown again
-  and a warning is logged.
+  power level is shown at once and sent to the module only after it has
+  been unchanged for 5 seconds. Several quick clicks on "+" or "−" lead to
+  one single write of the final value.
+- ⚡ Operating mode, on/off, and preset are still sent immediately.
+- 🛡️ An invalid value (e.g. 40 °C) is still rejected right away; if
+  sending fails after the wait, the previous value is shown again and a
+  warning is logged.
+- 💾 A value still waiting when the integration is reloaded is sent right
+  away instead of being lost.
 
 ### 🐛 Fixed
 
-- 🔙 After changing the target temperature (or mode, preset, power level),
-  the new value appeared, jumped back to the old one, and only showed up
-  again after the next polling cycle. The base unit applies a write a few
-  seconds later, and the quick read-back right after the write treated the
-  still-old value as a rejection. The written value now stays on screen
-  while the device catches up (up to 60 s); only a value the device still
-  reports differently after that is taken over, with a warning in the log.
+- 🔙 **No more jumping back:** after a change, the new value appeared,
+  jumped back to the old one, and only returned after the next polling
+  cycle. The base unit applies a write a few seconds later; the quick
+  read-back right after the write took the still-old value for a
+  rejection. The written value now stays on screen while the module
+  catches up (up to 60 s); only a value the module still reports
+  differently after that is taken over, with a warning in the log.
 
 ## [1.3.0] - 2026-10-10
 
@@ -192,7 +201,8 @@ First release.
   configuration diagnostics.
 - German and English translations.
 
-[Unreleased]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.0.1...v1.1.0
