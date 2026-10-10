@@ -313,6 +313,9 @@ class ViegaRoomClimateEntity(ViegaCoordinatedEntity, ClimateEntity, RestoreEntit
         client = entry_data["client"]
         values = await self._read_values(client)
         self._verify_pending_writes(values, entry_data.get("polling"))
+        # A written value not yet confirmed by a newer cycle stays on screen
+        # (spec.md 16c): data older than the write must not flicker it back.
+        pending = set(self._pending_writes)
         if _LOGGER.isEnabledFor(logging.DEBUG):
             _LOGGER.debug(
                 "Room %s (%s): raw register values=%s registers(PDU)=%s",
@@ -325,7 +328,7 @@ class ViegaRoomClimateEntity(ViegaCoordinatedEntity, ClimateEntity, RestoreEntit
         if current_temperature is not None:
             self._attr_current_temperature = current_temperature
         target_temperature = self._scaled(values.get("target_temperature"))
-        if target_temperature is not None:
+        if target_temperature is not None and "target_temperature" not in pending:
             self._attr_target_temperature = target_temperature
         self._power_level = self._valid(values.get("power_level"), self._power_level)
         flow_temperature = self._scaled(values.get("flow_temperature"))
@@ -344,11 +347,11 @@ class ViegaRoomClimateEntity(ViegaCoordinatedEntity, ClimateEntity, RestoreEntit
                 self._actuator_positions[actor_number],
             )
         operating_mode = self._valid(values.get("operating_mode"), None)
-        if operating_mode is not None:
+        if operating_mode is not None and "operating_mode" not in pending:
             self._operating_mode = operating_mode
             self._remember_active_mode()
         profile_mode = self._valid(values.get("profile_mode"), None)
-        if profile_mode is not None:
+        if profile_mode is not None and "profile_mode" not in pending:
             self._profile_mode = profile_mode
 
     async def _read_values(self, client) -> dict[str, int | None]:
@@ -424,7 +427,7 @@ class ViegaRoomClimateEntity(ViegaCoordinatedEntity, ClimateEntity, RestoreEntit
         """
         generation = shared.generation if shared is not None else 0
         for key, (address, expected, write_generation) in list(self._pending_writes.items()):
-            if generation <= write_generation:
+            if shared is not None and generation <= write_generation:
                 continue
             raw = values.get(key)
             if raw is None or raw == -99:
@@ -466,6 +469,7 @@ class ViegaRoomClimateEntity(ViegaCoordinatedEntity, ClimateEntity, RestoreEntit
         )
         self._attr_target_temperature = float(temperature)
         self._record_pending_write("target_temperature", int(target_register), register_value)
+        await self._async_after_write()
 
     async def async_set_hvac_mode(self, hvac_mode: str) -> None:
         """Write the operating mode to holding register 40001."""
@@ -477,6 +481,7 @@ class ViegaRoomClimateEntity(ViegaCoordinatedEntity, ClimateEntity, RestoreEntit
         self._operating_mode = register_value
         self._remember_active_mode()
         self._record_pending_write("operating_mode", address, register_value)
+        await self._async_after_write()
 
     def _remember_active_mode(self) -> None:
         if self.hvac_mode in ("heat", "cool"):
@@ -507,6 +512,7 @@ class ViegaRoomClimateEntity(ViegaCoordinatedEntity, ClimateEntity, RestoreEntit
         await async_write_register(self.hass, self._entry_id, address, value)
         self._profile_mode = value
         self._record_pending_write("profile_mode", address, value)
+        await self._async_after_write()
 
     @property
     def device_info(self):

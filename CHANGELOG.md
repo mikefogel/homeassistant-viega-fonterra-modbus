@@ -40,6 +40,10 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ### 🐛 Fixed
 
+- 🎛️ A changed target temperature, mode, preset, or power level appeared
+  only after a delay (since 1.2.0), and two quick clicks on "+" raised the
+  target by only 0.5 °C: the new value is now shown immediately, kept until
+  the device confirms it, and read back within about a second.
 - 🔢 The open-transition count and cumulative open time started again at
   0 after every restart instead of continuing from their restored values.
 - 📖 The README dashboard example used `sensor.fonterra_wlan_serial_number`;

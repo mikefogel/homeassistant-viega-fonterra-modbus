@@ -776,11 +776,23 @@ from the recorder instead.
 
 ### 16c. Read-after-write verification
 
-After an acknowledged write the integration requests an early polling cycle
-(§16i) and compares the device's next valid value from a **newer** cycle than
-the write with the written value. The device value is authoritative: on a
-mismatch the entity shows the device value and a warning is logged. A failed
-write is never treated as a state change.
+After an acknowledged write the entity **immediately** shows the written value
+and reports its new state to Home Assistant (`async_write_ha_state`), for the
+target temperature, operating mode (including on/off), preset, and power
+level. Because entities are not polled (§16i), Home Assistant does not refresh
+their state after a service call on its own; without this, the change would
+only appear after the next polling cycle, and a second quick change (e.g. two
+clicks on "+") would be computed from the old value.
+
+The integration then requests an early polling cycle and compares the
+device's next valid value from a **newer** cycle than the write with the
+written value. Until that cycle, no older data may overwrite the written
+value (no flicker back to the old value). The device value is authoritative:
+on a mismatch the entity shows the device value and a warning is logged. A
+failed write is never treated as a state change. Requested cycles are
+debounced with a short cooldown (`1` s instead of Home Assistant's default
+`10` s), so consecutive changes are read back promptly without flooding the
+device.
 
 ### 16d. Contiguous register-block reads
 

@@ -69,9 +69,3 @@ async def async_write_register(
             device=entry_data.get("device_name", "Fonterra"),
             error=err,
         ) from err
-    # Poll again soon instead of waiting a whole interval: shows the device's
-    # own value early and lets read-after-write verification run (spec.md
-    # 16c/16i).
-    coordinator = entry_data.get("polling")
-    if hasattr(coordinator, "async_request_refresh"):
-        await coordinator.async_request_refresh()

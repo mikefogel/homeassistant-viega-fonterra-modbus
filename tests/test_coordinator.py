@@ -232,7 +232,9 @@ async def test_run_exclusive_does_not_interleave_with_a_cycle(hass):
     assert log[:index].count("cycle-start") == log[:index].count("cycle-end")
 
 
-async def test_a_write_requests_an_early_cycle(hass, monkeypatch):
+async def test_write_helper_only_writes(hass, monkeypatch):
+    """The early cycle is requested by the entity after it has shown the new
+    value (spec.md 16c), not by the write helper itself."""
     client = _BlockRecordingClient()
     coordinator = _coordinator(hass, client, TWO_ROOMS)
     requested: list[bool] = []
@@ -245,7 +247,13 @@ async def test_a_write_requests_an_early_cycle(hass, monkeypatch):
     await async_write_register(hass, coordinator.entry_id, 51, 215)
 
     assert client.writes == [(51, 215)]
-    assert requested == [True]
+    assert requested == []
+
+
+async def test_requested_cycles_use_a_short_cooldown(hass):
+    coordinator = _coordinator(hass, _BlockRecordingClient(), TWO_ROOMS)
+
+    assert coordinator._debounced_refresh.cooldown == coordinator_module.REQUEST_REFRESH_COOLDOWN == 1.0
 
 
 def test_module_exposes_the_quantity_limit():

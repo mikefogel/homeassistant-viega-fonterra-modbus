@@ -109,7 +109,10 @@ class ViegaPowerLevelNumber(ViegaCoordinatedEntity, NumberEntity, RestoreEntity)
             return
         if values and values[0] != ViegaModbusClient.ERROR_SENTINEL:
             self._verify_pending_write(values[0], entry_data.get("polling"))
-            self._attr_native_value = values[0]
+            # Keep showing a written level until a newer cycle confirms it
+            # (spec.md 16c): older data must not flicker it back.
+            if self._pending_write is None:
+                self._attr_native_value = values[0]
 
     def _verify_pending_write(self, raw: int, shared) -> None:
         """Check a just-written power level against the device's own next
@@ -118,7 +121,7 @@ class ViegaPowerLevelNumber(ViegaCoordinatedEntity, NumberEntity, RestoreEntity)
             return
         expected, write_generation = self._pending_write
         generation = shared.generation if shared is not None else 0
-        if generation <= write_generation:
+        if shared is not None and generation <= write_generation:
             return
         self._pending_write = None
         if raw != expected:
@@ -140,6 +143,7 @@ class ViegaPowerLevelNumber(ViegaCoordinatedEntity, NumberEntity, RestoreEntity)
         self._attr_native_value = level
         shared = self.hass.data[DOMAIN][self._entry_id].get("polling")
         self._pending_write = (level, shared.generation if shared is not None else 0)
+        await self._async_after_write()
 
     @property
     def device_info(self):

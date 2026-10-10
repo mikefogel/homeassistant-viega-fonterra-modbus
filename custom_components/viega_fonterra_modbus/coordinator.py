@@ -25,6 +25,7 @@ from typing import Any, TypeVar
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import DOMAIN
@@ -36,6 +37,10 @@ _LOGGER = logging.getLogger(__name__)
 #: Modbus function 0x03/0x04 quantity field is one byte; a request can never
 #: ask for more than this many registers in one go.
 MAX_BLOCK_REGISTERS = 125
+
+#: Cooldown between cycles requested after writes (spec.md 16c): short, so a
+#: second change is read back promptly, instead of Home Assistant's 10 s.
+REQUEST_REFRESH_COOLDOWN = 1.0
 
 #: A register an entity asked for outside the topology's known set is kept
 #: in the polling plan until it has not been asked for in this many cycles
@@ -77,6 +82,9 @@ class ViegaDataCoordinator(DataUpdateCoordinator[dict[ReadKey, list[int]]]):
         kwargs: dict[str, Any] = {
             "name": f"{DOMAIN} {entry.entry_id}",
             "update_interval": timedelta(seconds=float(polling_interval)),
+            "request_refresh_debouncer": Debouncer(
+                hass, _LOGGER, cooldown=REQUEST_REFRESH_COOLDOWN, immediate=True
+            ),
         }
         # `config_entry` became a constructor argument in newer Home
         # Assistant versions; older ones (hacs.json minimum) do not accept it.

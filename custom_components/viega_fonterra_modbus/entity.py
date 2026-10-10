@@ -48,6 +48,22 @@ class ViegaCoordinatedEntity(Entity):
             f"{DOMAIN} update {self.entity_id}",
         )
 
+    async def _async_after_write(self) -> None:
+        """Show an acknowledged write right away and read it back soon
+        (spec.md 16c).
+
+        Home Assistant only refreshes an entity's state after a service call
+        when the entity is polled, which these entities are not - so the new
+        value is reported here; otherwise it would only appear after the
+        next polling cycle, and a second quick change would start from the
+        old value.
+        """
+        if self.hass is not None and self.platform is not None and self.entity_id:
+            self.async_write_ha_state()
+        coordinator = self._coordinator
+        if coordinator is not None:
+            await coordinator.async_request_refresh()
+
     async def _async_update_from_coordinator(self) -> None:
         await self.async_update()
         if self.hass is not None and self.entity_id is not None:
