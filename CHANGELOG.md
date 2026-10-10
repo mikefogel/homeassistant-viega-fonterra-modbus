@@ -6,13 +6,23 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### 🔄 Changed
+## [1.3.2] - 2026-10-10
 
-- 🎨 **New integration icon** – a house with underfloor-heating loops and a
-  thermometer on an orange tile – now shipped inside the integration
-  (`brand/` folder). Home Assistant 2026.3 or newer shows it under
-  *Settings → Devices & services* after the update; no submission to the
-  brands repository is needed anymore.
+🌟 **Highlights:** the integration finally shows its own icon in Home
+Assistant.
+
+### ✨ Added
+
+- 🎨 **Integration icon in Home Assistant:** a new icon – a house with
+  underfloor-heating loops and a thermometer on an orange tile – now ships
+  inside the integration. Home Assistant 2026.3 or newer shows it under
+  *Settings → Devices & services* after this update (you may need to
+  reload the browser tab); older versions simply keep the placeholder.
+
+### 📚 Documentation
+
+- 🏷️ README section *Icon / branding* explains where the icon lives and
+  how Home Assistant picks it up.
 
 ## [1.3.1] - 2026-10-10
 
@@ -209,7 +219,8 @@ First release.
   configuration diagnostics.
 - German and English translations.
 
-[Unreleased]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.3.1...HEAD
+[Unreleased]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.3.2...HEAD
+[1.3.2]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.1.0...v1.2.0
