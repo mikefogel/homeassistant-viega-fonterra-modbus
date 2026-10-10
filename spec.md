@@ -756,16 +756,19 @@ affected. The polling cycle (§16i) therefore records, per register, whether
 its value in the latest cycle was `-99` and in how many cycles it has been
 `-99` since setup. This is exposed as:
 
-- a diagnostic sensor **Invalid registers**: the number of registers that were
-  `-99` in the latest cycle (`0` when everything is valid, unknown before the
-  first cycle), with the attribute `invalid_registers`, a sorted list of
-  stable register identifiers such as `room_3.current_temperature`,
+- a diagnostic sensor **Invalid registers**: the number of registers that had
+  no valid value in the latest cycle – reported as `-99`, or rejected by the
+  module with an exception response (§16d) – (`0` when everything is valid,
+  unknown before the first cycle), with the attributes `invalid_registers`
+  (the `-99` ones) and `rejected_registers` (the rejected ones), sorted lists
+  of stable register identifiers such as `room_3.current_temperature`,
   `actuator_5.return_temperature`, or `base_unit.flow_temperature` (not
-  translated text); its state changes only when the set of invalid
-  registers changes;
+  translated text); its state changes only when these sets change;
 - the diagnostics export (§16e), which lists every register that has been
   `-99` at least once with its identifier, room name (if any), bank, PDU and
-  manual address, number of `-99` cycles, and whether it is `-99` right now.
+  manual address, number of `-99` cycles, and whether it is `-99` right now,
+  and likewise every register the module has rejected, with the exception
+  code and the number of cycles.
 
 Registers that are not part of the documented topology are identified by bank
 and address (e.g. `input_999`). Text registers count as invalid when their
@@ -832,7 +835,20 @@ device.
 Within a polling cycle, adjacent registers are read with one request (at most
 `125` registers). Input and holding registers are never combined, undocumented
 gaps are never bridged, and values are only assigned to their declared
-addresses. A failed block only drops its own registers from that cycle.
+addresses. A block that fails for a transport reason (timeout, lost
+connection) only drops its own registers from that cycle.
+
+**Rejected blocks.** A module may answer a block read with a Modbus exception
+response (observed after a Viega firmware update: exception `4` on every
+cycle), so none of the block's registers would ever get a new value and their
+entities would silently keep stale values. When a block read of more than one
+register is rejected with an exception response, the cycle reads that block's
+registers **one by one** right away, and keeps reading them one by one in
+later cycles. A register whose single read is rejected as well is reported as
+*rejected* (with the exception code) – it is the cause, the others get fresh
+values again. The first time a block is split and the first time a register
+is rejected, a warning is logged once (with bank, addresses, and exception
+code), so the problem is visible without debug logging.
 
 ### 16e. Extended downloadable diagnostics
 

@@ -104,6 +104,14 @@ class ViegaDataCoordinator(DataUpdateCoordinator[dict[ReadKey, list[int]]]):
         #: cycles each register has been `-99` since setup (spec.md 16b).
         self.invalid_now: set[ReadKey] = set()
         self.invalid_cycles: dict[ReadKey, int] = {}
+        #: Registers the module answered with a Modbus exception even when
+        #: read alone (key -> exception code), and in how many cycles
+        #: (spec.md 16d).
+        self.rejected_now: dict[ReadKey, int] = {}
+        self.rejected_cycles: dict[ReadKey, int] = {}
+        #: Registers of a rejected block; read one by one from then on.
+        self._read_singly: set[tuple[str, int]] = set()
+        self._warned_rejected: set[ReadKey] = set()
 
     async def read(
         self, hass: HomeAssistant, entry_id: str, bank: str, address: int, count: int = 1
@@ -149,21 +157,81 @@ class ViegaDataCoordinator(DataUpdateCoordinator[dict[ReadKey, list[int]]]):
         async with self._lock:
             singles, multis = self._plan()
             data: dict[ReadKey, list[int]] = {}
+            rejected: dict[ReadKey, int] = {}
             for bank, addresses in singles.items():
                 reader = self._reader(bank)
-                for start, length in contiguous_runs(addresses):
-                    values = await self._try_read(reader, bank, start, length)
-                    if values is None:
-                        continue
-                    for offset, value in enumerate(values):
-                        data[(bank, start + offset, 1)] = [value]
+                one_by_one = {a for a in addresses if (bank, a) in self._read_singly}
+                for start, length in contiguous_runs(addresses - one_by_one):
+                    values, exception_code = await self._try_read(reader, bank, start, length)
+                    if values is not None:
+                        for offset, value in enumerate(values):
+                            data[(bank, start + offset, 1)] = [value]
+                    elif exception_code is not None and length > 1:
+                        # The module rejects this block: read its registers
+                        # one by one, now and in later cycles (spec.md 16d).
+                        _LOGGER.warning(
+                            "Entry %s: the module rejected reading %s registers %s-%s "
+                            "(Modbus exception %s); reading them one by one",
+                            self.entry_id, bank, start, start + length - 1, exception_code,
+                        )
+                        block = set(range(start, start + length))
+                        self._read_singly.update((bank, a) for a in block)
+                        one_by_one |= block
+                    elif exception_code is not None:
+                        rejected[(bank, start, 1)] = exception_code
+                for address in sorted(one_by_one):
+                    values, exception_code = await self._try_read(reader, bank, address, 1)
+                    if values is not None:
+                        data[(bank, address, 1)] = values
+                    elif exception_code is not None:
+                        rejected[(bank, address, 1)] = exception_code
             for bank, address, count in sorted(multis):
-                values = await self._try_read(self._reader(bank), bank, address, count)
+                values, exception_code = await self._try_read(
+                    self._reader(bank), bank, address, count
+                )
                 if values is not None:
                     data[(bank, address, count)] = values
+                elif exception_code is not None:
+                    rejected[(bank, address, count)] = exception_code
             self.generation += 1
             self._track_invalid(data)
+            self._track_rejected(rejected)
             return data
+
+    def _track_rejected(self, rejected: dict[ReadKey, int]) -> None:
+        self.rejected_now = rejected
+        for key, exception_code in rejected.items():
+            self.rejected_cycles[key] = self.rejected_cycles.get(key, 0) + 1
+            if key not in self._warned_rejected:
+                self._warned_rejected.add(key)
+                _LOGGER.warning(
+                    "Entry %s: the module rejects reading %s (%s register %s, "
+                    "Modbus exception %s); its value cannot be updated",
+                    self.entry_id, self._label(key)[0], key[0], key[1], exception_code,
+                )
+
+    def rejected_register_ids(self) -> list[str]:
+        """Identifiers of the registers the module rejected in the latest cycle."""
+        return sorted(self._label(key)[0] for key in self.rejected_now)
+
+    def rejected_registers_report(self) -> list[dict[str, Any]]:
+        """Every register the module has rejected, for the diagnostics export."""
+        report = []
+        for key, cycles in sorted(self.rejected_cycles.items()):
+            bank, address, count = key
+            identifier, room = self._label(key)
+            report.append({
+                "register": identifier,
+                "room": room,
+                "bank": bank,
+                "address": address,
+                "manual_address": (40000 if bank == "holding" else 30000) + address,
+                "count": count,
+                "exception_code": self.rejected_now.get(key),
+                "rejected_cycles": cycles,
+                "rejected_now": key in self.rejected_now,
+            })
+        return report
 
     def _track_invalid(self, data: dict[ReadKey, list[int]]) -> None:
         self.invalid_now = {
@@ -207,12 +275,17 @@ class ViegaDataCoordinator(DataUpdateCoordinator[dict[ReadKey, list[int]]]):
             else self.client.read_input_registers
         )
 
-    async def _try_read(self, reader, bank: str, address: int, count: int) -> list[int] | None:
+    async def _try_read(
+        self, reader, bank: str, address: int, count: int
+    ) -> tuple[list[int] | None, int | None]:
+        """Return `(values, None)`, or `(None, exception_code)` - the code is
+        set only when the module answered with a Modbus exception response,
+        not for transport failures."""
         try:
-            return await reader(address, count)
-        except Exception:  # noqa: BLE001 - one failed block must not fail the cycle
+            return await reader(address, count), None
+        except Exception as err:  # noqa: BLE001 - one failed block must not fail the cycle
             _LOGGER.debug(
                 "Entry %s: reading %s registers %s-%s failed",
                 self.entry_id, bank, address, address + count - 1, exc_info=True,
             )
-            return None
+            return None, getattr(err, "exception_code", None)

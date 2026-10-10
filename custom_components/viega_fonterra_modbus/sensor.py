@@ -555,9 +555,10 @@ class ViegaConnectionHealthSensor(ViegaCoordinatedEntity, SensorEntity):
 
 
 class ViegaInvalidRegistersSensor(ViegaCoordinatedEntity, SensorEntity):
-    """How many registers the device reported as `-99` in the latest polling
-    cycle, and which (spec.md 16b) - the cause behind a growing
-    invalid-value count, e.g. a room without a paired thermostat.
+    """How many registers had no valid value in the latest polling cycle -
+    reported as `-99` or rejected by the module (spec.md 16b/16d) - and
+    which: the cause behind a growing invalid-value count (e.g. a room
+    without a paired thermostat) or behind values that stopped updating.
 
     Read from the polling coordinator's own bookkeeping; no Modbus request.
     Not restored: it describes the current cycle.
@@ -572,15 +573,19 @@ class ViegaInvalidRegistersSensor(ViegaCoordinatedEntity, SensorEntity):
         self._entry_id = entry_id
         self._attr_unique_id = f"{entry_id}_health_invalid_registers"
         self._attr_native_value = None
-        self._attr_extra_state_attributes = {"invalid_registers": []}
+        self._attr_extra_state_attributes = {"invalid_registers": [], "rejected_registers": []}
 
     async def async_update(self) -> None:
         coordinator = self.hass.data[DOMAIN][self._entry_id].get("polling")
         if not hasattr(coordinator, "invalid_register_ids") or not coordinator.generation:
             return
-        registers = coordinator.invalid_register_ids()
-        self._attr_native_value = len(registers)
-        self._attr_extra_state_attributes = {"invalid_registers": registers}
+        invalid = coordinator.invalid_register_ids()
+        rejected = coordinator.rejected_register_ids()
+        self._attr_native_value = len(invalid) + len(rejected)
+        self._attr_extra_state_attributes = {
+            "invalid_registers": invalid,
+            "rejected_registers": rejected,
+        }
 
     @property
     def device_info(self):

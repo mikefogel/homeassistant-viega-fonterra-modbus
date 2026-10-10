@@ -6,6 +6,20 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### 🐛 Fixed
+
+- 🧩 **Values that silently stopped updating:** after a Viega firmware
+  update a module rejected one of the combined register reads (Modbus
+  exception 4) on every cycle, so actuator positions, room diagnostics, and
+  the pump indicator kept stale values (the pump stayed *unknown*). Rejected
+  blocks are now read register by register, so everything else updates
+  again; a warning is logged once.
+
+### ✨ Added
+
+- 🔎 The **Invalid registers** sensor and *Download diagnostics* also list
+  registers the module rejects, with the Modbus exception code.
+
 ### 📚 Documentation
 
 - 🛠️ New README section *After a Viega Fonterra firmware update*: a Viega

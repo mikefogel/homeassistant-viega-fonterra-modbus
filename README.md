@@ -226,7 +226,7 @@ Each module also exposes nine diagnostic sensors derived entirely from the integ
 - last Modbus exception code, when available
 - duration of the most recent successful request
 - number of automatic reconnections, and the time of the last one
-- **invalid registers**: how many registers the device reported as `-99` in the latest polling cycle, with the list of them (e.g. `room_3.current_temperature`) as an attribute
+- **invalid registers**: how many registers had no valid value in the latest polling cycle, with two lists as attributes – the ones the device reported as `-99` (e.g. `room_3.current_temperature`) and the ones the module **rejected** with a Modbus exception
 
 These are diagnostic only: a communication failure never overwrites a room's last valid value, and no host/port/network information is exposed through them.
 
@@ -2402,7 +2402,7 @@ A firmware update of the Fonterra Smart Control (pushed by Viega through its clo
 1. **Modbus TCP was switched off.** The integration cannot connect until it is enabled again – in the Viega Smart Control app or web interface (this also works remotely through the Viega cloud).
 2. **The module came back with a different MAC address** – a firmware-generated ("locally administered") one, e.g. `C4:93:00:1C:C3:EE` became `C6:93:00:1C:C3:ED`. The router therefore treats it as a new device: the old DHCP lease and any IP reservation no longer apply, and the module gets a **new IP address**. The hostname the module itself sends in its DHCP request (`smart-<serial number>`) stays the same – but a **name you assigned to the module in the router** (e.g. renamed in the FRITZ!Box device list) belongs to the old device entry and is gone for the new one.
 
-What you see in Home Assistant: values stop changing (they stay at their last known state), and after 30 minutes *Settings → Repairs* shows **"Viega module … is not reachable"** for each affected module.
+What you see in Home Assistant: values stop changing (they stay at their last known state), and after 30 minutes *Settings → Repairs* shows **"Viega module … is not reachable"** for each affected module. After the update the module may also reject some read requests – see "Some values stopped updating" below.
 
 **Getting it back:**
 
@@ -2445,6 +2445,12 @@ The device reports at least one register as `-99` ("value not available") in eve
 - **Download diagnostics** lists every register that has been `-99` since the last start, with its room, manual address, and the number of cycles.
 
 Compare the listed room or actuator with the installation (thermostat paired? battery?) and with the manual's register table.
+
+### Some values stopped updating, or the pump indicator stays "unknown"
+
+If a module answers part of the polling cycle with a Modbus exception (observed after a Viega firmware update: exception code `4` on every cycle), the affected entities cannot get new values and keep showing their last ones – e.g. actuator positions, the room diagnostics, and the circulation-pump indicator, which then stays *unknown*. Signs: *Last failed Modbus request* is as recent as *Last successful Modbus response*, and *Last Modbus exception code* shows a value.
+
+The integration handles this on its own: when the module rejects a block of registers, it reads them one by one, so all other values update again; the log shows a warning once (`the module rejected reading input registers …`). Any register the module still rejects is listed in the **Invalid registers** sensor (attribute *rejected registers*) and under `rejected_registers` in **Download diagnostics**. If that list is not empty, compare it with the installation and include it in an issue report.
 
 ### A Repairs entry says the module is not reachable
 

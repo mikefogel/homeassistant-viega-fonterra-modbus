@@ -108,6 +108,12 @@ def _extended_diagnostics(entry_data: dict[str, Any]) -> dict[str, Any]:
             if hasattr(entry_data.get("polling"), "invalid_registers_report")
             else []
         ),
+        # Registers the module answers with a Modbus exception (spec.md 16d).
+        "rejected_registers": (
+            entry_data["polling"].rejected_registers_report()
+            if hasattr(entry_data.get("polling"), "rejected_registers_report")
+            else []
+        ),
         "last_rediscovery": entry_data.get("last_rediscovery"),
     }
 

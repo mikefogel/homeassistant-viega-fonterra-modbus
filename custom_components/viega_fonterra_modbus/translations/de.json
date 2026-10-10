@@ -156,6 +156,9 @@
         "state_attributes": {
           "invalid_registers": {
             "name": "Register"
+          },
+          "rejected_registers": {
+            "name": "Abgelehnte Register"
           }
         }
       },
