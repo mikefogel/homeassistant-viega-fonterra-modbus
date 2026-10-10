@@ -9,6 +9,10 @@ DEFAULT_PORT = 502
 DEFAULT_POLLING_INTERVAL = 30  # seconds
 DEFAULT_MODBUS_TIMEOUT = 5  # seconds
 MIN_SCAN_INTERVAL = 5  # seconds; also the minimum accepted `polling_interval`
+# The base unit applies a written value with a delay of a few seconds; a
+# mismatching read within this time after a write keeps the written value
+# on screen instead of reverting it (spec.md 16c).
+WRITE_CONFIRM_GRACE = 60.0  # seconds
 # "diagnostic" is not a real Home Assistant platform/integration domain (unlike
 # sensor/binary_sensor/switch/climate/number) and must never be added here:
 # diagnostic.py's entities are created directly by sensor.py's

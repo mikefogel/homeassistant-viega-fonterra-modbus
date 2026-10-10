@@ -148,3 +148,57 @@ def test_older_data_does_not_flicker_the_written_value_back():
     asyncio.run(entity.async_update())  # newer cycle confirms
     assert entity.target_temperature == 22.5
     assert entity._pending_writes == {}
+
+
+# --- Device applies writes with a delay (spec.md 16c grace period) ---------
+
+
+@pytest.fixture
+def slow_device(monkeypatch, fake_device):
+    """Fake module that keeps reporting the old holding value for the first
+    reads after a write, like the real base unit does."""
+    holding = {TARGET: 200, LEVEL: 3, 1: 1, 2: 0}
+    delayed: dict[int, list] = {}  # address -> [new value, reads left]
+
+    async def read_holding_registers(self, address, count=1):
+        result = []
+        for a in range(address, address + count):
+            if a in delayed:
+                new, left = delayed[a]
+                if left <= 0:
+                    holding[a] = new
+                    del delayed[a]
+                else:
+                    delayed[a][1] = left - 1
+            result.append(holding.get(a, 0))
+        return result
+
+    async def write_register(self, address, value):
+        delayed[address] = [value, 2]  # old value for the next two reads
+
+    monkeypatch.setattr(FakeClient, "read_holding_registers", read_holding_registers)
+    monkeypatch.setattr(FakeClient, "write_register", write_register)
+    return holding
+
+
+async def test_delayed_device_does_not_flicker_back(hass, slow_device):
+    """Reported: the new target appeared, jumped back to the old one, and
+    only later showed the new one again."""
+    await _setup(hass)
+    coordinator = hass.data[DOMAIN][next(iter(hass.data[DOMAIN]))]["polling"]
+
+    await hass.services.async_call(
+        "climate", "set_temperature", {"entity_id": CLIMATE, "temperature": 22.0}, blocking=True
+    )
+    await hass.async_block_till_done()
+    seen = [hass.states.get(CLIMATE).attributes["temperature"]]
+    for _ in range(3):  # device still reports 20.0 twice, then 22.0
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+        seen.append(hass.states.get(CLIMATE).attributes["temperature"])
+
+    assert seen == [22.0, 22.0, 22.0, 22.0]
+    assert slow_device[TARGET] == 220
+    entity = hass.data["climate"].get_entity(CLIMATE)
+    assert entity._pending_writes == {}
+    assert entity.last_error_message == ""

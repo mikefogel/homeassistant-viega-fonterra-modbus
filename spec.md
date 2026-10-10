@@ -787,11 +787,19 @@ only appear after the next polling cycle, and a second quick change (e.g. two
 clicks on "+") would be computed from the old value.
 
 The integration then requests an early polling cycle and compares the
-device's next valid value from a **newer** cycle than the write with the
-written value. Until that cycle, no older data may overwrite the written
-value (no flicker back to the old value). The device value is authoritative:
-on a mismatch the entity shows the device value and a warning is logged. A
-failed write is never treated as a state change. Requested cycles are
+device's valid values from cycles **newer** than the write with the written
+value. Until a value is confirmed, no older data may overwrite the written
+value (no flicker back to the old value).
+
+The base unit applies a written value with a delay of a few seconds (observed
+on real hardware: right after the write it still reports the old value, at
+the next regular cycle the new one). A mismatching read therefore does not
+end the verification at once: for a **grace period of 60 s** after the write
+the entity keeps showing the written value and keeps checking each newer
+cycle. As soon as the device reports the written value, the write is
+confirmed. If the device still reports something else after the grace
+period, the device value is authoritative: the entity shows it and a warning
+is logged. A failed write is never treated as a state change. Requested cycles are
 debounced with a short cooldown (`1` s instead of Home Assistant's default
 `10` s), so consecutive changes are read back promptly without flooding the
 device.

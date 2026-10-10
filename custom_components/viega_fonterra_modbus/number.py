@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import time
 
 from homeassistant.components.number import NumberEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .const import DOMAIN
+from .const import DOMAIN, WRITE_CONFIRM_GRACE
 from .device import build_device_info
 from .entity_tracking import register_platform
 from .errors import async_write_register, invalid_request
@@ -82,7 +83,7 @@ class ViegaPowerLevelNumber(ViegaCoordinatedEntity, NumberEntity, RestoreEntity)
         # value (from a cache generation newer than the write) has been
         # compared against it. See climate.py's `_verify_pending_writes`
         # for why the generation check matters.
-        self._pending_write: tuple[int, int] | None = None
+        self._pending_write: tuple[int, int, float] | None = None
 
     async def async_added_to_hass(self) -> None:
         """Restore the last known value across restarts (spec.md 15)."""
@@ -119,10 +120,12 @@ class ViegaPowerLevelNumber(ViegaCoordinatedEntity, NumberEntity, RestoreEntity)
         valid read of it (spec.md 16c)."""
         if self._pending_write is None:
             return
-        expected, write_generation = self._pending_write
+        expected, write_generation, written_at = self._pending_write
         generation = shared.generation if shared is not None else 0
         if shared is not None and generation <= write_generation:
             return
+        if raw != expected and time.monotonic() - written_at < WRITE_CONFIRM_GRACE:
+            return  # the device may still be applying the write
         self._pending_write = None
         if raw != expected:
             self.last_error_message = (
@@ -142,7 +145,9 @@ class ViegaPowerLevelNumber(ViegaCoordinatedEntity, NumberEntity, RestoreEntity)
         await async_write_register(self.hass, self._entry_id, self.address, level)
         self._attr_native_value = level
         shared = self.hass.data[DOMAIN][self._entry_id].get("polling")
-        self._pending_write = (level, shared.generation if shared is not None else 0)
+        self._pending_write = (
+            level, shared.generation if shared is not None else 0, time.monotonic()
+        )
         await self._async_after_write()
 
     @property

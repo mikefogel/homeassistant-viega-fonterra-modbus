@@ -6,6 +6,16 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### 🐛 Fixed
+
+- 🔙 After changing the target temperature (or mode, preset, power level),
+  the new value appeared, jumped back to the old one, and only showed up
+  again after the next polling cycle. The base unit applies a write a few
+  seconds later, and the quick read-back right after the write treated the
+  still-old value as a rejection. The written value now stays on screen
+  while the device catches up (up to 60 s); only a value the device still
+  reports differently after that is taken over, with a warning in the log.
+
 ## [1.3.0] - 2026-10-10
 
 🌟 **Highlights:** changes on your thermostat cards appear instantly again,

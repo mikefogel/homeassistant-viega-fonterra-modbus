@@ -467,11 +467,15 @@ def test_verified_write_that_matches_leaves_no_warning():
     assert entity.last_error_message == ""
 
 
-def test_a_mismatched_verification_reports_a_warning_and_keeps_the_device_value():
+def test_a_mismatched_verification_reports_a_warning_and_keeps_the_device_value(monkeypatch):
     """spec.md 16c: "the device value remains authoritative" - a mismatch
-    must both report a diagnostic warning and reconcile the displayed state
-    to what the device actually reports, not the optimistically-written
-    value."""
+    that persists beyond the grace period must both report a diagnostic
+    warning and reconcile the displayed state to what the device actually
+    reports, not the optimistically-written value."""
+    from custom_components.viega_fonterra_modbus import climate as climate_module
+
+    now = {"t": 1000.0}
+    monkeypatch.setattr(climate_module.time, "monotonic", lambda: now["t"])
     entity = _entity(room_config={"name": "Wohnzimmer", "actor": 1})
     client = _RecordingWriteThenReadClient()
     shared = _FakeSharedPolling(client)
@@ -484,6 +488,12 @@ def test_a_mismatched_verification_reports_a_warning_and_keeps_the_device_value(
 
     # The device rejected/overrode the write and actually holds "heat" (1).
     client.values_by_address[entity._registers["operating_mode"]] = 1
+    shared.bump()
+    asyncio.run(entity.async_update())
+    assert entity.hvac_mode == "off"  # within the grace period: may still apply
+    assert entity.last_error_message == ""
+
+    now["t"] += 61
     shared.bump()
     asyncio.run(entity.async_update())
 

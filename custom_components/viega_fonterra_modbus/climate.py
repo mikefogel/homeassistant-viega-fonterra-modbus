@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from homeassistant.components.climate import (
     ClimateEntity,
@@ -14,7 +15,7 @@ from homeassistant.const import UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .const import DOMAIN
+from .const import DOMAIN, WRITE_CONFIRM_GRACE
 from .device import build_device_info
 from .entity_tracking import register_platform
 from .errors import async_write_register, invalid_request
@@ -426,11 +427,18 @@ class ViegaRoomClimateEntity(ViegaCoordinatedEntity, ClimateEntity, RestoreEntit
         nothing to wait for.
         """
         generation = shared.generation if shared is not None else 0
-        for key, (address, expected, write_generation) in list(self._pending_writes.items()):
+        now = time.monotonic()
+        for key, (address, expected, write_generation, written_at) in list(
+            self._pending_writes.items()
+        ):
             if shared is not None and generation <= write_generation:
                 continue
             raw = values.get(key)
             if raw is None or raw == -99:
+                continue
+            if raw != expected and now - written_at < WRITE_CONFIRM_GRACE:
+                # The device may still be applying the write: keep showing
+                # the written value and check again next cycle.
                 continue
             del self._pending_writes[key]
             if raw != expected:
@@ -447,7 +455,7 @@ class ViegaRoomClimateEntity(ViegaCoordinatedEntity, ClimateEntity, RestoreEntit
     def _record_pending_write(self, key: str, address: int, expected: int) -> None:
         shared = self.hass.data[DOMAIN][self._entry_id].get("polling")
         generation = shared.generation if shared is not None else 0
-        self._pending_writes[key] = (address, expected, generation)
+        self._pending_writes[key] = (address, expected, generation, time.monotonic())
 
     async def async_set_temperature(self, **kwargs) -> None:
         """Write the requested target temperature to the room register."""

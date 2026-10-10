@@ -142,7 +142,11 @@ def test_matching_verification_leaves_no_error_message():
     assert entity._attr_native_value == 4
 
 
-def test_mismatched_verification_reports_a_warning_and_keeps_the_device_value():
+def test_mismatched_verification_reports_a_warning_and_keeps_the_device_value(monkeypatch):
+    from custom_components.viega_fonterra_modbus import number as number_module
+
+    now = {"t": 1000.0}
+    monkeypatch.setattr(number_module.time, "monotonic", lambda: now["t"])
     entity = ViegaPowerLevelNumber("entry_1", "room_1", {"name": "Wohnzimmer"})
     client = _WriteThenReadClient()
     shared = _FakeSharedPolling(client)
@@ -152,6 +156,12 @@ def test_mismatched_verification_reports_a_warning_and_keeps_the_device_value():
 
     asyncio.run(entity.async_set_native_value(4))
     client.value = 7  # the device actually kept/reports a different level
+    shared.bump()
+    asyncio.run(entity.async_update())
+    assert entity._attr_native_value == 4  # within the grace period (spec.md 16c)
+    assert entity.last_error_message == ""
+
+    now["t"] += 61
     shared.bump()
     asyncio.run(entity.async_update())
 
