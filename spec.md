@@ -272,12 +272,13 @@ complete YAML (kept in `docs/dashboards/`, identical to the README blocks):
    target-temperature feature, actuator, return-temperature, and diagnostic
    tiles), labelled module-status badges, and a full-width history graph;
    built-in cards only.
-3. **Tiles with button-card** – the same content in a denser layout. This is
-   the only example that uses a HACS card and must say so clearly: it is
-   optional, names the card and the version it was tested with, and nothing
-   else in the README depends on it. Its texts come from Home Assistant's own
-   formatting (`hass.formatEntityState` etc.), so they follow the user's
-   language.
+3. **Tiles with button-card** – a denser, styled layout based on a real
+   user dashboard, anonymised (generic module and room names, no real
+   entity IDs). This is the only example that uses a HACS card and must say
+   so clearly: it is optional, names the card and the version it was tested
+   with, and nothing else in the README depends on it. Its labels are German
+   in the card templates and its entity IDs those of a German installation,
+   so it is rendered on a German instance.
 
 The screenshots must show what the YAML actually produces: they are taken
 from a real Home Assistant instance running this integration against a

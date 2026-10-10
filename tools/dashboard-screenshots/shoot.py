@@ -1,8 +1,9 @@
 """Log in to the local render instance and screenshot dashboards via Chrome DevTools."""
-import asyncio, base64, json, subprocess, sys, time
+import asyncio, base64, json, os, subprocess, sys, time
 import aiohttp
 
-BASE = "http://127.0.0.1:18123"
+BASE = os.environ.get("HA_URL", "http://127.0.0.1:18123")
+UI_LANGUAGE = os.environ.get("UI_LANGUAGE", "en")
 CLIENT = BASE + "/"
 
 
@@ -38,7 +39,7 @@ async def main(shots):
     chrome = subprocess.Popen([
         "google-chrome", "--headless=new", "--disable-gpu", "--no-first-run",
         "--user-data-dir=" + sys.argv[1], "--remote-debugging-port=9333",
-        "--force-dark-mode", "--hide-scrollbars", "--lang=en-US", "about:blank"],
+        "--force-dark-mode", "--hide-scrollbars", "--lang=" + UI_LANGUAGE, "about:blank"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         async with aiohttp.ClientSession() as session:
@@ -68,7 +69,7 @@ async def main(shots):
                           "expires": int(time.time() * 1000) + tokens["expires_in"] * 1000}
                 await cdp.call("Runtime.evaluate", expression=
                     f"localStorage.setItem('hassTokens', {json.dumps(json.dumps(stored))});"
-                    "localStorage.setItem('selectedLanguage', '\"en\"');"
+                    f"localStorage.setItem('selectedLanguage', '\"{UI_LANGUAGE}\"');"
                     "localStorage.setItem('selectedTheme', JSON.stringify({theme:'default', dark:true}));"
                     "localStorage.setItem('dockedSidebar', '\"always_hidden\"');")
                 for path, out, width, height in shots:

@@ -14,8 +14,9 @@ and versions follow [Semantic Versioning](https://semver.org/).
 - 📖 README: step-by-step guide for creating the pump automation, for one
   shared pump and for one pump per module.
 - 🖼️ README: three example dashboards (standard, tiles with built-in cards,
-  tiles with button-card from HACS) with real screenshots from Home
-  Assistant 2026.10 and their complete YAML.
+  and a German button-card layout from HACS based on a real, anonymised
+  user dashboard) with real screenshots from Home Assistant 2026.10 and
+  their complete YAML.
 
 ### 🐛 Fixed
 

@@ -567,9 +567,9 @@ views:
 
 </details>
 
-### 3. Tiles with button-card (HACS)
+### 3. Tiles with button-card (HACS, German)
 
-The same information in a denser, more styled layout with the room temperature coloured by what the room is doing and a module status line that counts the open circuits. **Optional and not part of this integration:** it needs the [button-card](https://github.com/custom-cards/button-card) frontend card from HACS (tested with 7.0.1). Everything else in this README works with built-in cards only.
+A denser, styled layout contributed from a real installation (anonymised): status chips for flow temperature, pump, open circuits, and base-unit error; one card per room with the temperature coloured from blue to red, target and diagnostic, a ten-step power-level bar, every actuator with its return temperature, and −/target/+ buttons; plus the 24-hour history. **Optional and not part of this integration:** it needs the [button-card](https://github.com/custom-cards/button-card) frontend card from HACS (tested with 7.0.1). Its labels ("Vorlauf", "Pumpe läuft", "Soll", "RL", ...) are written in German inside the card templates, and the entity IDs are those of a German installation, so the screenshot is taken in German. Everything else in this README works with built-in cards only.
 
 ![Tiles dashboard built with button-card](docs/dashboard-button-card.png)
 
@@ -577,212 +577,1719 @@ The same information in a denser, more styled layout with the room temperature c
 <summary>YAML</summary>
 
 ```yaml
-# Requires the button-card frontend card from HACS:
+# Requires the button-card frontend card from HACS (tested with 7.0.1):
 # https://github.com/custom-cards/button-card
-title: Heating
-button_card_templates:
-  # One room card: activity, temperature, target, diagnostic, actuators, -/+
-  viega_room:
-    show_icon: false
-    show_name: false
-    show_state: false
-    tap_action:
-      action: more-info
-      entity: "[[[ return variables.climate ]]]"
-    styles:
-      card:
-        - padding: 14px
-        - border-radius: 14px
-      grid:
-        - grid-template-areas: '"head head head" "temp temp temp" "info info info" "acts acts acts" "minus target plus"'
-        - grid-template-columns: 1fr 1fr 1fr
-        - row-gap: 6px
-      custom_fields:
-        head:
-          - justify-self: start
-          - font-size: 14px
-        temp:
-          - justify-self: start
-          - font-size: 40px
-          - font-weight: 300
-          - line-height: 1.1
-          - color: >-
-              [[[ const a = states[variables.climate].attributes.hvac_action;
-                  return a === 'heating' ? 'var(--state-climate-heat-color)'
-                       : a === 'cooling' ? 'var(--state-climate-cool-color)'
-                       : 'var(--primary-text-color)'; ]]]
-        info:
-          - justify-self: start
-          - font-size: 12px
-          - color: var(--secondary-text-color)
-        acts:
-          - justify-self: stretch
-          - font-size: 12px
-        target:
-          - align-self: center
-          - font-size: 16px
-    custom_fields:
-      head: >-
-        [[[ const c = states[variables.climate];
-            const a = c.attributes.hvac_action;
-            const color = a === 'heating' ? 'var(--state-climate-heat-color)'
-                        : a === 'cooling' ? 'var(--state-climate-cool-color)'
-                        : 'var(--secondary-text-color)';
-            return `${variables.name} · <span style="color:${color}">`
-                 + `${hass.formatEntityAttributeValue(c, 'hvac_action')}</span>`; ]]]
-      temp: >-
-        [[[ return `${states[variables.climate].attributes.current_temperature.toFixed(1)}°`; ]]]
-      info: >-
-        [[[ const c = states[variables.climate];
-            return `${hass.formatEntityAttributeName(c, 'temperature')} `
-                 + `${c.attributes.temperature.toFixed(1)} °C · `
-                 + hass.formatEntityState(states[variables.diagnostic]); ]]]
-      acts: >-
-        [[[ return variables.actuators.map(([position, ret, number]) => {
-              const open = states[position].state === 'on';
-              const color = open ? 'var(--state-climate-heat-color)' : 'var(--disabled-text-color)';
-              return `<div style="display:flex;justify-content:space-between">`
-                   + `<span><span style="color:${color}">●</span> `
-                   + `${hass.formatEntityState(states[position])} · ${number}</span>`
-                   + `<span>${hass.formatEntityState(states[ret])}</span></div>`;
-            }).join(''); ]]]
-      target: >-
-        [[[ return `${states[variables.climate].attributes.temperature.toFixed(1)}`; ]]]
-      minus:
-        card:
-          type: custom:button-card
-          icon: mdi:minus
-          styles:
-            card:
-              - border-radius: 50%
-              - width: 40px
-              - height: 40px
-          tap_action:
-            action: perform-action
-            perform_action: climate.set_temperature
-            target:
-              entity_id: "[[[ return variables.climate ]]]"
-            data:
-              temperature: "[[[ return states[variables.climate].attributes.temperature - 0.5 ]]]"
-      plus:
-        card:
-          type: custom:button-card
-          icon: mdi:plus
-          styles:
-            card:
-              - border-radius: 50%
-              - width: 40px
-              - height: 40px
-          tap_action:
-            action: perform-action
-            perform_action: climate.set_temperature
-            target:
-              entity_id: "[[[ return variables.climate ]]]"
-            data:
-              temperature: "[[[ return states[variables.climate].attributes.temperature + 0.5 ]]]"
-
+# Labels are German and the entity IDs those of a German Home Assistant
+# installation (module "Fonterra"); adapt both to your installation.
+title: Heizung
 views:
-  - title: Fonterra
-    path: fonterra
-    icon: mdi:radiator
-    type: sections
-    max_columns: 4
-    sections:
-      - type: grid
-        column_span: 4
-        cards:
-          # Module status line: flow, pump, open circuits, base-unit error
-          - type: custom:button-card
-            grid_options:
-              columns: full
-            show_icon: false
+- type: sections
+  max_columns: 4
+  title: Fonterra
+  path: fonterra
+  icon: mdi:radiator
+  sections:
+  - type: grid
+    column_span: 4
+    cards:
+    - type: heading
+      heading: Viega Fonterra · Fonterra
+      heading_style: title
+      icon: mdi:heating-coil
+    - type: custom:button-card
+      show_name: false
+      show_icon: false
+      show_state: false
+      tap_action:
+        action: none
+      styles:
+        card:
+        - background: none
+        - box-shadow: none
+        - border: none
+        - padding: '0'
+        grid:
+        - display: flex
+        - flex-wrap: wrap
+        - gap: 10px
+        custom_fields:
+          p1:
+          - width: auto
+          p2:
+          - width: auto
+          p3:
+          - width: auto
+          p4:
+          - width: auto
+      custom_fields:
+        p1:
+          card:
+            type: custom:button-card
+            entity: sensor.fonterra_vorlauftemperatur
             show_name: false
+            show_icon: false
             show_state: false
             tap_action:
-              action: none
+              action: more-info
             styles:
               card:
-                - padding: 12px 16px
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              - background: var(--ha-card-background,var(--card-background-color))
+              - border: 1px solid var(--divider-color)
+              - border-radius: 20px
+              - padding: 7px 16px
+              - width: auto
               grid:
-                - grid-template-areas: '"title flow pump open error"'
-                - grid-template-columns: 2fr 1fr 1fr 1fr 1fr
+              - grid-template-areas: '"v"'
               custom_fields:
-                title:
-                  - justify-self: start
-                  - font-size: 18px
-                  - font-weight: 500
+                v:
+                - justify-self: stretch
+                - text-align: left
+                - font-size: 14px
+                - white-space: nowrap
             custom_fields:
-              title: Viega Fonterra – Fonterra
-              flow: >-
-                [[[ return `Flow <b>${hass.formatEntityState(states['sensor.fonterra_flow_temperature'])}</b>`; ]]]
-              pump: >-
-                [[[ return `Pump <b>${hass.formatEntityState(states['binary_sensor.fonterra_circulation_pump'])}</b>`; ]]]
-              open: >-
-                [[[ const actuators = Object.keys(states).filter(
-                      (id) => /^binary_sensor\.fonterra_.+_actuator_\d+_position$/.test(id));
-                    const open = actuators.filter((id) => states[id].state === 'on').length;
-                    return `Circuits open <b>${open} / ${actuators.length}</b>`; ]]]
-              error: >-
-                [[[ return `Error <b>${hass.formatEntityState(states['binary_sensor.fonterra_base_unit_error'])}</b>`; ]]]
-
-      - type: grid
-        cards:
-          - type: custom:button-card
-            template: viega_room
-            variables:
-              name: Bad
-              climate: climate.fonterra_bad
-              diagnostic: sensor.fonterra_bad_diagnostic
-              actuators:
-                - [binary_sensor.fonterra_bad_actuator_1_position, sensor.fonterra_bad_actuator_1_return_temperature, 1]
-
-      - type: grid
-        cards:
-          - type: custom:button-card
-            template: viega_room
-            variables:
-              name: Schlafzimmer
-              climate: climate.fonterra_schlafzimmer
-              diagnostic: sensor.fonterra_schlafzimmer_diagnostic
-              actuators:
-                - [binary_sensor.fonterra_schlafzimmer_actuator_2_position, sensor.fonterra_schlafzimmer_actuator_2_return_temperature, 2]
-                - [binary_sensor.fonterra_schlafzimmer_actuator_3_position, sensor.fonterra_schlafzimmer_actuator_3_return_temperature, 3]
-
-      - type: grid
-        cards:
-          - type: custom:button-card
-            template: viega_room
-            variables:
-              name: Arbeitszimmer
-              climate: climate.fonterra_arbeitszimmer
-              diagnostic: sensor.fonterra_arbeitszimmer_diagnostic
-              actuators:
-                - [binary_sensor.fonterra_arbeitszimmer_actuator_4_position, sensor.fonterra_arbeitszimmer_actuator_4_return_temperature, 4]
-
-      - type: grid
-        cards:
-          - type: custom:button-card
-            template: viega_room
-            variables:
-              name: Kinderzimmer
-              climate: climate.fonterra_kinderzimmer
-              diagnostic: sensor.fonterra_kinderzimmer_diagnostic
-              actuators:
-                - [binary_sensor.fonterra_kinderzimmer_actuator_5_position, sensor.fonterra_kinderzimmer_actuator_5_return_temperature, 5]
-
-      - type: grid
-        column_span: 4
-        cards:
-          - type: history-graph
-            title: Temperature history (24 h)
-            grid_options:
-              columns: full
-            hours_to_show: 24
-            entities:
-              - entity: climate.fonterra_bad
-              - entity: climate.fonterra_schlafzimmer
-              - entity: climate.fonterra_arbeitszimmer
-              - entity: climate.fonterra_kinderzimmer
+              v: |
+                [[[[
+                const v=parseFloat(entity.state);
+                return `<ha-icon icon="mdi:thermometer-water" style="--mdc-icon-size:18px;color:var(--secondary-text-color);vertical-align:-3px"></ha-icon> Vorlauf <b>${isNaN(v)?'–':v.toFixed(1).replace('.',',')+' °C'}</b>`;
+                ]]]]
+        p2:
+          card:
+            type: custom:button-card
+            entity: binary_sensor.fonterra_umwalzpumpe
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              - background: var(--ha-card-background,var(--card-background-color))
+              - border: 1px solid var(--divider-color)
+              - border-radius: 20px
+              - padding: 7px 16px
+              - width: auto
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+                - font-size: 14px
+                - white-space: nowrap
+            custom_fields:
+              v: |
+                [[[[
+                const on=entity.state==='on';const c=on?'var(--success-color,#4caf50)':'var(--primary-text-color)';
+                return `<ha-icon icon="mdi:pump" style="--mdc-icon-size:18px;color:var(--secondary-text-color);vertical-align:-3px"></ha-icon> Pumpe <b style="color:${c}">${on?'läuft':'aus'}</b>`;
+                ]]]]
+        p3:
+          card:
+            type: custom:button-card
+            entity: sensor.fonterra_aktuell_geoffnete_aktoren
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              - background: var(--ha-card-background,var(--card-background-color))
+              - border: 1px solid var(--divider-color)
+              - border-radius: 20px
+              - padding: 7px 16px
+              - width: auto
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+                - font-size: 14px
+                - white-space: nowrap
+            custom_fields:
+              v: |
+                [[[[
+                const n=parseFloat(entity.state);const c=n>0?'var(--warning-color,#ffa726)':'var(--primary-text-color)';
+                return `<ha-icon icon="mdi:valve" style="--mdc-icon-size:18px;color:var(--secondary-text-color);vertical-align:-3px"></ha-icon> Kreise offen <b style="color:${c}">${isNaN(n)?'–':n} / 5</b>`;
+                ]]]]
+        p4:
+          card:
+            type: custom:button-card
+            entity: binary_sensor.fonterra_basiseinheit_fehler
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              - background: var(--ha-card-background,var(--card-background-color))
+              - border: 1px solid var(--divider-color)
+              - border-radius: 20px
+              - padding: 7px 16px
+              - width: auto
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+                - font-size: 14px
+                - white-space: nowrap
+            custom_fields:
+              v: |
+                [[[[
+                const err=entity.state==='on';const cs=states['sensor.fonterra_basiseinheit_fehlercode'];const code=cs?cs.state:'–';
+                const c=err?'var(--error-color,#f44336)':'var(--success-color,#4caf50)';
+                return `<ha-icon icon="${err?'mdi:alert-circle':'mdi:check-circle'}" style="--mdc-icon-size:18px;color:${c};vertical-align:-3px"></ha-icon> Fehler <b style="color:${c}">${err?'Code '+code:'keiner (Code '+code+')'}</b>`;
+                ]]]]
+      grid_options:
+        columns: full
+  - type: grid
+    cards:
+    - type: custom:button-card
+      show_name: false
+      show_icon: false
+      show_state: false
+      tap_action:
+        action: none
+      styles:
+        card:
+        - padding: 14px 14px 14px 19px
+        - position: relative
+        - overflow: hidden
+        grid:
+        - grid-template-areas: '"title title" "ist ist" "soll diag" "stufe stufe" "a1 r1" "btn btn"'
+        - grid-template-columns: 1fr 1fr
+        - row-gap: 4px
+        custom_fields:
+          accent:
+          - width: 100%
+          - justify-self: stretch
+          - position: absolute
+          - left: '0'
+          - top: '0'
+          - bottom: '0'
+          - width: 5px
+          title:
+          - width: 100%
+          - justify-self: stretch
+          ist:
+          - width: 100%
+          - justify-self: stretch
+          soll:
+          - width: 100%
+          - justify-self: stretch
+          diag:
+          - width: 100%
+          - justify-self: stretch
+          stufe:
+          - width: 100%
+          - justify-self: stretch
+          a1:
+          - width: 100%
+          - justify-self: stretch
+          r1:
+          - width: 100%
+          - justify-self: stretch
+          btn:
+          - width: 100%
+          - justify-self: stretch
+          - margin-top: 6px
+      custom_fields:
+        accent: |
+          [[[
+          const s=[[17,[66,133,244]],[19.5,[38,166,154]],[21.5,[255,167,38]],[24,[239,83,80]]];
+          const col=(t)=>{if(isNaN(t))return 'var(--secondary-text-color)';if(t<=s[0][0])return `rgb(${s[0][1]})`;
+            for(let i=1;i<s.length;i++){if(t<=s[i][0]){const f=(t-s[i-1][0])/(s[i][0]-s[i-1][0]);
+            return `rgb(${s[i-1][1].map((v,k)=>Math.round(v+(s[i][1][k]-v)*f))})`;}}return `rgb(${s[3][1]})`;};
+          const f1=(v)=>isNaN(v)?'–':Number(v).toFixed(1).replace('.',',');
+          return `<div style="width:5px;height:100%;background:${col(parseFloat(entity.attributes.current_temperature))}"></div>`;
+          ]]]
+        title:
+          card:
+            type: custom:button-card
+            entity: climate.fonterra_bad
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+                - font-size: 14px
+                - color: var(--secondary-text-color)
+            custom_fields:
+              v: |
+                [[[[
+                const h=entity.attributes.hvac_action==='heating';
+                return 'Bad'+(h?' · <span style="color:var(--warning-color,#ffa726)">heizt</span>':entity.state==='off'?' · Standby':'');
+                ]]]]
+        ist:
+          card:
+            type: custom:button-card
+            entity: climate.fonterra_bad
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+                - font-size: 38px
+                - font-weight: '700'
+                - line-height: '1.1'
+            custom_fields:
+              v: |
+                [[[[
+                const s=[[17,[66,133,244]],[19.5,[38,166,154]],[21.5,[255,167,38]],[24,[239,83,80]]];
+                const col=(t)=>{if(isNaN(t))return 'var(--secondary-text-color)';if(t<=s[0][0])return `rgb(${s[0][1]})`;
+                  for(let i=1;i<s.length;i++){if(t<=s[i][0]){const f=(t-s[i-1][0])/(s[i][0]-s[i-1][0]);
+                  return `rgb(${s[i-1][1].map((v,k)=>Math.round(v+(s[i][1][k]-v)*f))})`;}}return `rgb(${s[3][1]})`;};
+                const f1=(v)=>isNaN(v)?'–':Number(v).toFixed(1).replace('.',',');
+                const t=parseFloat(entity.attributes.current_temperature);return `<span style="color:${col(t)}">${f1(t)}°</span>`;
+                ]]]]
+        soll:
+          card:
+            type: custom:button-card
+            entity: climate.fonterra_bad
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+                - font-size: 13px
+                - color: var(--secondary-text-color)
+            custom_fields:
+              v: |
+                [[[[
+                const t=parseFloat(entity.attributes.temperature);return `Soll ${isNaN(t)?'–':t.toFixed(1).replace('.',',')} °C`;
+                ]]]]
+        diag:
+          card:
+            type: custom:button-card
+            entity: sensor.fonterra_bad_diagnose
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+                - font-size: 13px
+                - color: var(--secondary-text-color)
+                - text-align: right
+            custom_fields:
+              v: |
+                [[[[
+                const s=entity.state;
+                if(s==='no_error')return 'Kein Fehler';
+                if(s==='sensor_invalid')return '<span style="color:var(--error-color,#f44336)">Sensor ungültig</span>';
+                return `<span style="color:var(--error-color,#f44336)">Fehler ${entity.attributes.error_code ?? s}</span>`;
+                ]]]]
+        stufe:
+          card:
+            type: custom:button-card
+            entity: number.fonterra_bad_leistungsstufe
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+            custom_fields:
+              v: |
+                [[[[
+                const s=[[17,[66,133,244]],[19.5,[38,166,154]],[21.5,[255,167,38]],[24,[239,83,80]]];
+                const col=(t)=>{if(isNaN(t))return 'var(--secondary-text-color)';if(t<=s[0][0])return `rgb(${s[0][1]})`;
+                  for(let i=1;i<s.length;i++){if(t<=s[i][0]){const f=(t-s[i-1][0])/(s[i][0]-s[i-1][0]);
+                  return `rgb(${s[i-1][1].map((v,k)=>Math.round(v+(s[i][1][k]-v)*f))})`;}}return `rgb(${s[3][1]})`;};
+                const f1=(v)=>isNaN(v)?'–':Number(v).toFixed(1).replace('.',',');
+                const n=Math.round(parseFloat(entity.state));const cl=states['climate.fonterra_bad'];
+                const c=col(cl?parseFloat(cl.attributes.current_temperature):NaN);
+                let h='<div style="display:flex;gap:3px;margin:6px 0 2px">';
+                for(let i=1;i<=10;i++)h+=`<i style="flex:1;height:6px;border-radius:3px;background:${i<=n?c:'var(--divider-color)'}"></i>`;
+                return h+`</div><div style="font-size:11px;color:var(--secondary-text-color)">Leistungsstufe ${isNaN(n)?'–':n} / 10</div>`;
+                ]]]]
+        a1:
+          card:
+            type: custom:button-card
+            entity: binary_sensor.fonterra_bad_aktor_1_stellung
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+                - font-size: 13px
+            custom_fields:
+              v: |
+                [[[[
+                const o=entity.state==='on';const c=o?'var(--warning-color,#ffa726)':'var(--secondary-text-color)';
+                return `<div style="padding:4px 0;border-top:1px solid var(--divider-color);color:${c}">${o?'● offen':'○ zu'} · Aktor 1</div>`;
+                ]]]]
+        r1:
+          card:
+            type: custom:button-card
+            entity: sensor.fonterra_bad_aktor_1_rucklauftemperatur
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+                - font-size: 13px
+            custom_fields:
+              v: |
+                [[[[
+                const v=parseFloat(entity.state);
+                return `<div style="padding:4px 0;border-top:1px solid var(--divider-color);text-align:right">RL ${isNaN(v)?'–':v.toFixed(1).replace('.',',')} °C</div>`;
+                ]]]]
+        btn:
+          card:
+            type: grid
+            columns: 3
+            square: false
+            cards:
+            - type: custom:button-card
+              entity: climate.fonterra_bad
+              show_icon: false
+              show_state: false
+              name: −
+              styles:
+                card:
+                - height: 36px
+                - border-radius: 10px
+                - box-shadow: none
+                - border: none
+                - background: var(--secondary-background-color)
+                name:
+                - font-size: 18px
+              tap_action:
+                action: perform-action
+                perform_action: climate.set_temperature
+                target:
+                  entity_id: climate.fonterra_bad
+                data:
+                  temperature: |
+                    [[[[
+                    const t=parseFloat(entity.attributes.temperature);
+                    return Math.min(30,Math.max(5,(isNaN(t)?20:t)-0.5));
+                    ]]]]
+            - type: custom:button-card
+              entity: climate.fonterra_bad
+              show_icon: false
+              show_state: false
+              name: |
+                [[[[
+                const t=parseFloat(entity.attributes.temperature);return isNaN(t)?'–':t.toFixed(1).replace('.',',');
+                ]]]]
+              tap_action:
+                action: more-info
+              styles:
+                card:
+                - height: 36px
+                - border-radius: 10px
+                - box-shadow: none
+                - border: none
+                - background: var(--secondary-background-color)
+                name:
+                - font-size: 16px
+                - font-weight: '600'
+                - justify-self: center
+            - type: custom:button-card
+              entity: climate.fonterra_bad
+              show_icon: false
+              show_state: false
+              name: +
+              styles:
+                card:
+                - height: 36px
+                - border-radius: 10px
+                - box-shadow: none
+                - border: none
+                - background: var(--secondary-background-color)
+                name:
+                - font-size: 18px
+              tap_action:
+                action: perform-action
+                perform_action: climate.set_temperature
+                target:
+                  entity_id: climate.fonterra_bad
+                data:
+                  temperature: |
+                    [[[[
+                    const t=parseFloat(entity.attributes.temperature);
+                    return Math.min(30,Math.max(5,(isNaN(t)?20:t)+0.5));
+                    ]]]]
+      entity: climate.fonterra_bad
+      grid_options:
+        columns: full
+  - type: grid
+    cards:
+    - type: custom:button-card
+      show_name: false
+      show_icon: false
+      show_state: false
+      tap_action:
+        action: none
+      styles:
+        card:
+        - padding: 14px 14px 14px 19px
+        - position: relative
+        - overflow: hidden
+        grid:
+        - grid-template-areas: '"title title" "ist ist" "soll diag" "stufe stufe" "a2 r2" "a3 r3" "btn btn"'
+        - grid-template-columns: 1fr 1fr
+        - row-gap: 4px
+        custom_fields:
+          accent:
+          - width: 100%
+          - justify-self: stretch
+          - position: absolute
+          - left: '0'
+          - top: '0'
+          - bottom: '0'
+          - width: 5px
+          title:
+          - width: 100%
+          - justify-self: stretch
+          ist:
+          - width: 100%
+          - justify-self: stretch
+          soll:
+          - width: 100%
+          - justify-self: stretch
+          diag:
+          - width: 100%
+          - justify-self: stretch
+          stufe:
+          - width: 100%
+          - justify-self: stretch
+          a2:
+          - width: 100%
+          - justify-self: stretch
+          r2:
+          - width: 100%
+          - justify-self: stretch
+          a3:
+          - width: 100%
+          - justify-self: stretch
+          r3:
+          - width: 100%
+          - justify-self: stretch
+          btn:
+          - width: 100%
+          - justify-self: stretch
+          - margin-top: 6px
+      custom_fields:
+        accent: |
+          [[[
+          const s=[[17,[66,133,244]],[19.5,[38,166,154]],[21.5,[255,167,38]],[24,[239,83,80]]];
+          const col=(t)=>{if(isNaN(t))return 'var(--secondary-text-color)';if(t<=s[0][0])return `rgb(${s[0][1]})`;
+            for(let i=1;i<s.length;i++){if(t<=s[i][0]){const f=(t-s[i-1][0])/(s[i][0]-s[i-1][0]);
+            return `rgb(${s[i-1][1].map((v,k)=>Math.round(v+(s[i][1][k]-v)*f))})`;}}return `rgb(${s[3][1]})`;};
+          const f1=(v)=>isNaN(v)?'–':Number(v).toFixed(1).replace('.',',');
+          return `<div style="width:5px;height:100%;background:${col(parseFloat(entity.attributes.current_temperature))}"></div>`;
+          ]]]
+        title:
+          card:
+            type: custom:button-card
+            entity: climate.fonterra_schlafzimmer
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+                - font-size: 14px
+                - color: var(--secondary-text-color)
+            custom_fields:
+              v: |
+                [[[[
+                const h=entity.attributes.hvac_action==='heating';
+                return 'Schlafzimmer'+(h?' · <span style="color:var(--warning-color,#ffa726)">heizt</span>':entity.state==='off'?' · Standby':'');
+                ]]]]
+        ist:
+          card:
+            type: custom:button-card
+            entity: climate.fonterra_schlafzimmer
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+                - font-size: 38px
+                - font-weight: '700'
+                - line-height: '1.1'
+            custom_fields:
+              v: |
+                [[[[
+                const s=[[17,[66,133,244]],[19.5,[38,166,154]],[21.5,[255,167,38]],[24,[239,83,80]]];
+                const col=(t)=>{if(isNaN(t))return 'var(--secondary-text-color)';if(t<=s[0][0])return `rgb(${s[0][1]})`;
+                  for(let i=1;i<s.length;i++){if(t<=s[i][0]){const f=(t-s[i-1][0])/(s[i][0]-s[i-1][0]);
+                  return `rgb(${s[i-1][1].map((v,k)=>Math.round(v+(s[i][1][k]-v)*f))})`;}}return `rgb(${s[3][1]})`;};
+                const f1=(v)=>isNaN(v)?'–':Number(v).toFixed(1).replace('.',',');
+                const t=parseFloat(entity.attributes.current_temperature);return `<span style="color:${col(t)}">${f1(t)}°</span>`;
+                ]]]]
+        soll:
+          card:
+            type: custom:button-card
+            entity: climate.fonterra_schlafzimmer
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+                - font-size: 13px
+                - color: var(--secondary-text-color)
+            custom_fields:
+              v: |
+                [[[[
+                const t=parseFloat(entity.attributes.temperature);return `Soll ${isNaN(t)?'–':t.toFixed(1).replace('.',',')} °C`;
+                ]]]]
+        diag:
+          card:
+            type: custom:button-card
+            entity: sensor.fonterra_schlafzimmer_diagnose
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+                - font-size: 13px
+                - color: var(--secondary-text-color)
+                - text-align: right
+            custom_fields:
+              v: |
+                [[[[
+                const s=entity.state;
+                if(s==='no_error')return 'Kein Fehler';
+                if(s==='sensor_invalid')return '<span style="color:var(--error-color,#f44336)">Sensor ungültig</span>';
+                return `<span style="color:var(--error-color,#f44336)">Fehler ${entity.attributes.error_code ?? s}</span>`;
+                ]]]]
+        stufe:
+          card:
+            type: custom:button-card
+            entity: number.fonterra_schlafzimmer_leistungsstufe
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+            custom_fields:
+              v: |
+                [[[[
+                const s=[[17,[66,133,244]],[19.5,[38,166,154]],[21.5,[255,167,38]],[24,[239,83,80]]];
+                const col=(t)=>{if(isNaN(t))return 'var(--secondary-text-color)';if(t<=s[0][0])return `rgb(${s[0][1]})`;
+                  for(let i=1;i<s.length;i++){if(t<=s[i][0]){const f=(t-s[i-1][0])/(s[i][0]-s[i-1][0]);
+                  return `rgb(${s[i-1][1].map((v,k)=>Math.round(v+(s[i][1][k]-v)*f))})`;}}return `rgb(${s[3][1]})`;};
+                const f1=(v)=>isNaN(v)?'–':Number(v).toFixed(1).replace('.',',');
+                const n=Math.round(parseFloat(entity.state));const cl=states['climate.fonterra_schlafzimmer'];
+                const c=col(cl?parseFloat(cl.attributes.current_temperature):NaN);
+                let h='<div style="display:flex;gap:3px;margin:6px 0 2px">';
+                for(let i=1;i<=10;i++)h+=`<i style="flex:1;height:6px;border-radius:3px;background:${i<=n?c:'var(--divider-color)'}"></i>`;
+                return h+`</div><div style="font-size:11px;color:var(--secondary-text-color)">Leistungsstufe ${isNaN(n)?'–':n} / 10</div>`;
+                ]]]]
+        a2:
+          card:
+            type: custom:button-card
+            entity: binary_sensor.fonterra_schlafzimmer_aktor_2_stellung
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+                - font-size: 13px
+            custom_fields:
+              v: |
+                [[[[
+                const o=entity.state==='on';const c=o?'var(--warning-color,#ffa726)':'var(--secondary-text-color)';
+                return `<div style="padding:4px 0;border-top:1px solid var(--divider-color);color:${c}">${o?'● offen':'○ zu'} · Aktor 2</div>`;
+                ]]]]
+        r2:
+          card:
+            type: custom:button-card
+            entity: sensor.fonterra_schlafzimmer_aktor_2_rucklauftemperatur
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+                - font-size: 13px
+            custom_fields:
+              v: |
+                [[[[
+                const v=parseFloat(entity.state);
+                return `<div style="padding:4px 0;border-top:1px solid var(--divider-color);text-align:right">RL ${isNaN(v)?'–':v.toFixed(1).replace('.',',')} °C</div>`;
+                ]]]]
+        a3:
+          card:
+            type: custom:button-card
+            entity: binary_sensor.fonterra_schlafzimmer_aktor_3_stellung
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+                - font-size: 13px
+            custom_fields:
+              v: |
+                [[[[
+                const o=entity.state==='on';const c=o?'var(--warning-color,#ffa726)':'var(--secondary-text-color)';
+                return `<div style="padding:4px 0;border-top:1px solid var(--divider-color);color:${c}">${o?'● offen':'○ zu'} · Aktor 3</div>`;
+                ]]]]
+        r3:
+          card:
+            type: custom:button-card
+            entity: sensor.fonterra_schlafzimmer_aktor_3_rucklauftemperatur
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+                - font-size: 13px
+            custom_fields:
+              v: |
+                [[[[
+                const v=parseFloat(entity.state);
+                return `<div style="padding:4px 0;border-top:1px solid var(--divider-color);text-align:right">RL ${isNaN(v)?'–':v.toFixed(1).replace('.',',')} °C</div>`;
+                ]]]]
+        btn:
+          card:
+            type: grid
+            columns: 3
+            square: false
+            cards:
+            - type: custom:button-card
+              entity: climate.fonterra_schlafzimmer
+              show_icon: false
+              show_state: false
+              name: −
+              styles:
+                card:
+                - height: 36px
+                - border-radius: 10px
+                - box-shadow: none
+                - border: none
+                - background: var(--secondary-background-color)
+                name:
+                - font-size: 18px
+              tap_action:
+                action: perform-action
+                perform_action: climate.set_temperature
+                target:
+                  entity_id: climate.fonterra_schlafzimmer
+                data:
+                  temperature: |
+                    [[[[
+                    const t=parseFloat(entity.attributes.temperature);
+                    return Math.min(30,Math.max(5,(isNaN(t)?20:t)-0.5));
+                    ]]]]
+            - type: custom:button-card
+              entity: climate.fonterra_schlafzimmer
+              show_icon: false
+              show_state: false
+              name: |
+                [[[[
+                const t=parseFloat(entity.attributes.temperature);return isNaN(t)?'–':t.toFixed(1).replace('.',',');
+                ]]]]
+              tap_action:
+                action: more-info
+              styles:
+                card:
+                - height: 36px
+                - border-radius: 10px
+                - box-shadow: none
+                - border: none
+                - background: var(--secondary-background-color)
+                name:
+                - font-size: 16px
+                - font-weight: '600'
+                - justify-self: center
+            - type: custom:button-card
+              entity: climate.fonterra_schlafzimmer
+              show_icon: false
+              show_state: false
+              name: +
+              styles:
+                card:
+                - height: 36px
+                - border-radius: 10px
+                - box-shadow: none
+                - border: none
+                - background: var(--secondary-background-color)
+                name:
+                - font-size: 18px
+              tap_action:
+                action: perform-action
+                perform_action: climate.set_temperature
+                target:
+                  entity_id: climate.fonterra_schlafzimmer
+                data:
+                  temperature: |
+                    [[[[
+                    const t=parseFloat(entity.attributes.temperature);
+                    return Math.min(30,Math.max(5,(isNaN(t)?20:t)+0.5));
+                    ]]]]
+      entity: climate.fonterra_schlafzimmer
+      grid_options:
+        columns: full
+  - type: grid
+    cards:
+    - type: custom:button-card
+      show_name: false
+      show_icon: false
+      show_state: false
+      tap_action:
+        action: none
+      styles:
+        card:
+        - padding: 14px 14px 14px 19px
+        - position: relative
+        - overflow: hidden
+        grid:
+        - grid-template-areas: '"title title" "ist ist" "soll diag" "stufe stufe" "a4 r4" "btn btn"'
+        - grid-template-columns: 1fr 1fr
+        - row-gap: 4px
+        custom_fields:
+          accent:
+          - width: 100%
+          - justify-self: stretch
+          - position: absolute
+          - left: '0'
+          - top: '0'
+          - bottom: '0'
+          - width: 5px
+          title:
+          - width: 100%
+          - justify-self: stretch
+          ist:
+          - width: 100%
+          - justify-self: stretch
+          soll:
+          - width: 100%
+          - justify-self: stretch
+          diag:
+          - width: 100%
+          - justify-self: stretch
+          stufe:
+          - width: 100%
+          - justify-self: stretch
+          a4:
+          - width: 100%
+          - justify-self: stretch
+          r4:
+          - width: 100%
+          - justify-self: stretch
+          btn:
+          - width: 100%
+          - justify-self: stretch
+          - margin-top: 6px
+      custom_fields:
+        accent: |
+          [[[
+          const s=[[17,[66,133,244]],[19.5,[38,166,154]],[21.5,[255,167,38]],[24,[239,83,80]]];
+          const col=(t)=>{if(isNaN(t))return 'var(--secondary-text-color)';if(t<=s[0][0])return `rgb(${s[0][1]})`;
+            for(let i=1;i<s.length;i++){if(t<=s[i][0]){const f=(t-s[i-1][0])/(s[i][0]-s[i-1][0]);
+            return `rgb(${s[i-1][1].map((v,k)=>Math.round(v+(s[i][1][k]-v)*f))})`;}}return `rgb(${s[3][1]})`;};
+          const f1=(v)=>isNaN(v)?'–':Number(v).toFixed(1).replace('.',',');
+          return `<div style="width:5px;height:100%;background:${col(parseFloat(entity.attributes.current_temperature))}"></div>`;
+          ]]]
+        title:
+          card:
+            type: custom:button-card
+            entity: climate.fonterra_arbeitszimmer
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+                - font-size: 14px
+                - color: var(--secondary-text-color)
+            custom_fields:
+              v: |
+                [[[[
+                const h=entity.attributes.hvac_action==='heating';
+                return 'Arbeitszimmer'+(h?' · <span style="color:var(--warning-color,#ffa726)">heizt</span>':entity.state==='off'?' · Standby':'');
+                ]]]]
+        ist:
+          card:
+            type: custom:button-card
+            entity: climate.fonterra_arbeitszimmer
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+                - font-size: 38px
+                - font-weight: '700'
+                - line-height: '1.1'
+            custom_fields:
+              v: |
+                [[[[
+                const s=[[17,[66,133,244]],[19.5,[38,166,154]],[21.5,[255,167,38]],[24,[239,83,80]]];
+                const col=(t)=>{if(isNaN(t))return 'var(--secondary-text-color)';if(t<=s[0][0])return `rgb(${s[0][1]})`;
+                  for(let i=1;i<s.length;i++){if(t<=s[i][0]){const f=(t-s[i-1][0])/(s[i][0]-s[i-1][0]);
+                  return `rgb(${s[i-1][1].map((v,k)=>Math.round(v+(s[i][1][k]-v)*f))})`;}}return `rgb(${s[3][1]})`;};
+                const f1=(v)=>isNaN(v)?'–':Number(v).toFixed(1).replace('.',',');
+                const t=parseFloat(entity.attributes.current_temperature);return `<span style="color:${col(t)}">${f1(t)}°</span>`;
+                ]]]]
+        soll:
+          card:
+            type: custom:button-card
+            entity: climate.fonterra_arbeitszimmer
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+                - font-size: 13px
+                - color: var(--secondary-text-color)
+            custom_fields:
+              v: |
+                [[[[
+                const t=parseFloat(entity.attributes.temperature);return `Soll ${isNaN(t)?'–':t.toFixed(1).replace('.',',')} °C`;
+                ]]]]
+        diag:
+          card:
+            type: custom:button-card
+            entity: sensor.fonterra_arbeitszimmer_diagnose
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+                - font-size: 13px
+                - color: var(--secondary-text-color)
+                - text-align: right
+            custom_fields:
+              v: |
+                [[[[
+                const s=entity.state;
+                if(s==='no_error')return 'Kein Fehler';
+                if(s==='sensor_invalid')return '<span style="color:var(--error-color,#f44336)">Sensor ungültig</span>';
+                return `<span style="color:var(--error-color,#f44336)">Fehler ${entity.attributes.error_code ?? s}</span>`;
+                ]]]]
+        stufe:
+          card:
+            type: custom:button-card
+            entity: number.fonterra_arbeitszimmer_leistungsstufe
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+            custom_fields:
+              v: |
+                [[[[
+                const s=[[17,[66,133,244]],[19.5,[38,166,154]],[21.5,[255,167,38]],[24,[239,83,80]]];
+                const col=(t)=>{if(isNaN(t))return 'var(--secondary-text-color)';if(t<=s[0][0])return `rgb(${s[0][1]})`;
+                  for(let i=1;i<s.length;i++){if(t<=s[i][0]){const f=(t-s[i-1][0])/(s[i][0]-s[i-1][0]);
+                  return `rgb(${s[i-1][1].map((v,k)=>Math.round(v+(s[i][1][k]-v)*f))})`;}}return `rgb(${s[3][1]})`;};
+                const f1=(v)=>isNaN(v)?'–':Number(v).toFixed(1).replace('.',',');
+                const n=Math.round(parseFloat(entity.state));const cl=states['climate.fonterra_arbeitszimmer'];
+                const c=col(cl?parseFloat(cl.attributes.current_temperature):NaN);
+                let h='<div style="display:flex;gap:3px;margin:6px 0 2px">';
+                for(let i=1;i<=10;i++)h+=`<i style="flex:1;height:6px;border-radius:3px;background:${i<=n?c:'var(--divider-color)'}"></i>`;
+                return h+`</div><div style="font-size:11px;color:var(--secondary-text-color)">Leistungsstufe ${isNaN(n)?'–':n} / 10</div>`;
+                ]]]]
+        a4:
+          card:
+            type: custom:button-card
+            entity: binary_sensor.fonterra_arbeitszimmer_aktor_4_stellung
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+                - font-size: 13px
+            custom_fields:
+              v: |
+                [[[[
+                const o=entity.state==='on';const c=o?'var(--warning-color,#ffa726)':'var(--secondary-text-color)';
+                return `<div style="padding:4px 0;border-top:1px solid var(--divider-color);color:${c}">${o?'● offen':'○ zu'} · Aktor 4</div>`;
+                ]]]]
+        r4:
+          card:
+            type: custom:button-card
+            entity: sensor.fonterra_arbeitszimmer_aktor_4_rucklauftemperatur
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+                - font-size: 13px
+            custom_fields:
+              v: |
+                [[[[
+                const v=parseFloat(entity.state);
+                return `<div style="padding:4px 0;border-top:1px solid var(--divider-color);text-align:right">RL ${isNaN(v)?'–':v.toFixed(1).replace('.',',')} °C</div>`;
+                ]]]]
+        btn:
+          card:
+            type: grid
+            columns: 3
+            square: false
+            cards:
+            - type: custom:button-card
+              entity: climate.fonterra_arbeitszimmer
+              show_icon: false
+              show_state: false
+              name: −
+              styles:
+                card:
+                - height: 36px
+                - border-radius: 10px
+                - box-shadow: none
+                - border: none
+                - background: var(--secondary-background-color)
+                name:
+                - font-size: 18px
+              tap_action:
+                action: perform-action
+                perform_action: climate.set_temperature
+                target:
+                  entity_id: climate.fonterra_arbeitszimmer
+                data:
+                  temperature: |
+                    [[[[
+                    const t=parseFloat(entity.attributes.temperature);
+                    return Math.min(30,Math.max(5,(isNaN(t)?20:t)-0.5));
+                    ]]]]
+            - type: custom:button-card
+              entity: climate.fonterra_arbeitszimmer
+              show_icon: false
+              show_state: false
+              name: |
+                [[[[
+                const t=parseFloat(entity.attributes.temperature);return isNaN(t)?'–':t.toFixed(1).replace('.',',');
+                ]]]]
+              tap_action:
+                action: more-info
+              styles:
+                card:
+                - height: 36px
+                - border-radius: 10px
+                - box-shadow: none
+                - border: none
+                - background: var(--secondary-background-color)
+                name:
+                - font-size: 16px
+                - font-weight: '600'
+                - justify-self: center
+            - type: custom:button-card
+              entity: climate.fonterra_arbeitszimmer
+              show_icon: false
+              show_state: false
+              name: +
+              styles:
+                card:
+                - height: 36px
+                - border-radius: 10px
+                - box-shadow: none
+                - border: none
+                - background: var(--secondary-background-color)
+                name:
+                - font-size: 18px
+              tap_action:
+                action: perform-action
+                perform_action: climate.set_temperature
+                target:
+                  entity_id: climate.fonterra_arbeitszimmer
+                data:
+                  temperature: |
+                    [[[[
+                    const t=parseFloat(entity.attributes.temperature);
+                    return Math.min(30,Math.max(5,(isNaN(t)?20:t)+0.5));
+                    ]]]]
+      entity: climate.fonterra_arbeitszimmer
+      grid_options:
+        columns: full
+  - type: grid
+    cards:
+    - type: custom:button-card
+      show_name: false
+      show_icon: false
+      show_state: false
+      tap_action:
+        action: none
+      styles:
+        card:
+        - padding: 14px 14px 14px 19px
+        - position: relative
+        - overflow: hidden
+        grid:
+        - grid-template-areas: '"title title" "ist ist" "soll diag" "stufe stufe" "a5 r5" "btn btn"'
+        - grid-template-columns: 1fr 1fr
+        - row-gap: 4px
+        custom_fields:
+          accent:
+          - width: 100%
+          - justify-self: stretch
+          - position: absolute
+          - left: '0'
+          - top: '0'
+          - bottom: '0'
+          - width: 5px
+          title:
+          - width: 100%
+          - justify-self: stretch
+          ist:
+          - width: 100%
+          - justify-self: stretch
+          soll:
+          - width: 100%
+          - justify-self: stretch
+          diag:
+          - width: 100%
+          - justify-self: stretch
+          stufe:
+          - width: 100%
+          - justify-self: stretch
+          a5:
+          - width: 100%
+          - justify-self: stretch
+          r5:
+          - width: 100%
+          - justify-self: stretch
+          btn:
+          - width: 100%
+          - justify-self: stretch
+          - margin-top: 6px
+      custom_fields:
+        accent: |
+          [[[
+          const s=[[17,[66,133,244]],[19.5,[38,166,154]],[21.5,[255,167,38]],[24,[239,83,80]]];
+          const col=(t)=>{if(isNaN(t))return 'var(--secondary-text-color)';if(t<=s[0][0])return `rgb(${s[0][1]})`;
+            for(let i=1;i<s.length;i++){if(t<=s[i][0]){const f=(t-s[i-1][0])/(s[i][0]-s[i-1][0]);
+            return `rgb(${s[i-1][1].map((v,k)=>Math.round(v+(s[i][1][k]-v)*f))})`;}}return `rgb(${s[3][1]})`;};
+          const f1=(v)=>isNaN(v)?'–':Number(v).toFixed(1).replace('.',',');
+          return `<div style="width:5px;height:100%;background:${col(parseFloat(entity.attributes.current_temperature))}"></div>`;
+          ]]]
+        title:
+          card:
+            type: custom:button-card
+            entity: climate.fonterra_kinderzimmer
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+                - font-size: 14px
+                - color: var(--secondary-text-color)
+            custom_fields:
+              v: |
+                [[[[
+                const h=entity.attributes.hvac_action==='heating';
+                return 'Kinderzimmer'+(h?' · <span style="color:var(--warning-color,#ffa726)">heizt</span>':entity.state==='off'?' · Standby':'');
+                ]]]]
+        ist:
+          card:
+            type: custom:button-card
+            entity: climate.fonterra_kinderzimmer
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+                - font-size: 38px
+                - font-weight: '700'
+                - line-height: '1.1'
+            custom_fields:
+              v: |
+                [[[[
+                const s=[[17,[66,133,244]],[19.5,[38,166,154]],[21.5,[255,167,38]],[24,[239,83,80]]];
+                const col=(t)=>{if(isNaN(t))return 'var(--secondary-text-color)';if(t<=s[0][0])return `rgb(${s[0][1]})`;
+                  for(let i=1;i<s.length;i++){if(t<=s[i][0]){const f=(t-s[i-1][0])/(s[i][0]-s[i-1][0]);
+                  return `rgb(${s[i-1][1].map((v,k)=>Math.round(v+(s[i][1][k]-v)*f))})`;}}return `rgb(${s[3][1]})`;};
+                const f1=(v)=>isNaN(v)?'–':Number(v).toFixed(1).replace('.',',');
+                const t=parseFloat(entity.attributes.current_temperature);return `<span style="color:${col(t)}">${f1(t)}°</span>`;
+                ]]]]
+        soll:
+          card:
+            type: custom:button-card
+            entity: climate.fonterra_kinderzimmer
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+                - font-size: 13px
+                - color: var(--secondary-text-color)
+            custom_fields:
+              v: |
+                [[[[
+                const t=parseFloat(entity.attributes.temperature);return `Soll ${isNaN(t)?'–':t.toFixed(1).replace('.',',')} °C`;
+                ]]]]
+        diag:
+          card:
+            type: custom:button-card
+            entity: sensor.fonterra_kinderzimmer_diagnose
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+                - font-size: 13px
+                - color: var(--secondary-text-color)
+                - text-align: right
+            custom_fields:
+              v: |
+                [[[[
+                const s=entity.state;
+                if(s==='no_error')return 'Kein Fehler';
+                if(s==='sensor_invalid')return '<span style="color:var(--error-color,#f44336)">Sensor ungültig</span>';
+                return `<span style="color:var(--error-color,#f44336)">Fehler ${entity.attributes.error_code ?? s}</span>`;
+                ]]]]
+        stufe:
+          card:
+            type: custom:button-card
+            entity: number.fonterra_kinderzimmer_leistungsstufe
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+            custom_fields:
+              v: |
+                [[[[
+                const s=[[17,[66,133,244]],[19.5,[38,166,154]],[21.5,[255,167,38]],[24,[239,83,80]]];
+                const col=(t)=>{if(isNaN(t))return 'var(--secondary-text-color)';if(t<=s[0][0])return `rgb(${s[0][1]})`;
+                  for(let i=1;i<s.length;i++){if(t<=s[i][0]){const f=(t-s[i-1][0])/(s[i][0]-s[i-1][0]);
+                  return `rgb(${s[i-1][1].map((v,k)=>Math.round(v+(s[i][1][k]-v)*f))})`;}}return `rgb(${s[3][1]})`;};
+                const f1=(v)=>isNaN(v)?'–':Number(v).toFixed(1).replace('.',',');
+                const n=Math.round(parseFloat(entity.state));const cl=states['climate.fonterra_kinderzimmer'];
+                const c=col(cl?parseFloat(cl.attributes.current_temperature):NaN);
+                let h='<div style="display:flex;gap:3px;margin:6px 0 2px">';
+                for(let i=1;i<=10;i++)h+=`<i style="flex:1;height:6px;border-radius:3px;background:${i<=n?c:'var(--divider-color)'}"></i>`;
+                return h+`</div><div style="font-size:11px;color:var(--secondary-text-color)">Leistungsstufe ${isNaN(n)?'–':n} / 10</div>`;
+                ]]]]
+        a5:
+          card:
+            type: custom:button-card
+            entity: binary_sensor.fonterra_kinderzimmer_aktor_5_stellung
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+                - font-size: 13px
+            custom_fields:
+              v: |
+                [[[[
+                const o=entity.state==='on';const c=o?'var(--warning-color,#ffa726)':'var(--secondary-text-color)';
+                return `<div style="padding:4px 0;border-top:1px solid var(--divider-color);color:${c}">${o?'● offen':'○ zu'} · Aktor 5</div>`;
+                ]]]]
+        r5:
+          card:
+            type: custom:button-card
+            entity: sensor.fonterra_kinderzimmer_aktor_5_rucklauftemperatur
+            show_name: false
+            show_icon: false
+            show_state: false
+            tap_action:
+              action: more-info
+            styles:
+              card:
+              - background: none
+              - box-shadow: none
+              - border: none
+              - border-radius: 6px
+              - padding: '0'
+              grid:
+              - grid-template-areas: '"v"'
+              custom_fields:
+                v:
+                - justify-self: stretch
+                - text-align: left
+                - font-size: 13px
+            custom_fields:
+              v: |
+                [[[[
+                const v=parseFloat(entity.state);
+                return `<div style="padding:4px 0;border-top:1px solid var(--divider-color);text-align:right">RL ${isNaN(v)?'–':v.toFixed(1).replace('.',',')} °C</div>`;
+                ]]]]
+        btn:
+          card:
+            type: grid
+            columns: 3
+            square: false
+            cards:
+            - type: custom:button-card
+              entity: climate.fonterra_kinderzimmer
+              show_icon: false
+              show_state: false
+              name: −
+              styles:
+                card:
+                - height: 36px
+                - border-radius: 10px
+                - box-shadow: none
+                - border: none
+                - background: var(--secondary-background-color)
+                name:
+                - font-size: 18px
+              tap_action:
+                action: perform-action
+                perform_action: climate.set_temperature
+                target:
+                  entity_id: climate.fonterra_kinderzimmer
+                data:
+                  temperature: |
+                    [[[[
+                    const t=parseFloat(entity.attributes.temperature);
+                    return Math.min(30,Math.max(5,(isNaN(t)?20:t)-0.5));
+                    ]]]]
+            - type: custom:button-card
+              entity: climate.fonterra_kinderzimmer
+              show_icon: false
+              show_state: false
+              name: |
+                [[[[
+                const t=parseFloat(entity.attributes.temperature);return isNaN(t)?'–':t.toFixed(1).replace('.',',');
+                ]]]]
+              tap_action:
+                action: more-info
+              styles:
+                card:
+                - height: 36px
+                - border-radius: 10px
+                - box-shadow: none
+                - border: none
+                - background: var(--secondary-background-color)
+                name:
+                - font-size: 16px
+                - font-weight: '600'
+                - justify-self: center
+            - type: custom:button-card
+              entity: climate.fonterra_kinderzimmer
+              show_icon: false
+              show_state: false
+              name: +
+              styles:
+                card:
+                - height: 36px
+                - border-radius: 10px
+                - box-shadow: none
+                - border: none
+                - background: var(--secondary-background-color)
+                name:
+                - font-size: 18px
+              tap_action:
+                action: perform-action
+                perform_action: climate.set_temperature
+                target:
+                  entity_id: climate.fonterra_kinderzimmer
+                data:
+                  temperature: |
+                    [[[[
+                    const t=parseFloat(entity.attributes.temperature);
+                    return Math.min(30,Math.max(5,(isNaN(t)?20:t)+0.5));
+                    ]]]]
+      entity: climate.fonterra_kinderzimmer
+      grid_options:
+        columns: full
+  - type: grid
+    column_span: 4
+    cards:
+    - type: history-graph
+      title: Temperaturverlauf 24 h
+      hours_to_show: 24
+      grid_options:
+        columns: full
+      entities:
+      - entity: climate.fonterra_bad
+      - entity: climate.fonterra_schlafzimmer
+      - entity: climate.fonterra_arbeitszimmer
+      - entity: climate.fonterra_kinderzimmer
 ```
 
 </details>
