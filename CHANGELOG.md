@@ -9,7 +9,9 @@ and versions follow [Semantic Versioning](https://semver.org/).
 ### 🔄 Changed
 
 - 🎨 New integration icon: a house with underfloor-heating loops and a
-  thermometer on an orange tile (PNG in all sizes plus the SVG source).
+  thermometer on an orange tile. The `brands/` folder now holds only the
+  PNGs the brands repository expects (no identical dark variants); the SVG
+  source lives in `docs/icon.svg`.
 
 ## [1.3.1] - 2026-10-10
 

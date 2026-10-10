@@ -946,7 +946,9 @@ Approved ideas, deliberately postponed. Each must be specified in its own
 section before it is implemented.
 
 - **Submit the brand icons** in `brands/custom_integrations/viega_fonterra_modbus/`
-  to `home-assistant/brands`, so Home Assistant shows the integration's icon
+  (PNG only, as the brands repository expects; no `dark_` variants, since the
+  icon works on both themes; SVG source in `docs/icon.svg`) to
+  `home-assistant/brands`, so Home Assistant shows the integration's icon
   under Settings → Devices & services. First check whether Home Assistant's
   current handling of custom-integration brands still requires that route.
 - **Decide whether to smooth `hvac_action`** (§5a.2). The actuators toggle
