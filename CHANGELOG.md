@@ -6,6 +6,20 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### ✨ Added
+
+- 🩺 New **Base unit diagnostic** sensor: shows the base-unit error as text
+  in your language, e.g. *"Basiseinheit: Mindestens ein Raumthermostat ist
+  nicht mehr verbunden"* or *"Kein Fehler"*, with the raw code as
+  attribute and a check/warning icon – just like the room diagnostic.
+  Until now the device page only said "Problem". The binary sensor and the
+  error-code sensor stay unchanged for your automations.
+
+### 📚 Documentation
+
+- 🔢 Troubleshooting explains why the Viega app can show more error codes
+  per room than Home Assistant: each room has only one error register.
+
 ## [1.3.3] - 2026-10-11
 
 🌟 **Highlights:** after the latest Viega firmware update, all values froze

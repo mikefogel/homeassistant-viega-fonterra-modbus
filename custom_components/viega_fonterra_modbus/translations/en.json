@@ -173,6 +173,29 @@
       },
       "actuator_stats_confirmed_open_seconds": {
         "name": "Confirmed open time"
+      },
+      "base_unit_diagnostic": {
+        "name": "Base unit diagnostic",
+        "state": {
+          "sensor_invalid": "No valid value",
+          "no_error": "No error",
+          "error_3": "Base unit: at least one room thermostat is no longer connected",
+          "error_4": "Base unit: fault on the actuator bus",
+          "error_5": "Base unit: fault at the flow-temperature sensor",
+          "error_6": "Base unit: fault at the return-temperature sensor",
+          "error_7": "Base unit: no further room thermostats can be registered",
+          "error_9": "Base unit: replace the backup battery",
+          "error_10": "Warning: risk of condensation, flow temperature too low",
+          "error_21": "No connection to the room thermostat",
+          "error_22": "Warning: room thermostat battery is weak",
+          "error_24": "Warning: connection to the room thermostat is weak",
+          "unknown_error": "Unknown error"
+        },
+        "state_attributes": {
+          "error_code": {
+            "name": "Error code"
+          }
+        }
       }
     },
     "binary_sensor": {

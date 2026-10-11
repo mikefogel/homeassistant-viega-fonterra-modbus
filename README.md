@@ -141,6 +141,7 @@ Depending on the discovered rooms/actuators and available registers, the integra
 | Sensor | `sensor.fonterra_wlan_serial_number` / `..._base_unit_serial_number` / `..._base_unit_name` | Diagnostic identity values |
 | Sensor | `sensor.fonterra_base_unit_error_code` | Raw base-unit error code + translated description |
 | Binary sensor | `binary_sensor.fonterra_base_unit_error` | On when the base-unit error code is non-zero |
+| Sensor | `sensor.fonterra_base_unit_diagnostic` | The base-unit error in your language (e.g. "Kein Fehler", "Basiseinheit: Mindestens ein Raumthermostat ist nicht mehr verbunden"), with the raw code as attribute |
 | Sensor | `sensor.fonterra_wohnzimmer_diagnostic` | That room's error/warning state in your language (e.g. "Kein Fehler", "Warnung: Batterie des Raumthermostats schwach"), with the raw code as attribute |
 | Binary sensor | `binary_sensor.fonterra_circulation_pump` | Derived circulation-pump indicator (see below) |
 | Sensor | `sensor.fonterra_last_successful_modbus_response` and eight more health sensors | Connection health metrics and invalid registers (see below; three of them are disabled by default) |
@@ -2464,6 +2465,10 @@ Expected: Fonterra actuators often open and close every few minutes while regula
 ### An automation that checked the diagnostic text stopped working (after 1.2.0)
 
 Since version 1.2.0 the room diagnostic sensor's state and the error-code sensor's `description` attribute hold a key that Home Assistant translates for display — e.g. `no_error`, `error_22`, `unknown_error` — instead of English text. An automation or template that compared `"No error"` must compare `no_error` instead. The keys and their texts are listed in `translations/en.json` under `entity.sensor.room_diagnostic.state`.
+
+### The Viega app shows more error codes than Home Assistant
+
+Each room has a single error register, so Modbus reports only one code per room at a time. When a room has several problems at once, the Viega app may list more than one (for example `24` and `21` for the same room) while Home Assistant shows only the one in the register (here `24`). This is a limit of the module's Modbus interface, not a read error — fix the reported problem, and the next one appears once the register changes.
 
 ### Changing the mode/preset in one room changes it everywhere
 

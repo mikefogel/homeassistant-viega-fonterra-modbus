@@ -6,6 +6,7 @@ import logging
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.restore_state import RestoreEntity
 
@@ -81,7 +82,7 @@ class ViegaDiagnosticTextEntity(ViegaCoordinatedEntity, SensorEntity, RestoreEnt
     def __init__(
         self,
         entry_id: str | None,
-        name: str,
+        name: str | None,
         status: str = DEFAULT_STATUS,
         room_id: str | None = None,
         address: int | None = None,
@@ -96,7 +97,7 @@ class ViegaDiagnosticTextEntity(ViegaCoordinatedEntity, SensorEntity, RestoreEnt
             # to build a translation placeholder from.
             self._attr_translation_key = "room_diagnostic"
             self._attr_translation_placeholders = {"room": str(room_name)}
-        else:
+        elif name is not None:
             self.name = name
         self.status = status
         self._room_id = room_id
@@ -156,3 +157,15 @@ class ViegaDiagnosticTextEntity(ViegaCoordinatedEntity, SensorEntity, RestoreEnt
         if self._entry_id is None:
             return None
         return build_device_info(self.hass, self._entry_id)
+
+
+class ViegaBaseUnitDiagnosticEntity(ViegaDiagnosticTextEntity):
+    """The base unit's error code as translated text (spec.md 3a/5d), next
+    to the binary sensor that only says "Problem"."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_translation_key = "base_unit_diagnostic"
+
+    def __init__(self, entry_id: str) -> None:
+        super().__init__(entry_id, None)
+        self._attr_unique_id = f"{entry_id}_base_unit_diagnostic"

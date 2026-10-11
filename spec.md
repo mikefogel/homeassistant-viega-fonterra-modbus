@@ -55,9 +55,18 @@ user-editable `device_name`:
 
 Serial numbers and the designation are exposed as read-only diagnostic sensors
 (and as device metadata where Home Assistant supports it). The error code is
-exposed as a diagnostic sensor with the raw code and a translated description
-(§5d), and drives the base-unit error binary sensor (`on` for any non-zero
-code).
+exposed in three ways, each for its own purpose:
+
+- **Base unit error** (binary sensor, device class `problem`): `on` for any
+  non-zero code – for automations;
+- **Base unit error code** (sensor): the raw code, with a translated
+  description attribute (§5d);
+- **Base unit diagnostic** (`enum` sensor, like the room diagnostic): the
+  translated text of the code as its state (e.g. "Basiseinheit: Mindestens
+  ein Raumthermostat ist nicht mehr verbunden", or "Kein Fehler"), the raw
+  code as `error_code` attribute, and the check/warning icons of the room
+  diagnostic – so the meaning is visible at a glance on the device page,
+  where the binary sensor only says "Problem".
 
 Identity values are read at setup and refreshed by the regular polling cycle
 (§16i); no diagnostic entity polls on its own. A failed, timed-out, or `-99`
@@ -81,6 +90,12 @@ codes to English descriptions; `ERROR_CODE_WARNINGS` (`10`, `22`, `24`) marks th
 codes the manual describes as warnings. New codes are added to the table, never
 guessed in the entity layer. A room's diagnostic reads that room's own error
 register, not the base unit's.
+
+Each register holds **one** code at a time. When a room has several problems
+at once, the Viega app may list more codes than Modbus exposes (observed:
+the app showed `24` and `21` for one room while its register reported only
+`24`). The integration shows what the register reports and does not try to
+reconstruct the other codes.
 
 The English descriptions are used only in logs and the diagnostics export (an
 unknown code renders as `"Unknown error (code N)"`). Entities expose a stable
@@ -147,6 +162,7 @@ that module's device (§7).
 | Actuator position | One binary sensor per actuator, device class `opening` | `0` = closed, `1` = open (not a percentage) |
 | Base-unit error active | Diagnostic binary sensor, device class `problem` | `on` for a non-zero code |
 | Which base-unit error | Diagnostic sensor: raw code + translated description | §3b |
+| Base-unit error as text | Base-unit diagnostic enum sensor (§5d) | §3a/§3b |
 | Room error/warning | Room diagnostic enum sensor (§5d) | Room's own error register |
 | Room number | Climate attribute `room_id` | From the topology |
 
@@ -351,8 +367,9 @@ Everything an entity shows follows Home Assistant's language setting
   `translation_placeholders` such as room and actuator), never from a
   hardcoded `_attr_name`.
 - **States and attribute values** that are text are stable keys: the room
-  diagnostic is an `enum` sensor whose state is one of the keys of §3b
-  (`entity.sensor.room_diagnostic.state.<key>`, raw code as `error_code`
+  diagnostic and the base-unit diagnostic are `enum` sensors whose state is
+  one of the keys of §3b (`entity.sensor.room_diagnostic.state.<key>` and
+  `entity.sensor.base_unit_diagnostic.state.<key>`, raw code as `error_code`
   attribute), and the base-unit error-code sensor's `description` attribute
   uses the same keys
   (`entity.sensor.base_unit_error_code.state_attributes.description.state.<key>`).
@@ -698,6 +715,10 @@ of every room with its registers; and a bounded extended snapshot (§16e).
   translated `HomeAssistantError`s; no raw exception reaches the user.
 - An unreachable module and base-unit errors appear under Settings → Repairs
   and clear themselves.
+- The base-unit diagnostic shows the translated text of the base-unit error
+  code (e.g. code `3` → "Basiseinheit: Mindestens ein Raumthermostat ist
+  nicht mehr verbunden"), "Kein Fehler" for `0`, and the raw code as
+  `error_code` attribute.
 - The diagnostics export contains configuration, identity, topology, and
   register addresses with the host redacted.
 

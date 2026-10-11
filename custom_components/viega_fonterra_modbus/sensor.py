@@ -19,7 +19,11 @@ from homeassistant.util import dt as dt_util
 from .binary_sensor import ActuatorStatistics
 from .const import DOMAIN
 from .device import build_device_info
-from .diagnostic import ViegaDiagnosticTextEntity, _room_error_address
+from .diagnostic import (
+    ViegaBaseUnitDiagnosticEntity,
+    ViegaDiagnosticTextEntity,
+    _room_error_address,
+)
 from .entity_tracking import register_platform
 from .modbus_handler import ViegaModbusClient
 from .entity import ViegaCoordinatedEntity
@@ -100,6 +104,7 @@ async def async_setup_entry(
         for metric_key in ViegaConnectionHealthSensor.METRIC_KEYS
     )
     entities.append(ViegaInvalidRegistersSensor(entry.entry_id))
+    entities.append(ViegaBaseUnitDiagnosticEntity(entry.entry_id))
 
     entities.extend(
         ViegaActuatorStatisticsSensor(entry.entry_id, metric_key)

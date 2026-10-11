@@ -285,3 +285,40 @@ async def test_ui_shows_translated_keys_and_units(hass, fake_device, monkeypatch
     assert hass.states.get("number.fonterra_wohnzimmer_power_level").attributes[
         "unit_of_measurement"
     ] == "level"
+
+
+async def test_base_unit_diagnostic_shows_the_error_as_text(hass, fake_device, monkeypatch):
+    """spec.md 3a/5d: the base unit's error code as translated text, next
+    to the binary sensor that only says "Problem"."""
+    from homeassistant.const import EntityCategory
+
+    from custom_components.viega_fonterra_modbus.registers import BASE_UNIT_REGISTERS
+
+    values = {BASE_UNIT_REGISTERS["error_code"]: 3}
+
+    async def read_input_registers(self, address, count=1):
+        return [values.get(address + i, 0) for i in range(count)]
+
+    monkeypatch.setattr(FakeClient, "read_input_registers", read_input_registers)
+    entry = _entry()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    entity_id = "sensor.fonterra_base_unit_diagnostic"
+    diagnostic = hass.states.get(entity_id)
+    assert diagnostic.state == "error_3"
+    assert diagnostic.attributes["error_code"] == 3
+    assert diagnostic.attributes["device_class"] == "enum"
+    entry_reg = er.async_get(hass).async_get(entity_id)
+    assert entry_reg.unique_id == f"{entry.entry_id}_base_unit_diagnostic"
+    assert entry_reg.entity_category == EntityCategory.DIAGNOSTIC
+    assert entry_reg.translation_key == "base_unit_diagnostic"
+
+    values[BASE_UNIT_REGISTERS["error_code"]] = 0
+    await hass.data[DOMAIN][entry.entry_id]["polling"].async_refresh()
+    await hass.async_block_till_done()
+
+    diagnostic = hass.states.get(entity_id)
+    assert diagnostic.state == "no_error"
+    assert diagnostic.attributes["error_code"] == 0

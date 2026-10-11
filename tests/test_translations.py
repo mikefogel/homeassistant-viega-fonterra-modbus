@@ -163,6 +163,7 @@ def test_every_error_state_key_is_translated():
     for language in ("de", "en"):
         sensor = _load(language)["entity"]["sensor"]
         assert set(sensor["room_diagnostic"]["state"]) == set(ERROR_STATE_KEYS), language
+        assert set(sensor["base_unit_diagnostic"]["state"]) == set(ERROR_STATE_KEYS), language
         description = sensor["base_unit_error_code"]["state_attributes"]["description"]
         assert set(description["state"]) == set(ERROR_STATE_KEYS), language
 
@@ -179,3 +180,5 @@ def test_icons_use_a_valve_for_actuators_and_a_pump_for_the_pump_indicator():
     pump = icons["entity"]["binary_sensor"]["circulation_pump"]
     assert pump == {"default": "mdi:pump-off", "state": {"on": "mdi:pump"}}
     assert set(icons["services"]) == {"rediscover", "overview"}
+    for key in ("room_diagnostic", "base_unit_diagnostic"):
+        assert icons["entity"]["sensor"][key]["state"]["no_error"] == "mdi:check-circle-outline"

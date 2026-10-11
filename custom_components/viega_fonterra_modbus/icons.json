@@ -26,6 +26,12 @@
         "range": {
           "0": "mdi:check-circle-outline"
         }
+      },
+      "base_unit_diagnostic": {
+        "default": "mdi:alert-circle-outline",
+        "state": {
+          "no_error": "mdi:check-circle-outline"
+        }
       }
     }
   },
