@@ -6,6 +6,11 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.4] - 2026-10-14
+
+🌟 **Highlights:** the base unit now tells you *what* is wrong, not just
+that something is.
+
 ### ✨ Added
 
 - 🩺 New **Base unit diagnostic** sensor: shows the base-unit error as text
@@ -279,7 +284,8 @@ First release.
   configuration diagnostics.
 - German and English translations.
 
-[Unreleased]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.3.3...HEAD
+[Unreleased]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.3.4...HEAD
+[1.3.4]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.3.3...v1.3.4
 [1.3.3]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.3.2...v1.3.3
 [1.3.2]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.3.0...v1.3.1
