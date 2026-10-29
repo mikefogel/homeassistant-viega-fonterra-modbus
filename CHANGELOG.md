@@ -6,6 +6,11 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.5] - 2026-10-29
+
+🌟 **Highlights:** new installations on modules updated by Viega find
+their rooms again – thanks to @Werner-Maye for the report!
+
 ### 🐛 Fixed
 
 - 🔍 Setting up a module that was updated by Viega found **no rooms** at
@@ -294,7 +299,8 @@ First release.
   configuration diagnostics.
 - German and English translations.
 
-[Unreleased]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.3.4...HEAD
+[Unreleased]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.3.5...HEAD
+[1.3.5]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.3.4...v1.3.5
 [1.3.4]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.3.3...v1.3.4
 [1.3.3]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.3.2...v1.3.3
 [1.3.2]: https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/compare/v1.3.1...v1.3.2
