@@ -123,11 +123,21 @@ The device is the source of truth for the topology:
 - Each room's display name is a 24-character text field of 12 registers
   (manual `30074`/`30086`/.../`30206`, manual page 90), decoded per §3a.
 
-Discovery reads all 12 actuators' position/return-temperature/Raum-ID
-registers (one 3-register read each) and the name of every room that an
-actuator reports. A room no actuator reports is omitted; a room whose name
-cannot be read gets a generic `room_<n>` name; a failed read for one actuator
-or name does not abort discovery.
+Discovery reads the Raum-ID register of all 12 actuators, **one register per
+read**, and the name of every room that an actuator reports. Position and
+return temperature are not needed for discovery; the polling cycle reads
+them. Single reads are required because modules updated by Viega (Oct 2026)
+reject every multi-register read of data registers with a Modbus exception
+(§16d), while multi-register text reads such as room names still work; a
+3-register read per actuator made discovery find no room at all on such a
+module (GitHub issue #2).
+
+An actuator slot that is not wired, reports a value outside `1`-`12`
+(e.g. `-99`), or answers with a Modbus exception is skipped, wherever it is:
+installers may leave the first channels empty and wire from the other end. A
+room no actuator reports is omitted; a room whose name cannot be read gets a
+generic `room_<n>` name; a failed read for one actuator or name does not
+abort discovery.
 
 The discovered topology is stored in the config entry's options. A previously
 stored or manually edited mapping (§6a) is used **only** when live discovery
@@ -673,6 +683,9 @@ of every room with its registers; and a bounded extended snapshot (§16e).
 - Every actuator of a room has its own position and return-temperature
   entities.
 - Rediscovery updates entities in place with stable unique IDs (§16a).
+- Discovery finds every assigned room on a module that rejects
+  multi-register reads and whose first actuator channels are empty
+  (GitHub issue #2).
 
 ### Climate
 

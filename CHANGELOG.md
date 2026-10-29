@@ -6,6 +6,16 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### 🐛 Fixed
+
+- 🔍 Setting up a module that was updated by Viega found **no rooms** at
+  all, so no thermostats or other room entities were created. Such modules
+  reject reading several registers at once, and the room discovery read
+  three per actuator. It now reads each actuator's room assignment on its
+  own. Empty actuator channels – also the first ones, when the installer
+  wired from the other end – are skipped
+  ([#2](https://github.com/mikefogel/homeassistant-viega-fonterra-modbus/issues/2)).
+
 ## [1.3.4] - 2026-10-14
 
 🌟 **Highlights:** the base unit now tells you *what* is wrong, not just
